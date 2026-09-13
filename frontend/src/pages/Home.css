@@ -1,16 +1,7 @@
-/* Tweak these numbers, save, and the page updates. */
-.sheet {
-  --banner-width: 560px;
+/* Tools workbench sizing. The shared page container lives in App.css. */
+.sheet.is-tools {
   --sidebar-width: 268px;
-  --page-width: 1640px;
-  --camera-size: 240px;
   --workbench-height: min(860px, calc(100vh - 64px));
-
-  box-sizing: border-box;
-  width: min(var(--page-width), calc(100% - 40px));
-  margin: 0 auto;
-  padding: 8px 0 48px;
-  position: relative;
 }
 
 .sheet:has(.sheet__row) {
@@ -19,94 +10,6 @@
   justify-content: center;
   min-height: 100vh;
   padding: 28px 0 36px;
-}
-
-.blob {
-  position: absolute;
-  z-index: 0;
-  pointer-events: none;
-}
-
-.blob-a {
-  top: 40px;
-  left: -80px;
-  width: 220px;
-  height: 180px;
-  border-radius: 60% 40% 55% 45%;
-  background: #3a2a78;
-  opacity: 0.35;
-  transform: rotate(-12deg);
-}
-
-.blob-b {
-  right: -60px;
-  top: 120px;
-  width: 260px;
-  height: 200px;
-  border-radius: 45% 55% 40% 60%;
-  background: #2a1848;
-  opacity: 0.4;
-  transform: rotate(18deg);
-}
-
-.binder-sparks {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
-
-.binder-sparks span {
-  position: absolute;
-  display: block;
-  opacity: 0.55;
-  animation: binder-drift 7s ease-in-out infinite alternate;
-}
-
-.binder-sparks__paper {
-  right: 5%;
-  top: 16%;
-  width: 54px;
-  height: 70px;
-  border: 1px solid rgba(232, 223, 176, 0.5);
-  border-radius: 8px;
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(232, 223, 176, 0.12) 0 7px,
-    rgba(126, 184, 232, 0.38) 8px 9px
-  );
-  transform: rotate(9deg);
-}
-
-.binder-sparks__tab {
-  left: 3%;
-  bottom: 9%;
-  width: 76px;
-  height: 28px;
-  border-radius: 9px 9px 3px 3px;
-  background: #ff7368;
-  animation-delay: -2.5s !important;
-  transform: rotate(-8deg);
-}
-
-.binder-sparks__ring {
-  right: 15%;
-  bottom: 5%;
-  width: 42px;
-  height: 42px;
-  border: 7px solid rgba(201, 182, 255, 0.65);
-  border-radius: 50%;
-  animation-delay: -4s !important;
-}
-
-@keyframes binder-drift {
-  from { translate: 0 0; }
-  to { translate: 0 -8px; }
-}
-
-.sheet > *:not(.blob):not(.binder-sparks) {
-  position: relative;
-  z-index: 1;
 }
 
 .avatar {
@@ -245,16 +148,6 @@
     filter 0.12s ease;
   -webkit-appearance: none;
   appearance: none;
-}
-
-.wrench-mark {
-  display: block;
-  width: 34px;
-  height: 34px;
-  overflow: visible;
-  object-fit: contain;
-  background: transparent;
-  transform-origin: 50% 50%;
 }
 
 .order-bar__pop:hover,
@@ -1494,27 +1387,11 @@
   font-size: 12px;
 }
 
-.notice {
-  width: min(520px, 100%);
-  margin: 18px auto 0;
-  padding: 10px 14px;
-  border: 1px solid var(--ink);
-  border-radius: 10px;
-  background: var(--raised);
-  font-weight: 700;
-  text-align: center;
-  box-shadow: none;
-}
-
 .file-input {
   display: none;
 }
 
 @media (max-width: 860px) {
-  .sheet {
-    width: calc(100% - 24px);
-  }
-
   .sheet:has(.sheet__row) {
     justify-content: flex-start;
     min-height: 0;
@@ -1656,80 +1533,6 @@
   }
 }
 
-@keyframes drift-a {
-  0%,
-  100% {
-    transform: rotate(-12deg) translate(0, 0);
-    border-radius: 60% 40% 55% 45%;
-  }
-  50% {
-    transform: rotate(-5deg) translate(18px, 14px);
-    border-radius: 48% 52% 42% 58%;
-  }
-}
-
-@keyframes drift-b {
-  0%,
-  100% {
-    transform: rotate(18deg) translate(0, 0);
-    border-radius: 45% 55% 40% 60%;
-  }
-  50% {
-    transform: rotate(10deg) translate(-16px, 10px);
-    border-radius: 55% 45% 58% 42%;
-  }
-}
-
-@keyframes gear-sway {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  50% {
-    transform: rotate(28deg);
-  }
-}
-
-@keyframes cam-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-7px);
-  }
-}
-
-@keyframes tab-sway {
-  0%,
-  100% {
-    transform: rotate(-3deg);
-  }
-  50% {
-    transform: rotate(4deg);
-  }
-}
-
-@keyframes hint-pulse {
-  0%,
-  100% {
-    opacity: 0.72;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@keyframes tick-bob {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
 @keyframes wrench-idle {
   0%,
   100% {
@@ -1769,10 +1572,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sheet,
-  .blob-a,
-  .blob-b,
-  .binder-sparks span,
   .camera-mark,
   .tab,
   .course-card small,

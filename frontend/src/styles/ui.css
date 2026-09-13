@@ -1,0 +1,348 @@
+/*
+ * Shared primitives for the signed-in app, built on the tokens in index.css.
+ * Prefixed ui- so they never collide with the landing page (lp-) or with the
+ * stylesheets of pages that have not been redesigned yet.
+ */
+
+/* Page frame */
+
+.ui-page {
+  width: 100%;
+  max-width: var(--layout-content-max-width);
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-8) var(--space-12);
+  color: var(--color-text);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color-scheme: dark;
+}
+
+.ui-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ui-page-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+}
+
+.ui-page-subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* Sections */
+
+.ui-section + .ui-section {
+  margin-top: var(--space-8);
+}
+
+.ui-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.ui-section-title {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+/* Panels: border, not shadow */
+
+.ui-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.ui-panel--padded {
+  padding: var(--space-4);
+}
+
+/* Rows inside a panel */
+
+.ui-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ui-list > li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.ui-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+}
+
+.ui-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-row__title {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-row__meta {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-row__aside {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Buttons: 32px tall, 6px radius. Never pills. */
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+
+.ui-button:hover {
+  background: var(--color-surface-hover);
+}
+
+.ui-button:focus-visible,
+.ui-link:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.ui-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-button--primary {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.ui-button--primary:hover {
+  background: var(--color-accent-hover);
+}
+
+.ui-link {
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.ui-link:hover {
+  color: var(--color-text);
+}
+
+/* Metrics */
+
+.ui-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ui-stat {
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.ui-stat + .ui-stat {
+  border-left: 1px solid var(--color-border);
+}
+
+.ui-stat__label {
+  display: block;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.ui-stat__value {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+}
+
+.ui-stat__unit {
+  margin-left: 2px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.ui-stat__meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+/* A thin meter. No gradient, no glow. */
+
+.ui-meter {
+  height: 4px;
+  overflow: hidden;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-active);
+}
+
+.ui-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+}
+
+/* Initials avatar */
+
+.ui-avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-active);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+}
+
+/* Small inline label */
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.ui-badge--accent {
+  border-color: transparent;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+}
+
+/* Empty states. The mascot is allowed here. */
+
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+}
+
+.ui-empty__mascot {
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--space-1);
+  border-radius: var(--radius-lg);
+  object-fit: cover;
+  object-position: center 22%;
+}
+
+.ui-empty__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.ui-empty__copy {
+  max-width: 36ch;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.ui-muted {
+  color: var(--color-text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .ui-page {
+    padding: var(--space-5) var(--space-4) var(--space-10);
+  }
+
+  .ui-page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ui-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ui-stat:nth-child(3) {
+    border-left: 0;
+  }
+
+  .ui-stat:nth-child(n + 3) {
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-button {
+    transition: none;
+  }
+}

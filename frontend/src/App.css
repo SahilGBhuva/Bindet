@@ -1,16 +1,44 @@
-#root { min-height:100vh; }
+#root { min-height: 100vh; }
 
 .app-shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
+  background: var(--color-bg);
 }
 
-.sheet.is-home {
-  --page-accent: var(--accent-home);
-  overflow-x: clip;
+.sheet {
+  position: relative;
+  min-width: 0;
 }
+
+/* Status message rendered by the shell for any page. */
+.notice {
+  width: min(520px, calc(100% - var(--space-8)));
+  margin: var(--space-4) auto 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/*
+ * Legacy page frame. Pages that have not been redesigned yet keep the container
+ * sizing and accent border they had before. Remove each page from these
+ * selectors as it moves to .ui-page, and delete the block when none are left.
+ * :where() keeps the specificity of the old bare .sheet rule, so page rules such as
+ * Home.css's .sheet:has(.sheet__row) still override it as they did before.
+ */
+.sheet:where(.is-tools, .is-progress, .is-games, .is-goals, .is-profile, .is-settings, .is-more) {
+  width: min(1640px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 8px 0 48px;
+}
+
 .sheet.is-tools { --page-accent: var(--accent-tools); }
 .sheet.is-progress { --page-accent: var(--accent-progress); }
 .sheet.is-games { --page-accent: var(--accent-games); }
@@ -21,7 +49,6 @@
 .sheet.is-profile .profile-page { border-color: transparent; }
 
 .sheet .board,
-.sheet .home__quote,
 .sheet.is-tools .courses,
 .sheet.is-tools .order-bar,
 .sheet.is-tools .panel {
@@ -37,4 +64,8 @@
   }
 
   .app-shell > .sheet { min-width: 0; }
+
+  .sheet:where(.is-tools, .is-progress, .is-games, .is-goals, .is-profile, .is-settings, .is-more) {
+    width: calc(100% - 24px);
+  }
 }

@@ -1,4 +1,3 @@
-import { WrenchMark } from './WrenchMark'
 import './SiteSidebar.css'
 
 export const SCREENS = ['home', 'tools', 'progress', 'games', 'goals', 'profile', 'settings', 'more'] as const
@@ -17,7 +16,7 @@ const ITEMS: { id: Screen; label: string }[] = [
 
 function Mark({ kind }: { kind: Screen }) {
   if (kind === 'home') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-7 8 7v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/></svg>
-  if (kind === 'tools') return <WrenchMark variant="sidebar" className="wrench-mark wrench-mark--sidebar" />
+  if (kind === 'tools') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.5 2.5-2.5-.6-.6-2.5z"/></svg>
   if (kind === 'progress') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>
   if (kind === 'games') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10a5 5 0 0 1 4.8 6.4l-1 3.4a2 2 0 0 1-3.3.9L15 16H9l-2.5 2.7a2 2 0 0 1-3.3-.9l-1-3.4A5 5 0 0 1 7 8Z"/><path d="M7 12v4M5 14h4M16.5 12.5h.01M19 15h.01"/></svg>
   if (kind === 'goals') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>

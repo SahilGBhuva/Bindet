@@ -12,7 +12,6 @@ import {
 import { AuthContext } from '../lib/AuthContext'
 import './AuthGate.css'
 import './GuestAuth.css'
-import '../Brand.css'
 
 type Mode = 'login' | 'signup'
 type GateView = 'landing' | 'auth' | 'confirm'

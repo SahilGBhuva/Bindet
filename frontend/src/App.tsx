@@ -12,7 +12,10 @@ import { Goals } from './pages/Goals'
 import { Profile } from './pages/Profile'
 import { Settings } from './pages/Settings'
 import { More } from './pages/More'
+// Home.css still styles Tools plus the avatar and file input used on Profile, so it stays global
+// until those pages are redesigned.
 import './pages/Home.css'
+import './styles/ui.css'
 import './App.css'
 
 function currentScreen(): Screen {
