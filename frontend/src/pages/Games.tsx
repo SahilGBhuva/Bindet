@@ -1,24 +1,27 @@
-import './Progress.css'
+const GAME_MODES = ['Arcade', 'Matches', 'High score']
 
 export function Games() {
   return (
-    <section className="board">
-      <h1>Games</h1>
-      <p>Study games will land here. Pick a unit on Home, then come back to play.</p>
-      <div className="board__grid">
-        <article>
-          <h2>Arcade</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>Matches</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>High score</h2>
-          <p>—</p>
-        </article>
+    <div className="ui-page games">
+      <header className="ui-page-header">
+        <div>
+          <h1 className="ui-page-title">Games</h1>
+          <p className="ui-page-subtitle">Study games will land here. Pick a unit in Tools, then come back to play.</p>
+        </div>
+      </header>
+
+      <div className="ui-panel">
+        <ul className="ui-list">
+          {GAME_MODES.map((mode) => (
+            <li key={mode} className="ui-row">
+              <div className="ui-row__main">
+                <span className="ui-row__title">{mode}</span>
+              </div>
+              <span className="ui-badge">Coming soon</span>
+            </li>
+          ))}
+        </ul>
       </div>
-    </section>
+    </div>
   )
 }
