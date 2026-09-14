@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { fileToAvatarDataUrl, loadAvatar, saveAvatar } from './session'
+import './AvatarControl.css'
 
 type AvatarControlProps = {
   onError?: (message: string) => void

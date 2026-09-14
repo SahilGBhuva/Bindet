@@ -1,0 +1,38 @@
+/*
+ * Moved verbatim from pages/Home.css when that global stylesheet was removed.
+ * Only the Profile page renders AvatarControl; restyle these with tokens when
+ * Profile is redesigned.
+ */
+.avatar {
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  color: var(--ink);
+  background: radial-gradient(circle at 30% 30%, #6d4c8d, #3a2433);
+  font-size: 22px;
+  font-weight: 800;
+  cursor: pointer;
+  text-decoration: none;
+  overflow: hidden;
+  padding: 0;
+}
+
+.avatar.has-photo {
+  background: var(--raised);
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar:hover {
+  box-shadow: 0 0 0 2px rgba(232, 223, 176, 0.35);
+}
+
+.file-input {
+  display: none;
+}
