@@ -303,20 +303,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
         <main>
           <section className="lp-hero" id="top">
-            <p className="lp-kicker">The binder for how you actually study</p>
+            <p className="lp-kicker"><span className="lp-live-dot" /> YOUR LEARNING, IN MOTION · THE STUDY OS</p>
             <h1>
-              Keep your learning
-              <span> together.</span>
+              Make every idea
+              <span> connect.</span>
             </h1>
             <p className="lp-lead">
-              Notes, flashcards, quizzes, and quests snap into one cinematic workspace — then cinch shut when you need the desk.
+              Your notes become flashcards, questions, and a clear next step. Everything you learn, in one place that grows with you.
             </p>
             <div className="lp-hero__cta">
               <button className="lp-btn lp-btn--primary" type="button" onClick={() => openAuth('signup')}>
-                Start building
+                Start learning <span aria-hidden="true">↗</span>
               </button>
               <button className="lp-btn lp-btn--ghost" type="button" onClick={continueAsGuest}>
-                Browse as guest
+                Explore the workspace
               </button>
             </div>
             <div className="lp-hero__frame" id="product">
@@ -325,7 +325,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   <span />
                   <span />
                   <span />
-                  <em>Bindet · Tools</em>
+                  <em>bindet / workspace</em>
                 </div>
                 <div className="lp-mock__body">
                   <aside>
@@ -336,7 +336,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     <i>Profile</i>
                   </aside>
                   <div>
-                    <p>Now navigating</p>
+                    <p>YOUR ACTIVE SPACE / 01</p>
                     <strong>Math · Algebra</strong>
                     <div className="lp-mock__pills">
                       <span>Note taker</span>
@@ -356,24 +356,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
           <section className="lp-bento" id="features">
             <article className="lp-card lp-card--wide lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Workflow</span>
-              <h3>Courses snap. The workbench stays.</h3>
-              <p>Scroll courses on the left. Notes, cards, and quizzes live on the right — one binder, not twelve tabs.</p>
+              <span>01 / ORGANIZE</span>
+              <h3>A home for every idea.</h3>
+              <p>Keep courses, units, and notes connected in one workspace. Find what matters without digging through tabs.</p>
             </article>
             <article className="lp-card lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Speed</span>
-              <h3>Pull a lecture</h3>
-              <p>The lectern fans your deposits into Goal, Break it down, Use your notes, Check yourself.</p>
+              <span>02 / UNDERSTAND</span>
+              <h3>Go beyond rereading.</h3>
+              <p>Turn your material into focused explanations and questions that make you think.</p>
             </article>
             <article className="lp-card lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Automation</span>
-              <h3>Pages become practice</h3>
-              <p>Scan a page, drop extra notes, then drill flashcards and quizzes without leaving the unit.</p>
+              <span>03 / PRACTICE</span>
+              <h3>From page to progress.</h3>
+              <p>Upload notes, then practice with flashcards and quizzes built around what you are studying.</p>
             </article>
             <article className="lp-card lp-card--mid lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Together</span>
-              <h3>Friend quests</h3>
-              <p>Share a code, start a goal, keep a private league with the people you actually study with.</p>
+              <span>04 / TOGETHER</span>
+              <h3>Better with your people.</h3>
+              <p>Study with friends, share a goal, and keep the momentum going together.</p>
             </article>
           </section>
         </main>
