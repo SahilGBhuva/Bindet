@@ -1,25 +1,27 @@
-import './Progress.css'
+const GOAL_TYPES = ['Daily', 'Weekly', 'Rewards']
 
 export function Goals() {
   return (
-    <section className="board">
-      <h1>Goals</h1>
-      <p>Daily and weekly study goals will show up on this board.</p>
-      <span className="board__tabs" aria-hidden="true"><i /><i /><i /></span>
-      <div className="board__grid">
-        <article>
-          <h2>Daily</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>Weekly</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>Rewards</h2>
-          <p>—</p>
-        </article>
+    <div className="ui-page goals">
+      <header className="ui-page-header">
+        <div>
+          <h1 className="ui-page-title">Goals</h1>
+          <p className="ui-page-subtitle">Daily and weekly study goals will show up here.</p>
+        </div>
+      </header>
+
+      <div className="ui-panel">
+        <ul className="ui-list">
+          {GOAL_TYPES.map((type) => (
+            <li key={type} className="ui-row">
+              <div className="ui-row__main">
+                <span className="ui-row__title">{type}</span>
+              </div>
+              <span className="ui-badge">Coming soon</span>
+            </li>
+          ))}
+        </ul>
       </div>
-    </section>
+    </div>
   )
 }

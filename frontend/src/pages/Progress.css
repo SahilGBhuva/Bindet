@@ -12,40 +12,6 @@
   animation: rise-in 0.35s ease both;
 }
 
-.board__tabs {
-  position: absolute;
-  right: 26px;
-  bottom: 24px;
-  display: flex;
-  align-items: flex-end;
-  gap: 7px;
-  pointer-events: none;
-  transform: rotate(-4deg);
-}
-
-.board__tabs i {
-  display: block;
-  width: 48px;
-  height: 18px;
-  border-radius: 7px 7px 3px 3px;
-  box-shadow: 0 5px 0 rgba(7, 17, 28, 0.2);
-}
-
-.board__tabs i:nth-child(1) {
-  background: #ff7368;
-  transform: translateY(-5px);
-}
-
-.board__tabs i:nth-child(2) {
-  background: #6ea8ff;
-  transform: translateY(3px);
-}
-
-.board__tabs i:nth-child(3) {
-  background: #f4b44f;
-  transform: translateY(-2px);
-}
-
 @keyframes rise-in {
   from {
     opacity: 0;
@@ -103,10 +69,6 @@
 @media (max-width: 860px) {
   .board__grid {
     grid-template-columns: 1fr;
-  }
-
-  .board__tabs {
-    display: none;
   }
 }
 
