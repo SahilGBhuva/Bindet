@@ -1,38 +1,45 @@
 /*
  * Design tokens for the signed-in app.
  *
- * One dark ground, raised surfaces by lightness rather than shadow, hairline
- * borders, a single accent. The logged-out landing page defines its own
- * --lp-* tokens in components/AuthGate.css and does not read these.
+ * Light theme: a near-white ground with white bordered cards, dark navy text and
+ * one saturated blue accent for links, active states and primary actions.
+ * The logged-out landing page defines its own --lp-* tokens in
+ * components/AuthGate.css and does not read these.
  */
 :root {
   /* Ground and surfaces */
-  --color-bg: #0a0a0b;
-  --color-surface: #111113;
-  --color-surface-hover: #17171a;
-  --color-surface-active: #1d1d21;
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f3f7;
+  --color-surface-active: #e8edf5;
 
   /* Borders */
-  --color-border: rgba(255, 255, 255, 0.07);
-  --color-border-strong: rgba(255, 255, 255, 0.12);
+  --color-border: #e3e7ee;
+  --color-border-strong: #cfd6e1;
 
   /* Text */
-  --color-text: #ededef;
-  --color-text-secondary: #a1a1aa;
-  --color-text-tertiary: #71717a;
+  --color-text: #0b1b33;
+  --color-text-secondary: #46546a;
+  --color-text-tertiary: #64748b;
 
   /* Accent and status. Status colors are for meaning (right/wrong, risk), never decoration. */
-  --color-accent: #7c74ff;
-  --color-accent-hover: #8d86ff;
-  --color-accent-text: #a9a4ff;
-  --color-accent-subtle: rgba(124, 116, 255, 0.12);
+  --color-accent: #1f5eff;
+  --color-accent-hover: #1a4fd6;
+  --color-accent-text: #1a4fd6;
+  --color-accent-subtle: #eaf0ff;
   --color-on-accent: #ffffff;
-  --color-positive: #4cc38a;
-  --color-warning: #e0a045;
-  --color-danger: #e5534b;
-  --color-focus: rgba(124, 116, 255, 0.6);
+  --color-dark: #0b1b33;
+  --color-dark-hover: #1d2f4d;
+  --color-on-dark: #ffffff;
+  --color-positive: #15803d;
+  --color-positive-subtle: #e8f6ee;
+  --color-warning: #b45309;
+  --color-warning-subtle: #fdf3e6;
+  --color-danger: #d92d20;
+  --color-danger-subtle: #fdeceb;
+  --color-focus: rgba(31, 94, 255, 0.45);
 
-  /* Type */
+  /* Type: bold, larger headings; body stays compact for dense lists and tables */
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -40,12 +47,14 @@
   --text-md: 15px;
   --text-lg: 18px;
   --text-xl: 22px;
-  --leading-tight: 1.25;
+  --text-2xl: 30px;
+  --leading-tight: 1.2;
   --leading-normal: 1.5;
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
-  --tracking-tight: -0.011em;
+  --weight-bold: 700;
+  --tracking-tight: -0.015em;
 
   /* Spacing, on a 4px grid */
   --space-1: 4px;
@@ -58,14 +67,14 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-full: 999px; /* avatars and small status dots only, never buttons */
+  /* Radius: moderate for cards and inputs, fully rounded for buttons, badges and avatars */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
 
-  /* Shadow: floating layers (menus, popovers) only. Panels use borders. */
-  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--color-border-strong);
+  /* Shadow: floating layers (menus, dialogs) only. Cards use borders. */
+  --shadow-popover: 0 12px 32px rgba(11, 27, 51, 0.12), 0 0 0 1px var(--color-border);
 
   /* Motion */
   --duration-fast: 120ms;
@@ -75,10 +84,8 @@
   --layout-sidebar-width: 232px;
   --layout-content-max-width: 1200px;
 
-  /* Base type size, line height and color-scheme are set on .app-shell (App.css) so the
-     landing page and not-yet-redesigned pages keep inheriting what they did before. */
   font-family: var(--font-sans);
-  color: var(--ink);
+  color: var(--color-text);
   background: var(--color-bg);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;

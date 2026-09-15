@@ -9,9 +9,9 @@
   padding: var(--space-4) var(--space-3);
   overflow-y: auto;
   border-right: 1px solid var(--color-border);
-  background: var(--color-bg);
+  background: var(--color-surface);
   font-family: var(--font-sans);
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 .bindit-rail__brand {
@@ -22,8 +22,8 @@
   padding: var(--space-1) 0;
   border-radius: var(--radius-md);
   color: var(--color-text);
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
   line-height: 1;
   text-decoration: none;
@@ -60,9 +60,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 32px;
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-md);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -103,12 +103,13 @@
 }
 
 .bindit-rail__item.is-active {
-  background: var(--color-surface-active);
-  color: var(--color-text);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-text);
+  font-weight: var(--weight-semibold);
 }
 
 .bindit-rail__item.is-active .bindit-rail__icon {
-  color: var(--color-text);
+  color: var(--color-accent-text);
 }
 
 @media (max-width: 860px) {
