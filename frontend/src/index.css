@@ -3,8 +3,8 @@
  *
  * Light theme: a near-white ground with white bordered cards, dark navy text and
  * one saturated blue accent for links, active states and primary actions.
- * The logged-out landing page defines its own --lp-* tokens in
- * components/AuthGate.css and does not read these.
+ * The logged-out landing page (components/Landing.css) and auth screens
+ * (components/GuestAuth.css) reuse these tokens with their own, louder treatment.
  */
 :root {
   /* Ground and surfaces */

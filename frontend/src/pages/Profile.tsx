@@ -353,7 +353,7 @@ export function Profile({ session, onError }: ProfileProps) {
         <div className="ui-stat ui-tone--orange">
           <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Login streak</span>
           <span className="ui-stat__value">{loginStreak}<span className="ui-stat__unit">{loginStreak === 1 ? 'day' : 'days'}</span></span>
-          {loginStreak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot.webp" alt="" title={`${loginStreak}-day streak`} /> : null}
+          {loginStreak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot-cutout.webp" alt="" title={`${loginStreak}-day streak`} /> : null}
         </div>
         <div className="ui-stat ui-tone--pink">
           <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.users}</span>Friends</span>
@@ -653,7 +653,7 @@ export function Profile({ session, onError }: ProfileProps) {
 
               {session && social && !social.friends.length && !social.requests.length ? (
                 <div className="ui-empty profile__friends-empty">
-                  <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                  <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
                   <p className="ui-empty__title">No friends yet</p>
                   <p className="ui-empty__copy">Search for classmates above or share your friend ID to start a weekly league.</p>
                 </div>

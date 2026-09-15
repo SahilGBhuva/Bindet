@@ -78,7 +78,7 @@ export function Progress({ session }: ProgressProps) {
       {courses.length === 0 || !pulse ? (
         <div className="ui-panel">
           <div className="ui-empty">
-            <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+            <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
             <p className="ui-empty__title">No courses yet</p>
             <p className="ui-empty__copy">Add a course in Tools and this page will grow a graph and roadmap for it.</p>
             <a className="ui-button ui-button--primary" href="#tools">Open Tools</a>

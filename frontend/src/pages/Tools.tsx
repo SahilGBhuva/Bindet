@@ -605,7 +605,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         </header>
         <div className="ui-panel">
           <div className="ui-empty">
-            <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+            <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
             <p className="ui-empty__title">Add your first course</p>
             <p className="ui-empty__copy">Courses hold units, and each unit holds the notes your flashcards and quizzes are built from.</p>
             <form className="tools__empty-form" onSubmit={addCourse}>
@@ -885,7 +885,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         </ul>
                       ) : (
                         <div className="ui-empty">
-                          <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                          <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
                           <p className="ui-empty__title">No notes in {activeUnit} yet</p>
                           <p className="ui-empty__copy">Flashcards and quiz questions are built from the files you add here.</p>
                         </div>
@@ -899,7 +899,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                 <div className="tools__cards" role="tabpanel" aria-label="Flashcards">
                   {unitNotes.length === 0 ? (
                     <div className="ui-empty">
-                      <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                      <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
                       <p className="ui-empty__title">No notes in {activeUnit} yet</p>
                       <p className="ui-empty__copy">Flashcards are generated from this unit’s notes.</p>
                       <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>

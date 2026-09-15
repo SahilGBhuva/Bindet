@@ -1,6 +1,6 @@
 /*
  * Shared primitives for the signed-in app, built on the tokens in index.css.
- * Prefixed ui- so they never collide with the landing page (lp-).
+ * Prefixed ui- so they never collide with the landing (lp-) and auth (auth-) screens.
  *
  * Light and friendly, still dense: white bordered cards on a near-white ground,
  * bold headings, pill buttons, one blue accent.
@@ -818,7 +818,7 @@
   text-align: center;
 }
 
-/* Full figure at real size: the source is 240x288, so 120px wide stays sharp on 2x screens. */
+/* Full figure at real size: the cutout is 240x288 with a transparent background, so 120px wide stays sharp on 2x screens. */
 .ui-empty__mascot {
   width: 120px;
   height: auto;
@@ -832,11 +832,7 @@
   flex: none;
 }
 
-/* The mascot image has no alpha channel; multiply drops its white ground on tinted surfaces. */
-.ui-empty__mascot,
-.ui-mascot-cheer {
-  mix-blend-mode: multiply;
-}
+
 
 .ui-empty__title {
   margin: 0;

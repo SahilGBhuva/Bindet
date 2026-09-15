@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getAccountProfile, getCachedFriends, getCachedProfile, getCachedProgress, getFriends, getProgress, type FriendsHub, type Profile, type Progress } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
+import type { Notebook } from '../lib/types'
 import { getStudentId, loadNotebook } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { Icons } from '../components/Icons'
@@ -45,16 +46,32 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'
 }
 
-export function Home({ session }: { session: AuthSession | null }) {
-  const studentId = session?.user.id ?? getStudentId()
-  const accessToken = session?.access_token
-  const [stats, setStats] = useState<Progress | null>(() => getCachedProgress(studentId))
-  const [profile, setProfile] = useState<Profile | null>(() => accessToken ? getCachedProfile(accessToken) : null)
-  const [social, setSocial] = useState<FriendsHub | null>(() => accessToken ? getCachedFriends(accessToken) : null)
-  const notebook = useMemo(() => loadNotebook(), [])
-  const [now] = useState(() => Date.now())
+/*
+ * Demo data for rendering the real dashboard outside the app (the landing page preview).
+ * When present, nothing is read from storage and no requests are made.
+ */
+export type HomePreview = {
+  studentId: string
+  signedIn: boolean
+  stats: Progress
+  profile: Profile
+  social: FriendsHub
+  notebook: Notebook
+  now: number
+}
+
+export function Home({ session, preview }: { session: AuthSession | null; preview?: HomePreview }) {
+  const studentId = preview?.studentId ?? session?.user.id ?? getStudentId()
+  const accessToken = preview ? undefined : session?.access_token
+  const [stats, setStats] = useState<Progress | null>(() => preview?.stats ?? getCachedProgress(studentId))
+  const [profile, setProfile] = useState<Profile | null>(() => preview?.profile ?? (accessToken ? getCachedProfile(accessToken) : null))
+  const [social, setSocial] = useState<FriendsHub | null>(() => preview?.social ?? (accessToken ? getCachedFriends(accessToken) : null))
+  const notebook = useMemo(() => preview?.notebook ?? loadNotebook(), [preview?.notebook])
+  const [now] = useState(() => preview?.now ?? Date.now())
+  const signedIn = preview ? preview.signedIn : Boolean(session)
 
   useEffect(() => {
+    if (preview) return
     void getProgress(studentId, accessToken, true).then(setStats).catch(() => undefined)
     if (accessToken) {
       void Promise.allSettled([
@@ -62,7 +79,7 @@ export function Home({ session }: { session: AuthSession | null }) {
         getFriends(accessToken, true).then(setSocial),
       ])
     }
-  }, [studentId, accessToken])
+  }, [studentId, accessToken, preview])
 
   const xp = profile?.total_xp ?? stats?.total_xp ?? 0
   const streak = profile?.login_streak ?? stats?.login_streak ?? 0
@@ -118,7 +135,7 @@ export function Home({ session }: { session: AuthSession | null }) {
           <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Streak</span>
           <span className="ui-stat__value dashboard__streak">
             {streak}<span className="ui-stat__unit">{streak === 1 ? 'day' : 'days'}</span>
-            {streak >= STREAK_MILESTONE ? <img className="ui-mascot-cheer dashboard__streak-mascot" src="/bindit-mascot.webp" alt="" title={`${streak}-day streak`} /> : null}
+            {streak >= STREAK_MILESTONE ? <img className="ui-mascot-cheer dashboard__streak-mascot" src="/bindit-mascot-cutout.webp" alt="" title={`${streak}-day streak`} /> : null}
           </span>
           <span className="ui-stat__meta">Best {bestStreak} {bestStreak === 1 ? 'day' : 'days'}</span>
         </div>
@@ -175,7 +192,7 @@ export function Home({ session }: { session: AuthSession | null }) {
                 </ul>
               ) : (
                 <div className="ui-empty">
-                  <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                  <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
                   <p className="ui-empty__title">No courses yet</p>
                   <p className="ui-empty__copy">Add a course in Tools, then upload notes to get quizzes and flashcards built from them.</p>
                   <a className="ui-button ui-button--primary" href="#tools">Add a course</a>
@@ -212,7 +229,7 @@ export function Home({ session }: { session: AuthSession | null }) {
           <section className="ui-section" aria-labelledby="dashboard-friends">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="dashboard-friends">Friends this week</h2>
-              {session ? (
+              {signedIn ? (
                 <a className="ui-link" href="#profile">
                   {requestCount ? `${requestCount} ${requestCount === 1 ? 'request' : 'requests'}` : 'View all'}
                 </a>
@@ -240,12 +257,12 @@ export function Home({ session }: { session: AuthSession | null }) {
                 </ol>
               ) : (
                 <div className="ui-empty">
-                  <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                  <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
                   <p className="ui-empty__title">No friends yet</p>
                   <p className="ui-empty__copy">
-                    {session ? 'Add friends from your profile to compare weekly XP.' : 'Create an account to add friends and compare weekly XP.'}
+                    {signedIn ? 'Add friends from your profile to compare weekly XP.' : 'Create an account to add friends and compare weekly XP.'}
                   </p>
-                  <a className="ui-button ui-button--primary" href={session ? '#profile' : '#settings'}>{session ? 'Find friends' : 'Create an account'}</a>
+                  <a className="ui-button ui-button--primary" href={signedIn ? '#profile' : '#settings'}>{signedIn ? 'Find friends' : 'Create an account'}</a>
                 </div>
               )}
             </div>
