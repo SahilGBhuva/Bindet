@@ -26,29 +26,6 @@
   text-align: center;
 }
 
-/*
- * Legacy page frame. Pages that have not been redesigned yet keep the container
- * sizing and accent border they had before. Remove each page from these
- * selectors as it moves to .ui-page, and delete the block when none are left.
- * :where() keeps the specificity of the old bare .sheet rule, so page rules such as
- * Home.css's .sheet:has(.sheet__row) still override it as they did before.
- */
-.sheet:where(.is-tools, .is-more) {
-  width: min(1640px, calc(100% - 40px));
-  margin: 0 auto;
-  padding: 8px 0 48px;
-}
-
-.sheet.is-tools { --page-accent: var(--accent-tools); }
-.sheet.is-more { --page-accent: var(--accent-more); }
-
-.sheet .board,
-.sheet.is-tools .courses,
-.sheet.is-tools .order-bar,
-.sheet.is-tools .panel {
-  border-color: var(--page-accent);
-}
-
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -58,8 +35,4 @@
   }
 
   .app-shell > .sheet { min-width: 0; }
-
-  .sheet:where(.is-tools, .is-more) {
-    width: calc(100% - 24px);
-  }
 }

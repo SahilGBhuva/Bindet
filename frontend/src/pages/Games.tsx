@@ -1,4 +1,4 @@
-const GAME_MODES = ['Arcade', 'Matches', 'High score']
+import { ComingSoonCards, Icons } from '../components/ComingSoonCards'
 
 export function Games() {
   return (
@@ -9,19 +9,14 @@ export function Games() {
           <p className="ui-page-subtitle">Study games will land here. Pick a unit in Tools, then come back to play.</p>
         </div>
       </header>
-
-      <div className="ui-panel">
-        <ul className="ui-list">
-          {GAME_MODES.map((mode) => (
-            <li key={mode} className="ui-row">
-              <div className="ui-row__main">
-                <span className="ui-row__title">{mode}</span>
-              </div>
-              <span className="ui-badge">Coming soon</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ComingSoonCards
+        label="Planned games"
+        items={[
+          { title: 'Arcade', copy: 'Quick rounds built from a unit in Tools.', icon: Icons.bolt },
+          { title: 'Matches', copy: 'Practice against friends.', icon: Icons.swords },
+          { title: 'High score', copy: 'Your best runs, kept in one place.', icon: Icons.trophy },
+        ]}
+      />
     </div>
   )
 }

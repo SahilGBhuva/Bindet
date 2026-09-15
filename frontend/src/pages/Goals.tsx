@@ -1,4 +1,4 @@
-const GOAL_TYPES = ['Daily', 'Weekly', 'Rewards']
+import { ComingSoonCards, Icons } from '../components/ComingSoonCards'
 
 export function Goals() {
   return (
@@ -9,19 +9,14 @@ export function Goals() {
           <p className="ui-page-subtitle">Daily and weekly study goals will show up here.</p>
         </div>
       </header>
-
-      <div className="ui-panel">
-        <ul className="ui-list">
-          {GOAL_TYPES.map((type) => (
-            <li key={type} className="ui-row">
-              <div className="ui-row__main">
-                <span className="ui-row__title">{type}</span>
-              </div>
-              <span className="ui-badge">Coming soon</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ComingSoonCards
+        label="Planned goals"
+        items={[
+          { title: 'Daily', copy: 'A daily XP target, set from your daily goal in Settings.', icon: Icons.sun },
+          { title: 'Weekly', copy: 'A bigger target that spans the whole week.', icon: Icons.calendar },
+          { title: 'Rewards', copy: 'Something to unlock when you hit your goals.', icon: Icons.gift },
+        ]}
+      />
     </div>
   )
 }

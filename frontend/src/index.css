@@ -91,35 +91,6 @@
   -webkit-font-smoothing: antialiased;
 }
 
-/*
- * Legacy palette. Pages that have not been redesigned yet still read these.
- * Values are unchanged from before the redesign so those pages do not shift.
- * Delete each token once no stylesheet references it.
- */
-:root {
-  --ink: #e6e8ec;
-  --muted: #9299a6;
-  --wash: #08121e;
-  --paper: #07111c;
-  --surface: #0a1626;
-  --surface-2: #0e1e32;
-  --raised: #14304a;
-  --glass: rgba(20, 36, 52, 0.92);
-  --ochre: #e0a045;
-  --coral: #d36b4f;
-  --sage: #6f9a7a;
-  --plum: #6d4c8d;
-  --accent-home: #7eb8e8;
-  --accent-tools: #9b8cff;
-  --accent-progress: #6f9a7a;
-  --accent-games: #d36b4f;
-  --accent-goals: #e0a045;
-  --accent-profile: #b57ad4;
-  --accent-settings: #c8bf8a;
-  --accent-more: #a78bfa;
-  --page-accent: var(--ink);
-}
-
 * { box-sizing: border-box; }
 html { scroll-behavior: auto; }
 body {

@@ -486,7 +486,7 @@ function ProgressInfo({ onClose }: { onClose: () => void }) {
           <li>More attempts, so the score trusts your accuracy instead of the 38% start</li>
           <li>Depositing notes — a small bonus, up to +8</li>
         </ul>
-        <p>Wrong answers pull the score down. XP and streak on this board are account-wide, not the same as unit mastery.</p>
+        <p>Wrong answers pull the score down. XP and streak on this page are account-wide, not the same as unit mastery.</p>
       </section>
     </aside>
   )
