@@ -42,6 +42,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false)
   const [pendingEmail, setPendingEmail] = useState('')
   const [resendIn, setResendIn] = useState(0)
+  // Why sign-up opened, when it came from a locked action in the landing page demo.
+  const [signupReason, setSignupReason] = useState('')
 
   const passwordScore = useMemo(() => {
     let score = 0
@@ -69,7 +71,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [resendIn])
 
-  function openAuth(nextMode: Mode = 'signup') {
+  function openAuth(nextMode: Mode = 'signup', reason = '') {
+    setSignupReason(reason)
     setMode(nextMode)
     setView('auth')
     setError('')
@@ -77,6 +80,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   function switchMode(nextMode: Mode) {
+    setSignupReason('')
     setMode(nextMode)
     setError('')
     setMessage('')
@@ -230,6 +234,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <AuthBrand />
             <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : 'Start studying'}</p>
             <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : 'Create your account'}</h1>
+            {mode === 'signup' && signupReason ? (
+              <p className="auth-reason" role="status">
+                <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
+              </p>
+            ) : null}
             <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
               <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'is-on' : ''} disabled={busy} onClick={() => switchMode('login')}>
                 Log in
@@ -282,7 +291,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       )
     }
 
-    return <Landing onSignUp={() => openAuth('signup')} onLogIn={() => openAuth('login')} onGuest={continueAsGuest} />
+    return <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} onGuest={continueAsGuest} />
   }
 
   return <AuthContext.Provider value={{ session, setSession }}>{children}</AuthContext.Provider>

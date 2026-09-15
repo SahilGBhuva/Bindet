@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
-import { fileToAvatarDataUrl, loadAvatar, saveAvatar } from './session'
+import { fileToAvatarDataUrl } from './session'
+import { useData } from './dataSource'
 import './AvatarControl.css'
 
 type AvatarControlProps = {
@@ -8,7 +9,8 @@ type AvatarControlProps = {
 }
 
 export function AvatarControl({ onError }: AvatarControlProps) {
-  const [src, setSrc] = useState(() => loadAvatar())
+  const data = useData()
+  const [src, setSrc] = useState(() => data.loadAvatar())
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function onPick(event: ChangeEvent<HTMLInputElement>) {
@@ -21,7 +23,7 @@ export function AvatarControl({ onError }: AvatarControlProps) {
     }
     try {
       const dataUrl = await fileToAvatarDataUrl(next)
-      saveAvatar(dataUrl)
+      data.saveAvatar(dataUrl)
       setSrc(dataUrl)
     } catch {
       onError?.('Could not use that image. Try another photo.')

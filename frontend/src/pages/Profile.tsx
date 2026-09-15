@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { answerFriendRequest, blockSocialUser, createStudyGroup, getAccountProfile, getCachedFriends, getCachedProfile, getCachedProgress, getCachedStudyGroups, getFriends, getProgress, getStudyGroups, joinStudyGroup, leaveStudyGroup, reactToActivity, readSocialNotifications, removeFriend, reportSocialUser, saveSocialPrivacy, searchFriends, sendFriendRequest, startFriendQuest, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type StudyGroup } from '../lib/api'
+import type { FriendsHub, PersonSuggestion, Profile as ProfileData, Progress as ProgressData, StudyGroup } from '../lib/api'
+import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
-import { getStudentId, loadNotebook } from '../lib/session'
 import type { Course } from '../lib/types'
 import { AvatarControl } from '../lib/AvatarControl'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
@@ -27,13 +27,14 @@ type ProfileProps = {
 }
 
 export function Profile({ session, onError }: ProfileProps) {
-  const studentId = session?.user.id ?? getStudentId()
-  const [profile, setProfile] = useState<ProfileData | null>(() => session ? getCachedProfile(session.access_token) : null)
-  const [stats, setStats] = useState<ProgressData | null>(() => getCachedProgress(studentId))
-  const [courses, setCourses] = useState<Course[]>(() => loadNotebook().courses)
-  const [activeCourse, setActiveCourse] = useState(() => loadNotebook().activeCourse)
-  const [social, setSocial] = useState<FriendsHub | null>(() => session ? getCachedFriends(session.access_token) : null)
-  const [groups, setGroups] = useState<StudyGroup[]>(() => session ? getCachedStudyGroups(session.access_token) ?? [] : [])
+  const data = useData()
+  const studentId = session?.user.id ?? data.getStudentId()
+  const [profile, setProfile] = useState<ProfileData | null>(() => session ? data.getCachedProfile(session.access_token) : null)
+  const [stats, setStats] = useState<ProgressData | null>(() => data.getCachedProgress(studentId))
+  const [courses, setCourses] = useState<Course[]>(() => data.loadNotebook().courses)
+  const [activeCourse, setActiveCourse] = useState(() => data.loadNotebook().activeCourse)
+  const [social, setSocial] = useState<FriendsHub | null>(() => session ? data.getCachedFriends(session.access_token) : null)
+  const [groups, setGroups] = useState<StudyGroup[]>(() => session ? data.getCachedStudyGroups(session.access_token) ?? [] : [])
   const [activeGroupId, setActiveGroupId] = useState('')
   const [showGroupSetup, setShowGroupSetup] = useState(false)
   const [groupName, setGroupName] = useState('')
@@ -46,26 +47,26 @@ export function Profile({ session, onError }: ProfileProps) {
   const [peopleResults, setPeopleResults] = useState<PersonSuggestion[]>([])
 
   useEffect(() => {
-    void getProgress(studentId, session?.access_token, true)
+    void data.getProgress(studentId, session?.access_token, true)
       .then(setStats)
       .catch(() => setStats(null))
-  }, [studentId, session?.access_token])
+  }, [data, studentId, session?.access_token])
 
   useEffect(() => {
     if (!session) {
       setProfile(null)
       return
     }
-    void getAccountProfile(session.access_token, true)
+    void data.getAccountProfile(session.access_token, true)
       .then(setProfile)
       .catch(() => onError?.('Could not load your profile.'))
-  }, [session, onError])
+  }, [data, session, onError])
 
   const refreshSocial = useCallback(async (force = true) => {
     if (!session) return
     const [friendsResult, groupsResult] = await Promise.allSettled([
-      getFriends(session.access_token, force),
-      getStudyGroups(session.access_token, force),
+      data.getFriends(session.access_token, force),
+      data.getStudyGroups(session.access_token, force),
     ])
     if (friendsResult.status === 'fulfilled') setSocial(friendsResult.value)
     else {
@@ -75,7 +76,7 @@ export function Profile({ session, onError }: ProfileProps) {
       setGroups(groupsResult.value)
       setActiveGroupId((current) => current || groupsResult.value[0]?.id || '')
     }
-  }, [session, onError])
+  }, [data, session, onError])
 
   useEffect(() => {
     if (!session) {
@@ -83,15 +84,15 @@ export function Profile({ session, onError }: ProfileProps) {
       setGroups([])
       return
     }
-    const cachedFriends = getCachedFriends(session.access_token)
-    const cachedGroups = getCachedStudyGroups(session.access_token)
+    const cachedFriends = data.getCachedFriends(session.access_token)
+    const cachedGroups = data.getCachedStudyGroups(session.access_token)
     if (cachedFriends) setSocial(cachedFriends)
     if (cachedGroups) {
       setGroups(cachedGroups)
       setActiveGroupId((current) => current || cachedGroups[0]?.id || '')
     }
     void refreshSocial(true)
-  }, [session, refreshSocial])
+  }, [data, session, refreshSocial])
 
   async function addFriend(event: FormEvent) {
     event.preventDefault()
@@ -99,7 +100,7 @@ export function Profile({ session, onError }: ProfileProps) {
     setSocialBusy(true)
     setSocialMessage('')
     try {
-      await sendFriendRequest(friendCode.trim(), session.access_token)
+      await data.sendFriendRequest(friendCode.trim(), session.access_token)
       setFriendCode('')
       setSocialMessage('Friend request sent!')
       await refreshSocial()
@@ -115,7 +116,7 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session || peopleQuery.trim().length < 2) return
     setSocialBusy(true)
     try {
-      setPeopleResults(await searchFriends(peopleQuery, session.access_token))
+      setPeopleResults(await data.searchFriends(peopleQuery, session.access_token))
     } finally {
       setSocialBusy(false)
     }
@@ -125,7 +126,7 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session) return
     setSocialBusy(true)
     try {
-      await sendFriendRequest(person.friend_code, session.access_token)
+      await data.sendFriendRequest(person.friend_code, session.access_token)
       setPeopleResults((current) => current.filter((item) => item.student_id !== person.student_id))
       setSocialMessage(`Friend request sent to ${person.display_name}.`)
       await refreshSocial()
@@ -158,7 +159,7 @@ export function Profile({ session, onError }: ProfileProps) {
       } : item),
     } : current)
     try {
-      await reactToActivity(eventId, session.access_token)
+      await data.reactToActivity(eventId, session.access_token)
     } catch {
       await refreshSocial()
     }
@@ -166,7 +167,7 @@ export function Profile({ session, onError }: ProfileProps) {
 
   async function markNotificationsRead() {
     if (!session) return
-    await readSocialNotifications(session.access_token)
+    await data.readSocialNotifications(session.access_token)
     setSocial((current) => current ? { ...current, notifications: current.notifications.map((item) => ({ ...item, is_read: true })) } : current)
     void refreshSocial()
   }
@@ -175,20 +176,20 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session || !profile) return
     const discoverable = field === 'discoverable' ? !profile.discoverable : profile.discoverable
     const requests = field === 'allow_friend_requests' ? !profile.allow_friend_requests : profile.allow_friend_requests
-    await saveSocialPrivacy(discoverable, requests, session.access_token)
+    await data.saveSocialPrivacy(discoverable, requests, session.access_token)
     setProfile({ ...profile, discoverable, allow_friend_requests: requests })
   }
 
   async function blockFriend(friendId: string) {
-    if (!session || !window.confirm('Block this person? They will be removed and unable to find or contact you.')) return
-    await blockSocialUser(friendId, session.access_token)
+    if (!session || !data.confirm('Block this person? They will be removed and unable to find or contact you.')) return
+    await data.blockSocialUser(friendId, session.access_token)
     setSocialMessage('Person blocked.')
     await refreshSocial()
   }
 
   async function reportFriend(friendId: string) {
-    if (!session || !window.confirm('Send a safety report about this person?')) return
-    await reportSocialUser(friendId, session.access_token)
+    if (!session || !data.confirm('Send a safety report about this person?')) return
+    await data.reportSocialUser(friendId, session.access_token)
     setSocialMessage('Report sent. Thank you for helping keep bindit safe.')
   }
 
@@ -196,7 +197,7 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session) return
     setSocialBusy(true)
     try {
-      await answerFriendRequest(requestId, accept, session.access_token)
+      await data.answerFriendRequest(requestId, accept, session.access_token)
       setSocialMessage(accept ? 'You are friends now!' : 'Request declined.')
       await refreshSocial()
     } finally {
@@ -208,7 +209,7 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session) return
     setSocialBusy(true)
     try {
-      await startFriendQuest(friendId, session.access_token)
+      await data.startFriendQuest(friendId, session.access_token)
       setSocialMessage('Friend Quest started — earn 100 XP together this week!')
       await refreshSocial()
     } finally {
@@ -217,10 +218,10 @@ export function Profile({ session, onError }: ProfileProps) {
   }
 
   async function unfriend(friendId: string) {
-    if (!session || !window.confirm('Remove this friend?')) return
+    if (!session || !data.confirm('Remove this friend?')) return
     setSocialBusy(true)
     try {
-      await removeFriend(friendId, session.access_token)
+      await data.removeFriend(friendId, session.access_token)
       setSocialMessage('Friend removed.')
       await refreshSocial()
     } finally {
@@ -234,7 +235,7 @@ export function Profile({ session, onError }: ProfileProps) {
     setSocialBusy(true)
     setSocialMessage('')
     try {
-      const group = await createStudyGroup({ name: groupName.trim(), description: groupDescription.trim(), weekly_goal_xp: 500 }, session.access_token)
+      const group = await data.createStudyGroup({ name: groupName.trim(), description: groupDescription.trim(), weekly_goal_xp: 500 }, session.access_token)
       setGroups((current) => [group, ...current])
       setActiveGroupId(group.id)
       setGroupName('')
@@ -255,7 +256,7 @@ export function Profile({ session, onError }: ProfileProps) {
     setSocialBusy(true)
     setSocialMessage('')
     try {
-      const group = await joinStudyGroup(groupCode.trim(), session.access_token)
+      const group = await data.joinStudyGroup(groupCode.trim(), session.access_token)
       setGroups((current) => [group, ...current.filter((item) => item.id !== group.id)])
       setActiveGroupId(group.id)
       setGroupCode('')
@@ -275,8 +276,8 @@ export function Profile({ session, onError }: ProfileProps) {
   }
 
   async function exitGroup(group: StudyGroup) {
-    if (!session || group.role === 'owner' || !window.confirm(`Leave ${group.name}?`)) return
-    await leaveStudyGroup(group.id, session.access_token)
+    if (!session || group.role === 'owner' || !data.confirm(`Leave ${group.name}?`)) return
+    await data.leaveStudyGroup(group.id, session.access_token)
     setGroups((current) => current.filter((item) => item.id !== group.id))
     setActiveGroupId('')
     setSocialMessage(`Left ${group.name}.`)
@@ -284,7 +285,7 @@ export function Profile({ session, onError }: ProfileProps) {
 
   useEffect(() => {
     const syncNotebook = () => {
-      const notebook = loadNotebook()
+      const notebook = data.loadNotebook()
       setCourses(notebook.courses)
       setActiveCourse(notebook.activeCourse)
     }
@@ -295,7 +296,7 @@ export function Profile({ session, onError }: ProfileProps) {
       window.removeEventListener('storage', syncNotebook)
       window.removeEventListener('hashchange', syncNotebook)
     }
-  }, [])
+  }, [data])
 
   const totalXp = profile?.total_xp ?? stats?.total_xp ?? 0
   const { level, inLevel, toNext } = xpLevel(totalXp)

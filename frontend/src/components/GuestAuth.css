@@ -86,6 +86,19 @@
   letter-spacing: -0.035em;
 }
 
+.auth-reason {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 12px;
+  background: var(--color-violet-tint);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.auth-reason strong {
+  color: var(--color-violet-text);
+}
+
 .auth-lead {
   margin: calc(-1 * var(--space-2)) 0 var(--space-5);
   color: var(--color-text-secondary);

@@ -72,6 +72,8 @@
 
 .lp-pill:focus-visible,
 .lp-link:focus-visible,
+.lp-demo-hint__link:focus-visible,
+.lp-scroll-cue:focus-visible,
 .lp-nav a:focus-visible,
 .lp-nav button:focus-visible {
   outline: 3px solid var(--color-focus);
@@ -130,8 +132,9 @@
 }
 
 .lp-link {
-  padding: 0;
+  padding: 6px 10px;
   border: 0;
+  border-radius: var(--radius-full);
   background: none;
   color: var(--color-text);
   font-weight: var(--weight-semibold);
@@ -139,6 +142,7 @@
 }
 
 .lp-link:hover {
+  background: var(--color-surface-hover);
   color: var(--color-accent-text);
 }
 
@@ -149,8 +153,12 @@
 }
 
 .lp-link--light:hover {
+  background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
-  opacity: 0.85;
+}
+
+.lp-link--light:focus-visible {
+  outline-color: #ffffff;
 }
 
 /* Background blobs */
@@ -206,8 +214,22 @@
   z-index: -1;
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   border-radius: var(--radius-full);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 8px 30px -18px rgba(11, 27, 51, 0.3);
+}
+
+/* A soft white fade across the full width, so scrolled content never shows around the nav */
+.lp-nav::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: -2;
+  width: 100vw;
+  height: calc(100% + 12px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.7) 60%, rgba(255, 255, 255, 0) 100%);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .lp-nav__brand {
@@ -462,7 +484,8 @@
 
 .lp-preview__window {
   margin: 0;
-  overflow: hidden;
+  /* clip, not hidden: focus or scrollIntoView must never scroll the frame out of alignment */
+  overflow: clip;
   border: 1px solid var(--color-border);
   border-radius: 20px;
   background: #ffffff;
@@ -508,30 +531,129 @@
 
 .lp-preview__stage {
   position: relative;
-  overflow: hidden;
+  overflow: clip;
 }
 
-.lp-preview__app {
+.lp-preview__scaler {
   position: absolute;
   top: 0;
   left: 0;
-  min-height: 0;
-  overflow: hidden;
   transform-origin: 0 0;
+}
+
+/* The live demo: real app pages inside the frame */
+.lp-demo {
+  min-height: 0;
+  overflow: clip;
+  background: var(--color-bg);
+}
+
+.lp-demo:not(.is-interactive) {
   pointer-events: none;
   user-select: none;
 }
 
-.lp-preview__app .bindit-rail {
+.lp-demo .bindit-rail {
   position: relative;
   height: 100%;
 }
 
+.lp-demo > .sheet {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.lp-demo__page {
+  animation: lp-demo-in 220ms var(--ease-standard) both;
+}
+
+@keyframes lp-demo-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 @media (max-width: 860px) {
-  .lp-preview__app .bindit-rail {
+  .lp-demo .bindit-rail {
     height: auto;
     max-width: none;
   }
+
+  .lp-demo > .sheet {
+    overflow: hidden;
+  }
+}
+
+/* Live frame: flattens as soon as someone points at it or tabs into it */
+.lp-preview__window.is-live {
+  transition: transform 320ms var(--ease-standard), box-shadow 320ms var(--ease-standard);
+}
+
+.lp-preview__window.is-live:hover,
+.lp-preview__window.is-live:focus-within {
+  transform: none;
+  box-shadow:
+    0 50px 120px -40px rgba(124, 58, 237, 0.55),
+    0 30px 80px -40px rgba(11, 92, 255, 0.5),
+    0 0 0 1px rgba(124, 58, 237, 0.18);
+}
+
+.lp-demo-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: fit-content;
+  max-width: 100%;
+  margin: calc(-1 * var(--space-6)) auto var(--space-6);
+  padding: 8px 16px 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-green) 26%, #ffffff);
+  border-radius: var(--radius-full);
+  background: #ffffff;
+  box-shadow: 0 8px 24px -16px rgba(11, 27, 51, 0.35);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.lp-demo-hint strong {
+  color: var(--color-text);
+}
+
+.lp-demo-hint__dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-green);
+}
+
+.lp-demo-hint__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--color-green);
+  animation: lp-ping 2s ease-out infinite;
+}
+
+@keyframes lp-ping {
+  0% { opacity: 0.7; transform: scale(1); }
+  80%, 100% { opacity: 0; transform: scale(2.8); }
+}
+
+.lp-demo-hint__link {
+  padding: 0;
+  border-radius: 4px;
+  border: 0;
+  background: none;
+  color: var(--color-accent-text);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 /* Feature grid */
@@ -975,8 +1097,15 @@
     transition: none;
   }
 
-  .lp-preview__window {
+  .lp-preview__window,
+  .lp-preview__window.is-live {
     transform: none;
+    transition: none;
+  }
+
+  .lp-demo__page,
+  .lp-demo-hint__dot::after {
+    animation: none;
   }
 
   .lp-pill,

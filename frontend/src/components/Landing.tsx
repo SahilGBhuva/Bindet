@@ -1,72 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Home, type HomePreview } from '../pages/Home'
-import { SiteSidebar } from '../lib/SiteSidebar'
-import { COURSE_TONES } from '../lib/session'
+import { DEMO_SUMMARY } from './demo/demoData'
+import { LivePreview } from './demo/LivePreview'
 import { toneClass, type Tone } from '../lib/tones'
 import './Landing.css'
 
 type LandingProps = {
-  onSignUp: () => void
+  onSignUp: (reason?: string) => void
   onLogIn: () => void
   onGuest: () => void
-}
-
-const DAY = 86_400_000
-const DEMO_NOW = Date.UTC(2026, 8, 14, 15, 30)
-const iso = (daysAgo: number) => new Date(DEMO_NOW - daysAgo * DAY).toISOString()
-const demoPerson = (id: string, name: string, username: string, weekly: number, active = true) => ({
-  student_id: id, username, display_name: name, avatar_path: '', total_xp: weekly * 9, streak: 6, active_today: active, weekly_xp: weekly, friend_streak: 4,
-})
-
-/* A made-up student used only to render the real dashboard in the preview. */
-const DEMO: HomePreview = {
-  studentId: 'demo-student',
-  signedIn: true,
-  now: DEMO_NOW,
-  stats: {
-    student_id: 'demo-student', total_xp: 2480, attempts: 214, correct_answers: 180, accuracy: 84.1,
-    streak: 5, best_streak: 11, login_streak: 12, best_login_streak: 12, weak_topics: ['stoichiometry'],
-    topics: [{ topic: 'stoichiometry', attempts: 22, correct_answers: 14, accuracy: 63.6 }],
-  },
-  profile: {
-    student_id: 'demo-student', username: 'maya_r', display_name: 'Maya Rodriguez', avatar_path: '', friend_code: 'BND-DEMO-0001',
-    daily_goal: 30, discoverable: true, allow_friend_requests: true, total_xp: 2480, streak: 5, best_streak: 11, login_streak: 12, best_login_streak: 12,
-  },
-  social: {
-    friends: [],
-    requests: [],
-    leaderboard: [
-      demoPerson('f1', 'Jordan Kim', 'jordank', 310),
-      demoPerson('demo-student', 'Maya Rodriguez', 'maya_r', 285),
-      demoPerson('f2', 'Priya Natarajan', 'priya_n', 240),
-      demoPerson('f3', 'Sam Rivera', 'samr', 120, false),
-    ],
-    quests: [{ id: 1, friend_id: 'f1', friend_name: 'Jordan Kim', target_xp: 100, progress_xp: 72, status: 'active', expires_at: iso(-2) }],
-    suggestions: [],
-    activity: [],
-    notifications: [],
-  },
-  notebook: {
-    courses: [
-      { name: 'AP Biology', units: ['Cells', 'Genetics', 'Evolution'], tone: COURSE_TONES[0] },
-      { name: 'Chemistry', units: ['Atoms', 'Stoichiometry'], tone: COURSE_TONES[1] },
-      { name: 'US History', units: ['Colonial era', 'Revolution'], tone: COURSE_TONES[3] },
-      { name: 'Algebra II', units: ['Functions', 'Logarithms'], tone: COURSE_TONES[2] },
-    ],
-    activeCourse: 'AP Biology',
-    activeUnit: 'Genetics',
-    deposits: [
-      { id: 'd1', course: 'AP Biology', unit: 'Genetics', fileName: 'punnett-squares-lecture.pdf', createdAt: iso(0.2) },
-      { id: 'd2', course: 'Chemistry', unit: 'Stoichiometry', fileName: 'mole-ratios-worksheet.docx', createdAt: iso(1) },
-      { id: 'd3', course: 'US History', unit: 'Revolution', fileName: 'causes-of-the-revolution.txt', createdAt: iso(3) },
-      { id: 'd4', course: 'AP Biology', unit: 'Cells', fileName: 'cell-membrane-notes.jpg', createdAt: iso(4) },
-      { id: 'd5', course: 'Algebra II', unit: 'Logarithms', fileName: 'log-rules.md', createdAt: iso(6) },
-      { id: 'd6', course: 'AP Biology', unit: 'Evolution', fileName: 'natural-selection.pdf', createdAt: iso(8) },
-      { id: 'd7', course: 'Chemistry', unit: 'Atoms', fileName: 'periodic-trends.pdf', createdAt: iso(9) },
-      { id: 'd8', course: 'Algebra II', unit: 'Functions', fileName: 'function-transformations.docx', createdAt: iso(11) },
-      { id: 'd9', course: 'US History', unit: 'Colonial era', fileName: 'jamestown-reading.pdf', createdAt: iso(13) },
-    ],
-  },
 }
 
 const FEATURES: { tone: Tone; title: string; copy: string; icon: ReactNode }[] = [
@@ -85,10 +26,10 @@ const STEPS: { tone: Tone; title: string; copy: string }[] = [
 ]
 
 const STATS = [
-  { label: 'Courses', value: DEMO.notebook.courses.length },
-  { label: 'Notes uploaded', value: DEMO.notebook.deposits.length },
-  { label: 'Day streak', value: DEMO.profile.login_streak },
-  { label: 'XP earned', value: DEMO.profile.total_xp },
+  { label: 'Courses', value: DEMO_SUMMARY.courses },
+  { label: 'Notes uploaded', value: DEMO_SUMMARY.notes },
+  { label: 'Day streak', value: DEMO_SUMMARY.streak },
+  { label: 'XP earned', value: DEMO_SUMMARY.xp },
 ]
 
 function prefersReducedMotion() {
@@ -158,27 +99,32 @@ function CountUp({ value }: { value: number }) {
 }
 
 /*
- * Virtual screen the dashboard is rendered at before scaling. The app's responsive
+ * Virtual screen the demo is rendered at before scaling. The app's responsive
  * rules follow the real viewport, so phones get the phone layout at phone width.
  */
 const DESKTOP_PREVIEW = { width: 1440, height: 880 }
 const PHONE_PREVIEW = { width: 420, height: 980 }
 const APP_MOBILE_BREAKPOINT = 860
 
-/* The real dashboard, rendered with demo data and scaled to fit its frame. */
-function ProductPreview() {
+/*
+ * The live demo: the real app pages running on sandboxed demo data, scaled to fit
+ * a browser frame. Interactive on larger screens; a static render on phones, where
+ * taps while scrolling would misfire and the real app is one tap away as a guest.
+ */
+function ProductPreview({ onLocked, onGuest }: { onLocked: (action: string) => void; onGuest: () => void }) {
   const frame = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.5)
-  const [size, setSize] = useState(DESKTOP_PREVIEW)
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth <= APP_MOBILE_BREAKPOINT)
+  const size = phone ? PHONE_PREVIEW : DESKTOP_PREVIEW
 
   useEffect(() => {
     const node = stage.current
     if (!node) return
     const update = () => {
-      const next = window.innerWidth <= APP_MOBILE_BREAKPOINT ? PHONE_PREVIEW : DESKTOP_PREVIEW
-      setSize(next)
-      setScale(node.clientWidth / next.width)
+      const nextPhone = window.innerWidth <= APP_MOBILE_BREAKPOINT
+      setPhone(nextPhone)
+      setScale(node.clientWidth / (nextPhone ? PHONE_PREVIEW : DESKTOP_PREVIEW).width)
     }
     update()
     const observer = new ResizeObserver(update)
@@ -193,12 +139,17 @@ function ProductPreview() {
   useEffect(() => {
     const node = frame.current
     // No tilt on phones: the projected frame would poke past the screen edges.
-    if (!node || prefersReducedMotion() || window.innerWidth < 640) return
+    if (!node || prefersReducedMotion() || phone) {
+      node?.style.removeProperty('--tilt')
+      node?.style.removeProperty('--lift')
+      return
+    }
     let pending = 0
     const apply = () => {
       pending = 0
       const box = node.getBoundingClientRect()
-      const progress = Math.min(1, Math.max(0, (window.innerHeight - box.top) / (window.innerHeight * 0.9)))
+      // Flat by the time the frame's top reaches the upper third of the screen.
+      const progress = Math.min(1, Math.max(0, (window.innerHeight - box.top) / (window.innerHeight * 0.7)))
       node.style.setProperty('--tilt', `${(1 - progress) * 14}deg`)
       node.style.setProperty('--lift', `${(1 - progress) * 40}px`)
     }
@@ -213,30 +164,37 @@ function ProductPreview() {
       window.removeEventListener('resize', onScroll)
       cancelAnimationFrame(pending)
     }
-  }, [])
+  }, [phone])
 
   return (
-    <div className="lp-preview" ref={frame}>
-      <figure className="lp-preview__window" aria-label="The bindit dashboard, shown with a demo student’s courses, notes, streak, and friends">
-        <div className="lp-preview__bar" aria-hidden="true">
-          <span /><span /><span />
-          <em>bindit · Home</em>
-        </div>
-        <div className="lp-preview__stage" ref={stage} style={{ height: size.height * scale }}>
-          <div
-            className="app-shell lp-preview__app"
-            inert
-            aria-hidden="true"
-            style={{ width: size.width, height: size.height, transform: `scale(${scale})` }}
-          >
-            <SiteSidebar active="home" />
-            <main className="sheet is-home">
-              <Home session={null} preview={DEMO} />
-            </main>
+    <>
+      <div className="lp-demo-hint">
+        {phone ? (
+          <>
+            <span className="lp-demo-hint__dot" aria-hidden="true" />
+            <span>A live render of the app. <button className="lp-demo-hint__link" type="button" onClick={onGuest}>Try the real thing as a guest</button></span>
+          </>
+        ) : (
+          <>
+            <span className="lp-demo-hint__dot" aria-hidden="true" />
+            <span><strong>Try it.</strong> This demo is live — switch pages, flip flashcards, answer a quiz.</span>
+          </>
+        )}
+      </div>
+      <div className="lp-preview" ref={frame}>
+        <figure className={`lp-preview__window${phone ? '' : ' is-live'}`} aria-label={phone ? 'The bindit dashboard with a demo student’s data' : 'Interactive bindit demo with a demo student’s data. Nothing you do here is saved.'}>
+          <div className="lp-preview__bar" aria-hidden="true">
+            <span /><span /><span />
+            <em>bindit · demo</em>
           </div>
-        </div>
-      </figure>
-    </div>
+          <div className="lp-preview__stage" ref={stage} style={{ height: size.height * scale }}>
+            <div className="lp-preview__scaler" style={{ width: size.width, height: size.height, transform: `scale(${scale})` }}>
+              <LivePreview key={phone ? 'phone' : 'desktop'} interactive={!phone} width={size.width} height={size.height} onLockedAction={onLocked} />
+            </div>
+          </div>
+        </figure>
+      </div>
+    </>
   )
 }
 
@@ -263,7 +221,7 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
         </nav>
         <div className="lp-nav__actions">
           <button className="lp-link" type="button" onClick={onLogIn}>Log in</button>
-          <button className="lp-pill lp-pill--gradient lp-pill--sm" type="button" onClick={onSignUp}>Get started</button>
+          <button className="lp-pill lp-pill--gradient lp-pill--sm" type="button" onClick={() => onSignUp()}>Get started</button>
         </div>
       </header>
 
@@ -280,7 +238,7 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
                 Upload your class notes and bindit turns them into flashcards, quizzes, and a mastery map for every course. Then study with friends and keep the streak going.
               </p>
               <div className="lp-hero__cta lp-enter" style={{ '--i': 3 } as CSSProperties}>
-                <button className="lp-pill lp-pill--gradient lp-pill--lg" type="button" onClick={onSignUp}>Get started</button>
+                <button className="lp-pill lp-pill--gradient lp-pill--lg" type="button" onClick={() => onSignUp()}>Get started</button>
                 <button className="lp-pill lp-pill--outline lp-pill--lg" type="button" onClick={onGuest}>Try it as a guest</button>
               </div>
             </div>
@@ -297,11 +255,11 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
         <section className="lp-section lp-product" id="product">
           <div className="lp-section__head" data-reveal>
             <p className="lp-eyebrow">The real app</p>
-            <h2 className="lp-section__title">This is the dashboard, not a mockup.</h2>
-            <p className="lp-section__lead">Rendered live from the same components students use, with a demo student’s courses, notes, streak, and friends.</p>
+            <h2 className="lp-section__title">This is the app, not a mockup.</h2>
+            <p className="lp-section__lead">The same screens students use, running on a demo student’s courses, notes, flashcards, and friends.</p>
           </div>
           <div data-reveal>
-            <ProductPreview />
+            <ProductPreview onLocked={(action) => onSignUp(action)} onGuest={onGuest} />
           </div>
         </section>
 
@@ -360,7 +318,7 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
               <h2 id="lp-final-title">Your notes are already a study plan.</h2>
               <p>Bring them to bindit and start practicing today.</p>
               <div className="lp-final__actions">
-                <button className="lp-pill lp-pill--white lp-pill--lg" type="button" onClick={onSignUp}>Get started</button>
+                <button className="lp-pill lp-pill--white lp-pill--lg" type="button" onClick={() => onSignUp()}>Get started</button>
                 <button className="lp-link lp-link--light" type="button" onClick={onGuest}>or try it as a guest</button>
               </div>
             </div>

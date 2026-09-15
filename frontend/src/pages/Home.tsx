@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getAccountProfile, getCachedFriends, getCachedProfile, getCachedProgress, getFriends, getProgress, type FriendsHub, type Profile, type Progress } from '../lib/api'
+import type { FriendsHub, Profile, Progress } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
-import type { Notebook } from '../lib/types'
-import { getStudentId, loadNotebook } from '../lib/session'
+import { useData } from '../lib/dataSource'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { Icons } from '../components/Icons'
 import './Dashboard.css'
@@ -14,8 +13,7 @@ const numberFormat = new Intl.NumberFormat()
 const dateFormat = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 const shortDateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
-function greeting(date: Date) {
-  const hour = date.getHours()
+function greeting(hour: number) {
   if (hour < 12) return 'Good morning'
   if (hour < 18) return 'Good afternoon'
   return 'Good evening'
@@ -46,40 +44,26 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'
 }
 
-/*
- * Demo data for rendering the real dashboard outside the app (the landing page preview).
- * When present, nothing is read from storage and no requests are made.
- */
-export type HomePreview = {
-  studentId: string
-  signedIn: boolean
-  stats: Progress
-  profile: Profile
-  social: FriendsHub
-  notebook: Notebook
-  now: number
-}
-
-export function Home({ session, preview }: { session: AuthSession | null; preview?: HomePreview }) {
-  const studentId = preview?.studentId ?? session?.user.id ?? getStudentId()
-  const accessToken = preview ? undefined : session?.access_token
-  const [stats, setStats] = useState<Progress | null>(() => preview?.stats ?? getCachedProgress(studentId))
-  const [profile, setProfile] = useState<Profile | null>(() => preview?.profile ?? (accessToken ? getCachedProfile(accessToken) : null))
-  const [social, setSocial] = useState<FriendsHub | null>(() => preview?.social ?? (accessToken ? getCachedFriends(accessToken) : null))
-  const notebook = useMemo(() => preview?.notebook ?? loadNotebook(), [preview?.notebook])
-  const [now] = useState(() => preview?.now ?? Date.now())
-  const signedIn = preview ? preview.signedIn : Boolean(session)
+export function Home({ session }: { session: AuthSession | null }) {
+  const data = useData()
+  const studentId = session?.user.id ?? data.getStudentId()
+  const accessToken = session?.access_token
+  const [stats, setStats] = useState<Progress | null>(() => data.getCachedProgress(studentId))
+  const [profile, setProfile] = useState<Profile | null>(() => accessToken ? data.getCachedProfile(accessToken) : null)
+  const [social, setSocial] = useState<FriendsHub | null>(() => accessToken ? data.getCachedFriends(accessToken) : null)
+  const notebook = useMemo(() => data.loadNotebook(), [data])
+  const [now] = useState(() => data.now())
+  const signedIn = Boolean(session)
 
   useEffect(() => {
-    if (preview) return
-    void getProgress(studentId, accessToken, true).then(setStats).catch(() => undefined)
+    void data.getProgress(studentId, accessToken, true).then(setStats).catch(() => undefined)
     if (accessToken) {
       void Promise.allSettled([
-        getAccountProfile(accessToken, true).then(setProfile),
-        getFriends(accessToken, true).then(setSocial),
+        data.getAccountProfile(accessToken, true).then(setProfile),
+        data.getFriends(accessToken, true).then(setSocial),
       ])
     }
-  }, [studentId, accessToken, preview])
+  }, [data, studentId, accessToken])
 
   const xp = profile?.total_xp ?? stats?.total_xp ?? 0
   const streak = profile?.login_streak ?? stats?.login_streak ?? 0
@@ -113,7 +97,7 @@ export function Home({ session, preview }: { session: AuthSession | null; previe
     <div className="ui-page dashboard">
       <header className="ui-page-header">
         <div>
-          <h1 className="ui-page-title">{greeting(new Date(now))}{name ? `, ${name}` : ''}</h1>
+          <h1 className="ui-page-title">{greeting(data.hourOf(now))}{name ? `, ${name}` : ''}</h1>
           <p className="ui-page-subtitle">{dateFormat.format(now)}</p>
         </div>
         <nav className="dashboard__actions" aria-label="Study actions">

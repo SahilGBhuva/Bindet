@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DragEvent, FormEvent } from 'react'
-import { analyzeAnswer, deleteNote, generateFlashcards, generateQuestion, uploadNote, type AnswerResult, type Flashcard, type GeneratedQuestion, type Topic } from '../lib/api'
-import { recordUnitAttempt } from '../lib/progress'
+import type { AnswerResult, Flashcard, GeneratedQuestion, Topic } from '../lib/api'
+import { useData } from '../lib/dataSource'
 import {
   fileToCourseImageDataUrl,
-  getStudentId,
-  loadNotebook,
   notesFor,
   pickCourseTone,
-  saveNotebook,
   unitsFor,
   withCourseTones,
 } from '../lib/session'
@@ -83,8 +80,9 @@ function plural(count: number, word: string) {
 }
 
 export function Tools({ accessToken }: { accessToken?: string }) {
+  const data = useData()
   const [notebook, setNotebook] = useState(() => {
-    const loaded = loadNotebook()
+    const loaded = data.loadNotebook()
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [addingCourse, setAddingCourse] = useState(false)
@@ -125,7 +123,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const courseImageInput = useRef<HTMLInputElement>(null)
   const orderDragIndex = useRef(-1)
   const menuRef = useRef<HTMLDivElement>(null)
-  const studentId = useRef(getStudentId())
+  const studentId = useRef(data.getStudentId())
   // AI generation is rate limited per day, so generated content is only requested
   // when what it depends on changes, never just because the user switched views.
   const pendingDeckKey = useRef('')
@@ -148,8 +146,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const quizKey = `${activeCourse}|${activeUnit}|${unitNotes.length ? `notes:${unitNotes.length}` : quizTopic}|${quizDifficulty}`
 
   useEffect(() => {
-    saveNotebook(notebook)
-  }, [notebook])
+    data.saveNotebook(notebook)
+  }, [data, notebook])
 
   useEffect(() => {
     setNotebook((current) => {
@@ -193,7 +191,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     pendingDeckKey.current = key
     setCardsBusy(true)
     setCardsError('')
-    void generateFlashcards({ course: activeCourse, unit: activeUnit, count: 10 }, accessToken)
+    void data.generateFlashcards({ course: activeCourse, unit: activeUnit, count: 10 }, accessToken)
       .then((result) => {
         if (latestDeckKey.current !== key) return
         setDeck({ key, cards: result.cards })
@@ -208,7 +206,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         pendingDeckKey.current = ''
         setCardsBusy(false)
       })
-  }, [accessToken, activeCourse, activeUnit, cardsRequest, deck, deckKey, panelFn, unitNotes.length])
+  }, [accessToken, activeCourse, activeUnit, cardsRequest, data, deck, deckKey, panelFn, unitNotes.length])
 
   useEffect(() => {
     if (panelFn !== 'quiz' || loadedQuizKey.current === quizKey) return
@@ -352,7 +350,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setMenuCourse('')
     const notes = notebook.deposits.filter((note) => note.course === course.name).length
     const detail = [plural(course.units.length, 'unit'), plural(notes, 'note')].join(' and ')
-    if (window.confirm(`Delete “${course.name}”? Its ${detail} will be removed from this device.`)) {
+    if (data.confirm(`Delete “${course.name}”? Its ${detail} will be removed from this device.`)) {
       removeCourse(course.name)
     }
   }
@@ -467,7 +465,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setQuizResult(null)
     setQuizAnswer('')
     try {
-      const next = await generateQuestion(
+      const next = await data.generateQuestion(
         quizTopic,
         quizDifficulty,
         activeCourse && activeUnit
@@ -488,15 +486,19 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     }
   }
 
-  async function checkQuizAnswer(event: FormEvent) {
+  function checkQuizAnswer(event: FormEvent) {
     event.preventDefault()
-    if (!quizQuestion || !quizAnswer.trim()) return
+    void gradeAnswer(quizAnswer)
+  }
+
+  async function gradeAnswer(answer: string) {
+    if (!quizQuestion || !answer.trim() || quizBusy) return
     setQuizBusy(true)
     setQuizError('')
     try {
-      const result = await analyzeAnswer(quizQuestion, quizAnswer, studentId.current, accessToken)
+      const result = await data.analyzeAnswer(quizQuestion, answer, studentId.current, accessToken)
       setQuizResult(result)
-      recordUnitAttempt({
+      data.recordUnitAttempt({
         course: activeCourse,
         unit: activeUnit || quizQuestion.topic,
         correct: result.correct,
@@ -535,7 +537,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setUploadBusy(true)
     setNotice('')
     try {
-      const uploaded = await uploadNote(candidate, activeCourse, activeUnit, accessToken)
+      const uploaded = await data.uploadNote(candidate, activeCourse, activeUnit, accessToken)
       const deposit: NoteDeposit = {
         id: uploaded.id,
         course: uploaded.course,
@@ -562,7 +564,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     if (removingNoteId) return
     setRemovingNoteId(note.id)
     try {
-      await deleteNote(note.id, accessToken)
+      await data.deleteNote(note.id, accessToken)
       setNotebook((current) => ({ ...current, deposits: current.deposits.filter((item) => item.id !== note.id) }))
       setNotice(`Removed “${note.fileName}”.`)
     } catch (error) {
@@ -961,27 +963,51 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
                   <div className={`tools__question${quizBusy && !quizResult ? ' is-loading' : ''}`} aria-busy={quizBusy}>
                     {quizQuestion ? (
-                      <p className="tools__prompt">{quizQuestion.question}</p>
+                      <>
+                        <p className="tools__prompt">{quizQuestion.question}</p>
+                        {quizQuestion.choices?.length ? (
+                          <div className="tools__choices" role="group" aria-label="Answer choices">
+                            {quizQuestion.choices.map((choice) => (
+                              <button
+                                key={choice}
+                                type="button"
+                                className={`tools__choice${quizAnswer === choice ? ' is-picked' : ''}${quizAnswer === choice && quizResult ? (quizResult.correct ? ' is-correct' : ' is-incorrect') : ''}`}
+                                aria-pressed={quizAnswer === choice}
+                                disabled={quizBusy || Boolean(quizResult)}
+                                onClick={() => {
+                                  setQuizAnswer(choice)
+                                  void gradeAnswer(choice)
+                                }}
+                              >
+                                {choice}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
                     ) : quizError ? null : (
                       <p className="tools__status" role="status"><span className="ui-spinner" />Loading a question…</p>
                     )}
                   </div>
 
-                  <form className="tools__answer" onSubmit={checkQuizAnswer}>
-                    <input
-                      className="ui-input"
-                      type="text"
-                      value={quizAnswer}
-                      onChange={(event) => setQuizAnswer(event.target.value)}
-                      placeholder="Your answer"
-                      aria-label="Your answer"
-                      autoComplete="off"
-                      disabled={quizBusy || !quizQuestion}
-                    />
-                    <button className="ui-button ui-button--primary" type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim()}>
-                      Check
-                    </button>
-                  </form>
+                  {/* Multiple-choice questions answer with the choice buttons; the demo never shows the text field. */}
+                  {quizQuestion?.choices?.length || (data.sandboxed && !quizQuestion) ? null : (
+                    <form className="tools__answer" onSubmit={checkQuizAnswer}>
+                      <input
+                        className="ui-input"
+                        type="text"
+                        value={quizAnswer}
+                        onChange={(event) => setQuizAnswer(event.target.value)}
+                        placeholder="Your answer"
+                        aria-label="Your answer"
+                        autoComplete="off"
+                        disabled={quizBusy || !quizQuestion}
+                      />
+                      <button className="ui-button ui-button--primary" type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim()}>
+                        Check
+                      </button>
+                    </form>
+                  )}
 
                   {quizError ? <p className="tools__error" role="alert">{quizError}</p> : null}
                   {quizResult ? (

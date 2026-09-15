@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getCachedProgress, getProgress, type Progress as ProgressData } from '../lib/api'
+import type { Progress as ProgressData } from '../lib/api'
+import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
 import {
   VERDICT_COPY,
   areaPath,
   buildCoursePulse,
-  loadUnitAttempts,
   smoothPath,
   type CoursePulse,
   type UnitJudgment,
 } from '../lib/progress'
-import { getStudentId, loadNotebook, withCourseTones } from '../lib/session'
+import { withCourseTones } from '../lib/session'
 import { courseInitial } from '../lib/tones'
 import { Icons } from '../components/Icons'
 import './Progress.css'
@@ -22,10 +22,11 @@ type ProgressProps = {
 }
 
 export function Progress({ session }: ProgressProps) {
-  const studentId = session?.user.id ?? getStudentId()
-  const [stats, setStats] = useState<ProgressData | null>(() => getCachedProgress(studentId))
+  const data = useData()
+  const studentId = session?.user.id ?? data.getStudentId()
+  const [stats, setStats] = useState<ProgressData | null>(() => data.getCachedProgress(studentId))
   const [notebook, setNotebook] = useState(() => {
-    const loaded = loadNotebook()
+    const loaded = data.loadNotebook()
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [selected, setSelected] = useState(() => notebook.activeCourse || notebook.courses[0]?.name || '')
@@ -34,12 +35,12 @@ export function Progress({ session }: ProgressProps) {
   const [infoOpen, setInfoOpen] = useState(false)
 
   useEffect(() => {
-    void getProgress(studentId, session?.access_token, true).then(setStats).catch(() => undefined)
-  }, [studentId, session?.access_token])
+    void data.getProgress(studentId, session?.access_token, true).then(setStats).catch(() => undefined)
+  }, [data, studentId, session?.access_token])
 
   useEffect(() => {
     const sync = () => {
-      const loaded = loadNotebook()
+      const loaded = data.loadNotebook()
       const courses = withCourseTones(loaded.courses)
       setNotebook({ ...loaded, courses })
       setSelected((current) =>
@@ -53,9 +54,9 @@ export function Progress({ session }: ProgressProps) {
       window.removeEventListener('storage', sync)
       window.removeEventListener('hashchange', sync)
     }
-  }, [])
+  }, [data])
 
-  const attempts = useMemo(() => loadUnitAttempts(), [notebook, stats, selected])
+  const attempts = useMemo(() => data.loadUnitAttempts(), [data, notebook, stats, selected])
   const courses = notebook.courses
   const activeCourse = courses.find((course) => course.name === selected) ?? courses[0]
   const pulse = useMemo(
@@ -196,7 +197,7 @@ function CourseBoard({
       <section className="ui-panel ui-stats progress__stats" aria-label="Account stats">
         <div className="ui-stat ui-tone--orange">
           <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Streak</span>
-          <span className="ui-stat__value">{stats?.streak ?? '—'}<span className="ui-stat__unit">{stats?.streak === 1 ? 'day' : 'days'}</span></span>
+          <span className="ui-stat__value">{stats?.login_streak ?? '—'}<span className="ui-stat__unit">{stats?.login_streak === 1 ? 'day' : 'days'}</span></span>
         </div>
         <div className="ui-stat ui-tone--violet">
           <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.sparkle}</span>XP</span>
