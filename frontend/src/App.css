@@ -33,16 +33,14 @@
  * :where() keeps the specificity of the old bare .sheet rule, so page rules such as
  * Home.css's .sheet:has(.sheet__row) still override it as they did before.
  */
-.sheet:where(.is-tools, .is-profile, .is-more) {
+.sheet:where(.is-tools, .is-more) {
   width: min(1640px, calc(100% - 40px));
   margin: 0 auto;
   padding: 8px 0 48px;
 }
 
 .sheet.is-tools { --page-accent: var(--accent-tools); }
-.sheet.is-profile { --page-accent: var(--accent-profile); }
 .sheet.is-more { --page-accent: var(--accent-more); }
-.sheet.is-profile .profile-page { border-color: transparent; }
 
 .sheet .board,
 .sheet.is-tools .courses,
@@ -61,7 +59,7 @@
 
   .app-shell > .sheet { min-width: 0; }
 
-  .sheet:where(.is-tools, .is-profile, .is-more) {
+  .sheet:where(.is-tools, .is-more) {
     width: calc(100% - 24px);
   }
 }
