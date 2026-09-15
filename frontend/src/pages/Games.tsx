@@ -12,9 +12,9 @@ export function Games() {
       <ComingSoonCards
         label="Planned games"
         items={[
-          { title: 'Arcade', copy: 'Quick rounds built from a unit in Tools.', icon: Icons.bolt },
-          { title: 'Matches', copy: 'Practice against friends.', icon: Icons.swords },
-          { title: 'High score', copy: 'Your best runs, kept in one place.', icon: Icons.trophy },
+          { title: 'Arcade', copy: 'Quick rounds built from a unit in Tools.', icon: Icons.bolt, tone: 'orange' },
+          { title: 'Matches', copy: 'Practice against friends.', icon: Icons.swords, tone: 'teal' },
+          { title: 'High score', copy: 'Your best runs, kept in one place.', icon: Icons.trophy, tone: 'violet' },
         ]}
       />
     </div>

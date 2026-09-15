@@ -11,6 +11,8 @@ import {
   type UnitJudgment,
 } from '../lib/progress'
 import { getStudentId, loadNotebook, withCourseTones } from '../lib/session'
+import { courseInitial } from '../lib/tones'
+import { Icons } from '../components/Icons'
 import './Progress.css'
 
 const GRAPH = { w: 720, h: 248, x: 44, y: 22 }
@@ -98,7 +100,7 @@ export function Progress({ session }: ProgressProps) {
                   setHover(null)
                 }}
               >
-                <span className="progress__swatch" style={{ background: course.tone ?? '#2a6ea8' }} aria-hidden="true" />
+                <span className="ui-course-mark ui-course-mark--sm" style={{ ['--course' as string]: course.tone ?? '#0b58f5' }} aria-hidden="true">{courseInitial(course.name)}</span>
                 <span className="progress__course-name">{course.name}</span>
               </button>
             ))}
@@ -156,10 +158,10 @@ function CourseBoard({
 
   return (
     <div className="progress__board">
-      <section className="ui-panel progress__summary" aria-label={`${course.name} summary`}>
+      <section className="ui-panel progress__summary" style={{ ['--course' as string]: palette.tone }} aria-label={`${course.name} summary`}>
         <div className="progress__summary-main">
-          <span className="ui-card__eyebrow">
-            <span className="progress__swatch" style={{ background: palette.tone }} aria-hidden="true" />
+          <span className="progress__eyebrow">
+            <span className="ui-course-mark ui-course-mark--sm" aria-hidden="true">{courseInitial(course.name)}</span>
             {course.name}
           </span>
           <p className="progress__mastery">
@@ -192,20 +194,20 @@ function CourseBoard({
       </section>
 
       <section className="ui-panel ui-stats progress__stats" aria-label="Account stats">
-        <div className="ui-stat">
-          <span className="ui-stat__label">Streak</span>
+        <div className="ui-stat ui-tone--orange">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Streak</span>
           <span className="ui-stat__value">{stats?.streak ?? '—'}<span className="ui-stat__unit">{stats?.streak === 1 ? 'day' : 'days'}</span></span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">XP</span>
+        <div className="ui-stat ui-tone--violet">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.sparkle}</span>XP</span>
           <span className="ui-stat__value">{stats ? stats.total_xp.toLocaleString() : '—'}</span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Accuracy</span>
+        <div className={`ui-stat ${stats && stats.attempts && stats.accuracy < 70 ? 'ui-tone--amber' : 'ui-tone--green'}`}>
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.check}</span>Accuracy</span>
           <span className="ui-stat__value">{stats ? `${stats.accuracy}%` : '—'}</span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Next up</span>
+        <div className="ui-stat ui-tone--blue">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.arrow}</span>Next up</span>
           <span className="ui-stat__value progress__next">{pulse.recommended || '—'}</span>
         </div>
       </section>

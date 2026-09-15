@@ -5,6 +5,8 @@ import type { AuthSession } from '../lib/auth'
 import { getStudentId, loadNotebook } from '../lib/session'
 import type { Course } from '../lib/types'
 import { AvatarControl } from '../lib/AvatarControl'
+import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { Icons } from '../components/Icons'
 import './Profile.css'
 
 const XP_PER_LEVEL = 100
@@ -329,8 +331,8 @@ export function Profile({ session, onError }: ProfileProps) {
       </header>
 
       <section className="ui-panel ui-stats profile__stats" aria-label="Your stats">
-        <div className="ui-stat">
-          <span className="ui-stat__label">Level</span>
+        <div className="ui-stat ui-tone--blue">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.level}</span>Level</span>
           <span className="ui-stat__value">{level}</span>
           <div
             className="ui-meter"
@@ -343,17 +345,18 @@ export function Profile({ session, onError }: ProfileProps) {
             <span style={{ width: `${(inLevel / XP_PER_LEVEL) * 100}%` }} />
           </div>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Total XP</span>
+        <div className="ui-stat ui-tone--violet">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.sparkle}</span>Total XP</span>
           <span className="ui-stat__value">{totalXp.toLocaleString()}</span>
           <span className="ui-stat__meta">{toNext} XP to level {level + 1}</span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Login streak</span>
+        <div className="ui-stat ui-tone--orange">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Login streak</span>
           <span className="ui-stat__value">{loginStreak}<span className="ui-stat__unit">{loginStreak === 1 ? 'day' : 'days'}</span></span>
+          {loginStreak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot.webp" alt="" title={`${loginStreak}-day streak`} /> : null}
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Friends</span>
+        <div className="ui-stat ui-tone--pink">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.users}</span>Friends</span>
           <span className="ui-stat__value">{social?.friends.length ?? 0}</span>
           {social?.requests.length ? <span className="ui-stat__meta">{social.requests.length} pending {social.requests.length === 1 ? 'request' : 'requests'}</span> : null}
         </div>
@@ -392,7 +395,7 @@ export function Profile({ session, onError }: ProfileProps) {
             ) : null}
 
             {groups.length ? (
-              <div className="ui-panel profile__group">
+              <div className="ui-panel profile__group ui-tone--teal">
                 {groups.length > 1 ? (
                   <div className="ui-tabs profile__group-tabs" role="tablist" aria-label="Your study groups">
                     {groups.map((group) => (
@@ -406,7 +409,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   <div className="profile__group-body">
                     <div className="profile__group-top">
                       <div className="profile__group-heading">
-                        <span className="ui-card__eyebrow"><UsersMark /> {activeGroup.members.length} {activeGroup.members.length === 1 ? 'member' : 'members'}</span>
+                        <span className="ui-card__eyebrow ui-tone--teal"><UsersMark /> {activeGroup.members.length} {activeGroup.members.length === 1 ? 'member' : 'members'}</span>
                         <h3 className="ui-card__title">{activeGroup.name}</h3>
                         <p className="ui-card__copy">{activeGroup.description || 'A private place to keep each other moving.'}</p>
                       </div>
@@ -431,7 +434,7 @@ export function Profile({ session, onError }: ProfileProps) {
                           {activeGroup.members.map((member, index) => (
                             <li key={member.student_id} className="ui-row">
                               <span className="profile__rank">{index + 1}</span>
-                              <span className="ui-avatar" aria-hidden="true">{member.display_name.slice(0, 1).toUpperCase()}</span>
+                              <span className={`ui-avatar ${toneClass(toneForName(member.display_name))}`} aria-hidden="true">{member.display_name.slice(0, 1).toUpperCase()}</span>
                               <div className="ui-row__main">
                                 <span className="ui-row__title">{member.student_id === studentId ? 'You' : member.display_name}</span>
                                 <span className="ui-row__meta">{member.role === 'owner' ? 'Group owner' : `@${member.username}`}</span>
@@ -467,7 +470,7 @@ export function Profile({ session, onError }: ProfileProps) {
                 ) : null}
               </div>
             ) : (
-              <button type="button" className="ui-card profile__group-empty" onClick={() => setShowGroupSetup(true)} disabled={!session}>
+              <button type="button" className="ui-card profile__group-empty ui-tone--teal" onClick={() => setShowGroupSetup(true)} disabled={!session}>
                 <span className="ui-icon"><UsersMark /></span>
                 <span className="ui-card__title">Create your first study group</span>
                 <span className="ui-card__copy">Invite friends, combine XP, and build momentum together.</span>
@@ -486,7 +489,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   {social.leaderboard.map((friend, index) => (
                     <li key={friend.student_id} className={`ui-row${friend.student_id === studentId ? ' profile__me' : ''}`}>
                       <span className="profile__rank">{index + 1}</span>
-                      <span className="ui-avatar" aria-hidden="true">{friend.display_name.slice(0, 1).toUpperCase()}</span>
+                      <span className={`ui-avatar ${toneClass(toneForName(friend.display_name))}`} aria-hidden="true">{friend.display_name.slice(0, 1).toUpperCase()}</span>
                       <div className="ui-row__main">
                         <span className="ui-row__title">{friend.student_id === studentId ? 'You' : friend.display_name}</span>
                         <span className="ui-row__meta">{friend.active_today ? 'Active today' : `${friend.streak} day study streak`}</span>
@@ -506,7 +509,7 @@ export function Profile({ session, onError }: ProfileProps) {
                 <ul className="ui-list">
                   {social.activity.slice(0, 6).map((event) => (
                     <li key={event.id} className="ui-row">
-                      <span className="ui-avatar" aria-hidden="true">{event.display_name.slice(0, 1).toUpperCase()}</span>
+                      <span className={`ui-avatar ${toneClass(toneForName(event.display_name))}`} aria-hidden="true">{event.display_name.slice(0, 1).toUpperCase()}</span>
                       <div className="ui-row__main">
                         <span className="ui-row__title">{event.student_id === studentId ? 'You' : event.display_name} earned {event.xp} XP</span>
                         <span className="ui-row__meta">{new Date(event.created_at).toLocaleDateString()}</span>
@@ -589,7 +592,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   <ul className="ui-list">
                     {(peopleResults.length ? peopleResults : social?.suggestions ?? []).slice(0, 4).map((person) => (
                       <li className="ui-row" key={person.student_id}>
-                        <span className="ui-avatar" aria-hidden="true">{person.display_name.slice(0, 1).toUpperCase()}</span>
+                        <span className={`ui-avatar ${toneClass(toneForName(person.display_name))}`} aria-hidden="true">{person.display_name.slice(0, 1).toUpperCase()}</span>
                         <div className="ui-row__main">
                           <span className="ui-row__title">{person.display_name}</span>
                           <span className="ui-row__meta">@{person.username}</span>
@@ -607,7 +610,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   <ul className="ui-list">
                     {social.requests.map((request) => (
                       <li className="ui-row" key={request.request_id}>
-                        <span className="ui-avatar" aria-hidden="true">{request.display_name.slice(0, 1).toUpperCase()}</span>
+                        <span className={`ui-avatar ${toneClass(toneForName(request.display_name))}`} aria-hidden="true">{request.display_name.slice(0, 1).toUpperCase()}</span>
                         <div className="ui-row__main">
                           <span className="ui-row__title">{request.display_name}</span>
                           <span className="ui-row__meta">@{request.username}</span>
@@ -626,7 +629,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   <ul className="ui-list">
                     {social.friends.map((friend) => (
                       <li className="ui-row profile__friend" key={friend.student_id}>
-                        <span className="ui-avatar" aria-hidden="true">{friend.display_name.slice(0, 1).toUpperCase()}</span>
+                        <span className={`ui-avatar ${toneClass(toneForName(friend.display_name))}`} aria-hidden="true">{friend.display_name.slice(0, 1).toUpperCase()}</span>
                         <div className="ui-row__main">
                           <span className="ui-row__title">{friend.display_name}</span>
                           <span className="ui-row__meta">{friend.friend_streak} day friend streak · {friend.weekly_xp} XP this week</span>
@@ -648,6 +651,13 @@ export function Profile({ session, onError }: ProfileProps) {
                 </div>
               ) : null}
 
+              {session && social && !social.friends.length && !social.requests.length ? (
+                <div className="ui-empty profile__friends-empty">
+                  <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                  <p className="ui-empty__title">No friends yet</p>
+                  <p className="ui-empty__copy">Search for classmates above or share your friend ID to start a weekly league.</p>
+                </div>
+              ) : null}
               <p className="profile__hint">
                 {!session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : 'Use Share ID to send it with your phone’s share menu.'}
               </p>
@@ -724,8 +734,12 @@ export function Profile({ session, onError }: ProfileProps) {
               ) : (
                 <div className="profile__courses">
                   {courses.map((course) => (
-                    <span key={course.name} className={`ui-badge profile__course${course.name === activeCourse ? ' ui-badge--accent' : ''}`}>
-                      <i style={{ background: course.tone ?? 'var(--color-text-tertiary)' }} aria-hidden="true" />
+                    <span
+                      key={course.name}
+                      className={`ui-badge ui-badge--course profile__course${course.name === activeCourse ? ' is-active' : ''}`}
+                      style={{ ['--course' as string]: course.tone ?? '#0b58f5' }}
+                    >
+                      <span className="ui-course-mark profile__course-mark" aria-hidden="true">{courseInitial(course.name)}</span>
                       {course.name}
                     </span>
                   ))}

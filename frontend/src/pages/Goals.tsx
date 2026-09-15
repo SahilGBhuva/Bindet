@@ -12,9 +12,9 @@ export function Goals() {
       <ComingSoonCards
         label="Planned goals"
         items={[
-          { title: 'Daily', copy: 'A daily XP target, set from your daily goal in Settings.', icon: Icons.sun },
-          { title: 'Weekly', copy: 'A bigger target that spans the whole week.', icon: Icons.calendar },
-          { title: 'Rewards', copy: 'Something to unlock when you hit your goals.', icon: Icons.gift },
+          { title: 'Daily', copy: 'A daily XP target, set from your daily goal in Settings.', icon: Icons.sun, tone: 'blue' },
+          { title: 'Weekly', copy: 'A bigger target that spans the whole week.', icon: Icons.calendar, tone: 'violet' },
+          { title: 'Rewards', copy: 'Something to unlock when you hit your goals.', icon: Icons.gift, tone: 'pink' },
         ]}
       />
     </div>

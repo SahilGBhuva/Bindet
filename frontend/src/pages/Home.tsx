@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { getAccountProfile, getCachedFriends, getCachedProfile, getCachedProgress, getFriends, getProgress, type FriendsHub, type Profile, type Progress } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { getStudentId, loadNotebook } from '../lib/session'
+import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { Icons } from '../components/Icons'
 import './Dashboard.css'
 
 const STREAK_MILESTONE = 7
+const GOOD_ACCURACY = 70
 
 const numberFormat = new Intl.NumberFormat()
 const dateFormat = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
@@ -104,28 +107,28 @@ export function Home({ session }: { session: AuthSession | null }) {
       </header>
 
       <section className="ui-panel ui-stats" aria-label="Your progress">
-        <div className="ui-stat">
-          <span className="ui-stat__label">Daily goal</span>
+        <div className="ui-stat ui-tone--blue">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.target}</span>Daily goal</span>
           <span className="ui-stat__value">{todayXp}<span className="ui-stat__unit">/ {dailyGoal} XP</span></span>
           <div className="ui-meter" role="progressbar" aria-label="Daily goal" aria-valuemin={0} aria-valuemax={dailyGoal} aria-valuenow={todayXp}>
             <span style={{ width: `${goalProgress}%` }} />
           </div>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Streak</span>
+        <div className="ui-stat ui-tone--orange">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.flame}</span>Streak</span>
           <span className="ui-stat__value dashboard__streak">
             {streak}<span className="ui-stat__unit">{streak === 1 ? 'day' : 'days'}</span>
-            {streak >= STREAK_MILESTONE ? <img className="dashboard__streak-mascot" src="/bindit-mascot.webp" alt="" title={`${streak}-day streak`} /> : null}
+            {streak >= STREAK_MILESTONE ? <img className="ui-mascot-cheer dashboard__streak-mascot" src="/bindit-mascot.webp" alt="" title={`${streak}-day streak`} /> : null}
           </span>
           <span className="ui-stat__meta">Best {bestStreak} {bestStreak === 1 ? 'day' : 'days'}</span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Total XP</span>
+        <div className="ui-stat ui-tone--violet">
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.sparkle}</span>Total XP</span>
           <span className="ui-stat__value">{numberFormat.format(xp)}</span>
           <span className="ui-stat__meta">{numberFormat.format(attempts)} {attempts === 1 ? 'answer' : 'answers'}</span>
         </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Accuracy</span>
+        <div className={`ui-stat ${attempts && accuracy < GOOD_ACCURACY ? 'ui-tone--amber' : 'ui-tone--green'}`}>
+          <span className="ui-stat__label"><span className="ui-stat__icon">{Icons.check}</span>Accuracy</span>
           <span className="ui-stat__value">{accuracy}%</span>
           <span className="ui-stat__meta">{numberFormat.format(correct)} of {numberFormat.format(attempts)} correct</span>
         </div>
@@ -157,15 +160,15 @@ export function Home({ session }: { session: AuthSession | null }) {
                   {courses.map((course) => {
                     const notes = notebook.deposits.filter((note) => note.course === course.name).length
                     return (
-                      <li key={course.name} className="ui-row">
-                        <span className="dashboard__swatch" style={{ background: course.tone }} aria-hidden="true" />
+                      <li key={course.name} className="ui-row ui-course-row" style={{ ['--course' as string]: course.tone }}>
+                        <span className="ui-course-mark" aria-hidden="true">{courseInitial(course.name)}</span>
                         <div className="ui-row__main">
                           <span className="ui-row__title">{course.name}</span>
                           <span className="ui-row__meta">
                             {course.units.length} {course.units.length === 1 ? 'unit' : 'units'} · {notes} {notes === 1 ? 'note' : 'notes'}
                           </span>
                         </div>
-                        {course.name === activeCourse ? <span className="ui-badge">Current</span> : null}
+                        {course.name === activeCourse ? <span className="ui-badge ui-badge--course">Current</span> : null}
                       </li>
                     )
                   })}
@@ -223,7 +226,7 @@ export function Home({ session }: { session: AuthSession | null }) {
                     return (
                       <li key={friend.student_id} className={`ui-row dashboard__friend${isYou ? ' is-you' : ''}`}>
                         <span className="dashboard__rank">{index + 1}</span>
-                        <span className="ui-avatar" aria-hidden="true">{initials(friend.display_name)}</span>
+                        <span className={`ui-avatar ${toneClass(toneForName(friend.display_name))}`} aria-hidden="true">{initials(friend.display_name)}</span>
                         <div className="ui-row__main">
                           <span className="ui-row__title">{isYou ? 'You' : friend.display_name}</span>
                           <span className="ui-row__meta">
@@ -236,9 +239,14 @@ export function Home({ session }: { session: AuthSession | null }) {
                   })}
                 </ol>
               ) : (
-                <p className="dashboard__inline-empty">
-                  {session ? <>Add friends from your <a className="ui-link" href="#profile">profile</a> to compare weekly XP.</> : 'Create an account to add friends.'}
-                </p>
+                <div className="ui-empty">
+                  <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                  <p className="ui-empty__title">No friends yet</p>
+                  <p className="ui-empty__copy">
+                    {session ? 'Add friends from your profile to compare weekly XP.' : 'Create an account to add friends and compare weekly XP.'}
+                  </p>
+                  <a className="ui-button ui-button--primary" href={session ? '#profile' : '#settings'}>{session ? 'Find friends' : 'Create an account'}</a>
+                </div>
               )}
             </div>
           </section>

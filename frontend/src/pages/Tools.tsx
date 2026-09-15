@@ -13,6 +13,7 @@ import {
   withCourseTones,
 } from '../lib/session'
 import type { Course, NoteDeposit } from '../lib/types'
+import { courseInitial } from '../lib/tones'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
@@ -38,14 +39,14 @@ const VIEWS: { id: ToolView; label: string }[] = [
 ]
 
 function courseTone(course: { name: string; tone?: string }) {
-  return course.tone ?? withCourseTones([{ name: course.name, units: [] }])[0].tone ?? '#2a6ea8'
+  return course.tone ?? withCourseTones([{ name: course.name, units: [] }])[0].tone ?? '#0b58f5'
 }
 
 function CourseMark({ course, size = 'sm' }: { course: Course; size?: 'sm' | 'lg' }) {
   if (course.image) return <img className={`tools__thumb tools__thumb--${size}`} src={course.image} alt="" />
   return (
-    <span className={`tools__thumb tools__thumb--${size} tools__thumb--empty`} aria-hidden="true">
-      <span className="tools__swatch" style={{ background: courseTone(course) }} />
+    <span className={`ui-course-mark ui-course-mark--${size}`} style={{ ['--course' as string]: courseTone(course) }} aria-hidden="true">
+      {courseInitial(course.name)}
     </span>
   )
 }
@@ -643,7 +644,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
             {courses.map((course) => {
               const isActive = course.name === activeCourse
               return (
-                <li key={course.name} className={`tools__course${isActive ? ' is-active' : ''}`}>
+                <li key={course.name} className={`tools__course${isActive ? ' is-active' : ''}`} style={{ ['--course' as string]: courseTone(course) }}>
                   {renamingCourse === course.name ? (
                     <form className="tools__course-rename" onSubmit={commitRenameCourse}>
                       <input
@@ -883,7 +884,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           ))}
                         </ul>
                       ) : (
-                        <p className="tools__inline-empty">No notes in {activeUnit} yet. Flashcards and quiz questions are built from the files you add here.</p>
+                        <div className="ui-empty">
+                          <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+                          <p className="ui-empty__title">No notes in {activeUnit} yet</p>
+                          <p className="ui-empty__copy">Flashcards and quiz questions are built from the files you add here.</p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -894,6 +899,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                 <div className="tools__cards" role="tabpanel" aria-label="Flashcards">
                   {unitNotes.length === 0 ? (
                     <div className="ui-empty">
+                      <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
                       <p className="ui-empty__title">No notes in {activeUnit} yet</p>
                       <p className="ui-empty__copy">Flashcards are generated from this unit’s notes.</p>
                       <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>
@@ -902,6 +908,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     <>
                       <button
                         className={`tools__card${cardFlipped ? ' is-flipped' : ''}`}
+                        style={current ? { ['--course' as string]: courseTone(current) } : undefined}
                         type="button"
                         aria-live="polite"
                         onClick={() => setCardFlipped((open) => !open)}
@@ -1016,6 +1023,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     <li
                       key={course.name}
                       className={`tools__order-item${orderDrag === course.name ? ' is-dragging' : ''}${course.name === looking?.name ? ' is-selected' : ''}`}
+                      style={{ ['--course' as string]: courseTone(course) }}
                       draggable={renamingCourse !== course.name}
                       onClick={() => {
                         setLookCourse(course.name)

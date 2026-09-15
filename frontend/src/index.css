@@ -20,24 +20,57 @@
   /* Text */
   --color-text: #0b1b33;
   --color-text-secondary: #46546a;
-  --color-text-tertiary: #64748b;
+  --color-text-tertiary: #5b687d;
 
-  /* Accent and status. Status colors are for meaning (right/wrong, risk), never decoration. */
-  --color-accent: #1f5eff;
-  --color-accent-hover: #1a4fd6;
-  --color-accent-text: #1a4fd6;
-  --color-accent-subtle: #eaf0ff;
+  /* Primary accent: links, active states and the main action. */
+  --color-accent: #0b5cff;
+  --color-accent-hover: #004ae6;
+  --color-accent-text: #0b58f5;
+  --color-accent-subtle: #e4edff;
   --color-on-accent: #ffffff;
   --color-dark: #0b1b33;
   --color-dark-hover: #1d2f4d;
   --color-on-dark: #ffffff;
-  --color-positive: #15803d;
-  --color-positive-subtle: #e8f6ee;
-  --color-warning: #b45309;
-  --color-warning-subtle: #fdf3e6;
-  --color-danger: #d92d20;
+  --color-focus: rgba(11, 92, 255, 0.45);
+
+  /*
+   * Color palette for telling things apart: courses, stats, card icons, people.
+   * Base is for fills (meters, borders, badges behind white text). -text is the
+   * readable shade for text and icons (>= 4.7:1 on its tint and on white).
+   * -tint is the light background.
+   */
+  --color-blue: #0b5cff;
+  --color-blue-text: #0b58f5;
+  --color-blue-tint: #e4edff;
+  --color-violet: #7c3aed;
+  --color-violet-text: #7c3aed;
+  --color-violet-tint: #f1e9fd;
+  --color-green: #12a150;
+  --color-green-text: #0e7a3d;
+  --color-green-tint: #e5f5ec;
+  --color-orange: #ea580c;
+  --color-orange-text: #b74509;
+  --color-orange-tint: #fdede4;
+  --color-pink: #db2777;
+  --color-pink-text: #c12269;
+  --color-pink-tint: #fbe7f0;
+  --color-teal: #0d9488;
+  --color-teal-text: #0a766d;
+  --color-teal-tint: #e4f3f2;
+  --color-amber: #d97706;
+  --color-amber-text: #a15804;
+  --color-amber-tint: #fbf0e4;
+
+  /* Status colors are for meaning (right/wrong, risk). */
+  --color-positive: var(--color-green-text);
+  --color-positive-subtle: var(--color-green-tint);
+  --color-warning: var(--color-amber-text);
+  --color-warning-subtle: var(--color-amber-tint);
+  --color-danger: #c4271b;
   --color-danger-subtle: #fdeceb;
-  --color-focus: rgba(31, 94, 255, 0.45);
+
+  /* Brand gradient: page titles and progress fills */
+  --gradient-brand: linear-gradient(90deg, #0b5cff 0%, #7c3aed 100%);
 
   /* Type: bold, larger headings; body stays compact for dense lists and tables */
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -73,8 +106,10 @@
   --radius-lg: 14px;
   --radius-full: 999px;
 
-  /* Shadow: floating layers (menus, dialogs) only. Cards use borders. */
+  /* Shadow: floating layers (menus, dialogs) and the primary button. Cards use borders. */
   --shadow-popover: 0 12px 32px rgba(11, 27, 51, 0.12), 0 0 0 1px var(--color-border);
+  --shadow-primary: 0 1px 2px rgba(11, 92, 255, 0.24), 0 6px 16px rgba(11, 92, 255, 0.28);
+  --shadow-primary-hover: 0 2px 4px rgba(11, 92, 255, 0.28), 0 10px 22px rgba(11, 92, 255, 0.34);
 
   /* Motion */
   --duration-fast: 120ms;

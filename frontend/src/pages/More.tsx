@@ -12,9 +12,9 @@ export function More() {
       <ComingSoonCards
         label="More pages"
         items={[
-          { title: 'Help', copy: 'Guides for notes, flashcards, and quizzes.', icon: Icons.help },
-          { title: 'About', copy: 'What bindit is and how it works.', icon: Icons.info },
-          { title: 'Feedback', copy: 'Tell us what to fix or build next.', icon: Icons.message },
+          { title: 'Help', copy: 'Guides for notes, flashcards, and quizzes.', icon: Icons.help, tone: 'blue' },
+          { title: 'About', copy: 'What bindit is and how it works.', icon: Icons.info, tone: 'green' },
+          { title: 'Feedback', copy: 'Tell us what to fix or build next.', icon: Icons.message, tone: 'violet' },
         ]}
       />
     </div>

@@ -28,13 +28,40 @@
 }
 
 .ui-page-title {
+  width: fit-content;
+  max-width: 100%;
   margin: 0;
+  padding-bottom: 0.06em;
   color: var(--color-text);
   font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   line-height: var(--leading-tight);
   letter-spacing: -0.025em;
 }
+
+/* Blue-to-violet title. Falls back to navy text where background-clip: text is unsupported. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .ui-page-title {
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+/*
+ * Tones: one of the palette colors, applied to a component through local
+ * variables. Components read --tone (fills), --tone-text (text and icons) and
+ * --tone-tint (backgrounds).
+ */
+.ui-tone--blue { --tone: var(--color-blue); --tone-text: var(--color-blue-text); --tone-tint: var(--color-blue-tint); }
+.ui-tone--violet { --tone: var(--color-violet); --tone-text: var(--color-violet-text); --tone-tint: var(--color-violet-tint); }
+.ui-tone--green { --tone: var(--color-green); --tone-text: var(--color-green-text); --tone-tint: var(--color-green-tint); }
+.ui-tone--orange { --tone: var(--color-orange); --tone-text: var(--color-orange-text); --tone-tint: var(--color-orange-tint); }
+.ui-tone--pink { --tone: var(--color-pink); --tone-text: var(--color-pink-text); --tone-tint: var(--color-pink-tint); }
+.ui-tone--teal { --tone: var(--color-teal); --tone-text: var(--color-teal-text); --tone-tint: var(--color-teal-tint); }
+.ui-tone--amber { --tone: var(--color-amber); --tone-text: var(--color-amber-text); --tone-tint: var(--color-amber-tint); }
 
 .ui-page-subtitle {
   margin: var(--space-1) 0 0;
@@ -103,7 +130,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--color-accent-text);
+  color: var(--tone-text, var(--color-accent-text));
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
 }
@@ -137,19 +164,19 @@
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  background: var(--color-accent-subtle);
-  color: var(--color-accent-text);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--tone-tint, var(--color-accent-subtle));
+  color: var(--tone-text, var(--color-accent-text));
 }
 
 .ui-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -245,10 +272,16 @@
 .ui-button--primary {
   background: var(--color-accent);
   color: var(--color-on-accent);
+  box-shadow: var(--shadow-primary);
 }
 
 .ui-button--primary:hover {
   background: var(--color-accent-hover);
+  box-shadow: var(--shadow-primary-hover);
+}
+
+.ui-button--primary:disabled {
+  box-shadow: none;
 }
 
 /* Low-emphasis actions inside dense lists (Remove, Clear, Cancel) */
@@ -576,29 +609,60 @@
 .ui-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+/* The stat strip is a row of cards, so the wrapping panel paints nothing. */
+.ui-panel.ui-stats {
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
 
 .ui-stat {
+  position: relative;
   min-width: 0;
   padding: var(--space-5);
-}
-
-.ui-stat + .ui-stat {
-  border-left: 1px solid var(--color-border);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--color-border)) 18%, var(--color-surface));
+  border-radius: var(--radius-lg);
+  background: var(--tone-tint, var(--color-surface));
 }
 
 .ui-stat__label {
-  display: block;
-  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
 }
 
+.ui-stat__icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--tone-text, var(--color-text-secondary));
+}
+
+.ui-stat__icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .ui-stat__value {
   display: block;
-  margin-top: var(--space-1);
-  color: var(--color-text);
-  font-size: var(--text-xl);
+  margin-top: var(--space-2);
+  color: var(--tone-text, var(--color-text));
+  font-size: 26px;
   font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   letter-spacing: var(--tracking-tight);
@@ -606,7 +670,7 @@
 
 .ui-stat__unit {
   margin-left: 3px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
@@ -614,25 +678,29 @@
 .ui-stat__meta {
   display: block;
   margin-top: 2px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: var(--text-xs);
 }
 
 /* A thin meter */
 
 .ui-meter {
-  height: 6px;
+  height: 8px;
   overflow: hidden;
   margin-top: var(--space-2);
   border-radius: var(--radius-full);
-  background: var(--color-surface-active);
+  background: color-mix(in srgb, var(--color-violet) 12%, var(--color-surface-active));
+}
+
+.ui-stat .ui-meter {
+  background: var(--color-surface);
 }
 
 .ui-meter > span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--color-accent);
+  background: var(--gradient-brand);
 }
 
 /* Initials avatar */
@@ -641,11 +709,11 @@
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-full);
-  background: var(--color-accent-subtle);
-  color: var(--color-accent-text);
+  background: var(--tone-tint, var(--color-accent-subtle));
+  color: var(--tone-text, var(--color-accent-text));
   font-size: 11px;
   font-weight: var(--weight-bold);
 }
@@ -654,6 +722,43 @@
   width: 56px;
   height: 56px;
   font-size: var(--text-lg);
+}
+
+/*
+ * Course badge: the course initial on its color. Set --course inline.
+ * Course tones are dark enough for white text (>= 5.3:1).
+ */
+.ui-course-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--course, var(--color-accent));
+  color: #ffffff;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.ui-course-mark--sm {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.ui-course-mark--lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  font-size: var(--text-xl);
+}
+
+/* Row accent for a course: a colored left edge. Set --course inline. */
+.ui-course-row {
+  box-shadow: inset 4px 0 0 var(--course, var(--color-accent));
 }
 
 /* Small inline label */
@@ -670,6 +775,16 @@
   font-size: 11px;
   font-weight: var(--weight-semibold);
   white-space: nowrap;
+}
+
+.ui-badge--tone {
+  background: var(--tone-tint);
+  color: var(--tone-text);
+}
+
+.ui-badge--course {
+  background: color-mix(in srgb, var(--course) 12%, var(--color-surface));
+  color: color-mix(in srgb, var(--course) 82%, #000000);
 }
 
 .ui-badge--accent {
@@ -703,13 +818,24 @@
   text-align: center;
 }
 
+/* Full figure at real size: the source is 240x288, so 120px wide stays sharp on 2x screens. */
 .ui-empty__mascot {
-  width: 56px;
-  height: 56px;
-  margin-bottom: var(--space-1);
-  border-radius: var(--radius-lg);
-  object-fit: cover;
-  object-position: center 22%;
+  width: 120px;
+  height: auto;
+  margin-bottom: var(--space-2);
+}
+
+/* Small celebratory mascot, e.g. beside a 7+ day streak */
+.ui-mascot-cheer {
+  width: 36px;
+  height: auto;
+  flex: none;
+}
+
+/* The mascot image has no alpha channel; multiply drops its white ground on tinted surfaces. */
+.ui-empty__mascot,
+.ui-mascot-cheer {
+  mix-blend-mode: multiply;
 }
 
 .ui-empty__title {
@@ -750,14 +876,15 @@
 
   .ui-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
   }
 
-  .ui-stat:nth-child(3) {
-    border-left: 0;
+  .ui-stat {
+    padding: var(--space-4);
   }
 
-  .ui-stat:nth-child(n + 3) {
-    border-top: 1px solid var(--color-border);
+  .ui-stat__value {
+    font-size: var(--text-xl);
   }
 }
 
