@@ -65,35 +65,41 @@ export function Progress({ session }: ProgressProps) {
   )
 
   return (
-    <section className="board progress-page">
-      <header className="progress-head">
-        <p className="progress-kicker">Progress</p>
-        <h1>Course pulse</h1>
-        <p>Each course gets its own mastery graph and unit roadmap. Judgment uses quiz history, accuracy, and notes.</p>
+    <div className="ui-page progress">
+      <header className="ui-page-header">
+        <div>
+          <h1 className="ui-page-title">Progress</h1>
+          <p className="ui-page-subtitle">Each course gets its own mastery graph and unit roadmap. Judgment uses quiz history, accuracy, and notes.</p>
+        </div>
       </header>
 
       {courses.length === 0 || !pulse ? (
-        <div className="progress-empty">
-          <strong>No courses yet</strong>
-          <p>Add a course in Tools and this board will grow a graph and roadmap for it.</p>
-          <a href="#tools">Open Tools</a>
+        <div className="ui-panel">
+          <div className="ui-empty">
+            <img className="ui-empty__mascot" src="/bindit-mascot.webp" alt="" />
+            <p className="ui-empty__title">No courses yet</p>
+            <p className="ui-empty__copy">Add a course in Tools and this page will grow a graph and roadmap for it.</p>
+            <a className="ui-button ui-button--primary" href="#tools">Open Tools</a>
+          </div>
         </div>
       ) : (
         <>
-          <nav className="progress-courses" aria-label="Courses">
+          <nav className="ui-tabs progress__courses" role="tablist" aria-label="Courses">
             {courses.map((course) => (
               <button
                 key={course.name}
                 type="button"
-                className={`progress-course ${course.name === pulse.course.name ? 'is-on' : ''}`}
-                style={{ ['--tone' as string]: course.tone ?? '#2a6ea8' }}
+                role="tab"
+                aria-selected={course.name === pulse.course.name}
+                className="ui-tab progress__course"
                 onClick={() => {
                   setSelected(course.name)
                   setFocusUnit('')
                   setHover(null)
                 }}
               >
-                {course.name}
+                <span className="progress__swatch" style={{ background: course.tone ?? '#2a6ea8' }} aria-hidden="true" />
+                <span className="progress__course-name">{course.name}</span>
               </button>
             ))}
           </nav>
@@ -110,7 +116,7 @@ export function Progress({ session }: ProgressProps) {
           />
         </>
       )}
-    </section>
+    </div>
   )
 }
 
@@ -149,101 +155,112 @@ function CourseBoard({
   }, [infoOpen, onInfo])
 
   return (
-    <article className="progress-board" style={{ ['--tone' as string]: palette.tone, ['--tone-soft' as string]: palette.soft }}>
-      <button
-        type="button"
-        className={`progress-info ${infoOpen ? 'is-open' : ''}`}
-        aria-expanded={infoOpen}
-        aria-controls="progress-info-panel"
-        aria-label={infoOpen ? 'Close progress info' : 'How progress works'}
-        onClick={onInfo}
-      >
-        <InfoMark />
-      </button>
-      {infoOpen ? <ProgressInfo onClose={onInfo} /> : null}
-      <header className="progress-hero">
-        <div>
-          <p className="progress-hero__kicker">{course.name}</p>
-          <h2>{pulse.mastery}<small> mastery</small></h2>
-          <p className="progress-hero__reason">{pulse.reason}</p>
-        </div>
-        <div className="progress-hero__meta">
-          <span className={`verdict verdict--${pulse.verdict}`}>{VERDICT_COPY[pulse.verdict].label}</span>
-          <span className={`progress-live ${pulse.live ? 'is-live' : ''}`}>
-            {pulse.live ? 'Live quizzes' : hasUnits ? 'No quizzes yet' : 'No units yet'}
+    <div className="progress__board">
+      <section className="ui-panel progress__summary" aria-label={`${course.name} summary`}>
+        <div className="progress__summary-main">
+          <span className="ui-card__eyebrow">
+            <span className="progress__swatch" style={{ background: palette.tone }} aria-hidden="true" />
+            {course.name}
           </span>
+          <p className="progress__mastery">
+            {pulse.mastery}
+            <span className="progress__mastery-unit">mastery</span>
+          </p>
+          <p className="progress__reason">{pulse.reason}</p>
         </div>
-      </header>
-
-      <dl className="progress-stats">
-        <div>
-          <dt>Streak</dt>
-          <dd>{stats?.streak ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>XP</dt>
-          <dd>{stats?.total_xp ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>Accuracy</dt>
-          <dd>{stats ? `${stats.accuracy}%` : '—'}</dd>
-        </div>
-        <div>
-          <dt>Next up</dt>
-          <dd>{pulse.recommended || '—'}</dd>
-        </div>
-      </dl>
-
-      <figure className="progress-graph">
-        <figcaption>
-          <div>
-            <strong>{course.name} mastery by session</strong>
-            <span>
-              {hasUnits
-                ? `${activeLine ? activeLine.name : 'Course average'} · session ${hoverIndex + 1} · ${hoverValue}%`
-                : 'Add units in Tools to start this graph'}
+        <div className="progress__summary-side">
+          <div className="progress__badges">
+            <span className={`ui-badge ${verdictTone(pulse.verdict)}`}>{VERDICT_COPY[pulse.verdict].label}</span>
+            <span className={`ui-badge ${pulse.live ? 'ui-badge--positive' : ''}`}>
+              {pulse.live ? 'Live quizzes' : hasUnits ? 'No quizzes yet' : 'No units yet'}
             </span>
           </div>
-        </figcaption>
-        {hasUnits ? (
-          <>
-            <PulseGraph pulse={pulse} focusUnit={focusUnit} hover={hover} onHover={onHover} />
-            <ul className="progress-legend">
-              <li>
-                <button type="button" className={!focusUnit ? 'is-on' : ''} onClick={() => onFocus('')}>
-                  <i style={{ background: palette.line }} />
-                  Average
-                </button>
-              </li>
-              {pulse.series.map((line) => (
-                <li key={line.name}>
-                  <button
-                    type="button"
-                    className={focusUnit === line.name ? 'is-on' : ''}
-                    onClick={() => onFocus(focusUnit === line.name ? '' : line.name)}
-                  >
-                    <i style={{ background: line.color }} />
-                    {line.name}
+          <div className="progress__info-anchor">
+            <button
+              type="button"
+              className="ui-button ui-button--ghost ui-button--sm progress__info"
+              aria-expanded={infoOpen}
+              aria-controls="progress-info-panel"
+              onClick={onInfo}
+            >
+              <InfoMark />
+              How progress works
+            </button>
+            {infoOpen ? <ProgressInfo onClose={onInfo} /> : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="ui-panel ui-stats progress__stats" aria-label="Account stats">
+        <div className="ui-stat">
+          <span className="ui-stat__label">Streak</span>
+          <span className="ui-stat__value">{stats?.streak ?? '—'}<span className="ui-stat__unit">{stats?.streak === 1 ? 'day' : 'days'}</span></span>
+        </div>
+        <div className="ui-stat">
+          <span className="ui-stat__label">XP</span>
+          <span className="ui-stat__value">{stats ? stats.total_xp.toLocaleString() : '—'}</span>
+        </div>
+        <div className="ui-stat">
+          <span className="ui-stat__label">Accuracy</span>
+          <span className="ui-stat__value">{stats ? `${stats.accuracy}%` : '—'}</span>
+        </div>
+        <div className="ui-stat">
+          <span className="ui-stat__label">Next up</span>
+          <span className="ui-stat__value progress__next">{pulse.recommended || '—'}</span>
+        </div>
+      </section>
+
+      <section className="ui-section" aria-labelledby="progress-graph-title">
+        <div className="ui-section-head">
+          <h2 className="ui-section-title" id="progress-graph-title">{course.name} mastery by session</h2>
+          <span className="ui-count">
+            {hasUnits
+              ? `${activeLine ? activeLine.name : 'Course average'} · session ${hoverIndex + 1} · ${hoverValue}%`
+              : 'Add units in Tools to start this graph'}
+          </span>
+        </div>
+        <figure className="ui-panel progress__graph">
+          {hasUnits ? (
+            <>
+              <PulseGraph pulse={pulse} focusUnit={focusUnit} hover={hover} onHover={onHover} />
+              <ul className="progress__legend" aria-label="Show a line">
+                <li>
+                  <button type="button" aria-pressed={!focusUnit} className="progress__legend-item" onClick={() => onFocus('')}>
+                    <i style={{ background: palette.line }} />
+                    Average
                   </button>
                 </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="progress-note">This course has no units yet, so there is nothing to plot.</p>
-        )}
-        {hasUnits && !pulse.live ? (
-          <p className="progress-note">Quiz these units in Tools to fill the graph.</p>
-        ) : null}
-      </figure>
+                {pulse.series.map((line) => (
+                  <li key={line.name}>
+                    <button
+                      type="button"
+                      aria-pressed={focusUnit === line.name}
+                      className="progress__legend-item"
+                      onClick={() => onFocus(focusUnit === line.name ? '' : line.name)}
+                    >
+                      <i style={{ background: line.color }} />
+                      {line.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="progress__note">This course has no units yet, so there is nothing to plot.</p>
+          )}
+          {hasUnits && !pulse.live ? (
+            <p className="progress__note">Quiz these units in Tools to fill the graph.</p>
+          ) : null}
+        </figure>
+      </section>
 
-      <section className="progress-roadmap" aria-label={`${course.name} roadmap`}>
-        <div className="progress-roadmap__head">
-          <h3>Unit roadmap</h3>
-          <p>Follow the course tone down the trail. The next unit to press is marked.</p>
+      <section className="ui-section" aria-labelledby="progress-roadmap-title">
+        <div className="ui-section-head">
+          <h2 className="ui-section-title" id="progress-roadmap-title">Unit roadmap</h2>
+          <span className="ui-count">The next unit to work on is marked.</span>
         </div>
         {hasUnits ? (
-          <ol className="progress-trail">
+          <ol className="ui-cards progress__trail">
             {pulse.units.map((unit, index) => (
               <RoadNode
                 key={unit.name}
@@ -256,12 +273,14 @@ function CourseBoard({
             ))}
           </ol>
         ) : (
-          <p className="progress-note">
-            Create units for {course.name} in <a href="#tools">Tools</a>, then they will show up here.
-          </p>
+          <div className="ui-panel">
+            <p className="progress__note">
+              Create units for {course.name} in <a className="ui-link" href="#tools">Tools</a>, then they will show up here.
+            </p>
+          </div>
         )}
       </section>
-    </article>
+    </div>
   )
 }
 
@@ -319,8 +338,8 @@ function PulseGraph({
     >
       <defs>
         <linearGradient id={`pulse-fill-${cssId(pulse.course.name)}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={mainColor} stopOpacity="0.5" />
-          <stop offset="100%" stopColor={mainColor} stopOpacity="0.03" />
+          <stop offset="0%" stopColor={mainColor} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={mainColor} stopOpacity="0" />
         </linearGradient>
       </defs>
       {ticks.map((tick) => {
@@ -369,7 +388,7 @@ function PulseGraph({
       {mark ? (
         <>
           <line className="progress-svg__hover" x1={mark.x} x2={mark.x} y1={y} y2={h - y} />
-          <circle cx={mark.x} cy={mark.y} r="6.5" fill={mainColor} stroke="#07111c" strokeWidth="3" />
+          <circle cx={mark.x} cy={mark.y} r="6.5" fill={mainColor} stroke="#ffffff" strokeWidth="3" />
         </>
       ) : null}
     </svg>
@@ -393,22 +412,27 @@ function RoadNode({
     <li>
       <button
         type="button"
-        className={`progress-node ${next ? 'is-next' : ''} ${selected ? 'is-on' : ''}`}
+        className={`ui-card progress__node${next ? ' is-next' : ''}${selected ? ' is-selected' : ''}`}
+        aria-pressed={selected}
         onClick={onSelect}
-        style={{ ['--node' as string]: color }}
       >
-        <span className="progress-node__ring" style={{ background: ring(unit.mastery, color) }}>
-          <b>{unit.mastery}</b>
+        <span className="progress__node-top">
+          <span className="progress__ring" style={{ background: ring(unit.mastery, color) }}>
+            <b>{unit.mastery}</b>
+          </span>
+          {next ? <span className="ui-badge ui-badge--accent">Next up</span> : null}
         </span>
-        <strong>{unit.name}</strong>
-        <span className={`verdict verdict--${unit.verdict}`}>{VERDICT_COPY[unit.verdict].label}</span>
-        <small>
-          {unit.attempts > 0
-            ? `${unit.correct}/${unit.attempts} · ${unit.delta >= 0 ? '+' : ''}${unit.delta} pts`
-            : unit.notes > 0
-              ? `${unit.notes} note${unit.notes === 1 ? '' : 's'} deposited`
-              : 'No quizzes yet'}
-        </small>
+        <span className="ui-card__title">{unit.name}</span>
+        <span className="progress__node-meta">
+          <span className={`ui-badge ${verdictTone(unit.verdict)}`}>{VERDICT_COPY[unit.verdict].label}</span>
+          <span className="ui-count">
+            {unit.attempts > 0
+              ? `${unit.correct}/${unit.attempts} correct · ${unit.delta >= 0 ? '+' : ''}${unit.delta} pts`
+              : unit.notes > 0
+                ? `${unit.notes} note${unit.notes === 1 ? '' : 's'} added`
+                : 'No quizzes yet'}
+          </span>
+        </span>
       </button>
     </li>
   )
@@ -426,10 +450,10 @@ function InfoMark() {
 
 function ProgressInfo({ onClose }: { onClose: () => void }) {
   return (
-    <aside id="progress-info-panel" className="progress-info-panel" role="dialog" aria-labelledby="progress-info-title">
+    <aside id="progress-info-panel" className="progress__info-panel" role="dialog" aria-labelledby="progress-info-title">
       <header>
         <h3 id="progress-info-title">How progress works</h3>
-        <button type="button" onClick={onClose} aria-label="Close progress info">
+        <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={onClose} aria-label="Close progress info">
           Close
         </button>
       </header>
@@ -469,7 +493,15 @@ function ProgressInfo({ onClose }: { onClose: () => void }) {
 }
 
 function ring(mastery: number, color: string) {
-  return `conic-gradient(${color} ${mastery * 3.6}deg, rgba(232, 223, 176, 0.14) 0deg)`
+  return `conic-gradient(${color} ${mastery * 3.6}deg, #e8edf5 0deg)`
+}
+
+function verdictTone(verdict: UnitJudgment['verdict']) {
+  if (verdict === 'sharp' || verdict === 'rising') return 'ui-badge--positive'
+  if (verdict === 'stuck') return 'ui-badge--danger'
+  if (verdict === 'slipping') return 'ui-badge--warning'
+  if (verdict === 'steady' || verdict === 'warming') return 'ui-badge--accent'
+  return ''
 }
 
 function cssId(value: string) {

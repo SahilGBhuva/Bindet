@@ -85,14 +85,14 @@ export function paletteFor(tone: string, count: number): CoursePalette {
   const [h, s] = hexToHsl(tone)
   const shifts = [0, 42, -38, 78, -72, 124]
   const units = Array.from({ length: Math.max(count, 1) }, (_, index) =>
-    hsl(h + (shifts[index] ?? index * 36), clamp(s + 18, 62, 82), 62 + (index % 3) * 4),
+    hsl(h + (shifts[index] ?? index * 36), clamp(s + 18, 62, 82), 44 + (index % 3) * 4),
   )
   return {
     tone,
-    line: hsl(h, 78, 72),
-    fill: hsla(h, 70, 58, 0.34),
-    soft: hsla(h, 60, 48, 0.2),
-    ink: hsl(h, 30, 88),
+    line: hsl(h, 74, 42),
+    fill: hsla(h, 70, 50, 0.16),
+    soft: hsla(h, 60, 48, 0.12),
+    ink: hsl(h, 40, 22),
     units,
   }
 }
