@@ -392,6 +392,16 @@
   to { opacity: 1; transform: none; }
 }
 
+/* Largest hero content is visible from the first frame (so it paints immediately) and only rises. */
+.lp-enter--solid {
+  animation-name: lp-rise-solid;
+}
+
+@keyframes lp-rise-solid {
+  from { transform: translateY(28px); }
+  to { transform: none; }
+}
+
 /* Scroll reveal */
 
 [data-reveal] {

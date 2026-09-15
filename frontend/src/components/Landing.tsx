@@ -273,10 +273,10 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
           <div className="lp-hero__inner">
             <div className="lp-hero__copy">
               <p className="lp-eyebrow lp-enter" style={{ '--i': 0 } as CSSProperties}>Notes, flashcards, quizzes, and friends in one place</p>
-              <h1 className="lp-hero__title lp-enter" style={{ '--i': 1 } as CSSProperties}>
+              <h1 className="lp-hero__title lp-enter lp-enter--solid" style={{ '--i': 1 } as CSSProperties}>
                 <span className="lp-spectrum lp-spectrum--lines">Keep your learning together.</span>
               </h1>
-              <p className="lp-hero__lead lp-enter" style={{ '--i': 2 } as CSSProperties}>
+              <p className="lp-hero__lead lp-enter lp-enter--solid" style={{ '--i': 2 } as CSSProperties}>
                 Upload your class notes and bindit turns them into flashcards, quizzes, and a mastery map for every course. Then study with friends and keep the streak going.
               </p>
               <div className="lp-hero__cta lp-enter" style={{ '--i': 3 } as CSSProperties}>
@@ -284,7 +284,7 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
                 <button className="lp-pill lp-pill--outline lp-pill--lg" type="button" onClick={onGuest}>Try it as a guest</button>
               </div>
             </div>
-            <div className="lp-hero__art lp-enter" style={{ '--i': 2 } as CSSProperties}>
+            <div className="lp-hero__art lp-enter lp-enter--solid" style={{ '--i': 2 } as CSSProperties}>
               <div className="lp-hero__halo" aria-hidden="true" />
               <img className="lp-hero__mascot" src="/bindit-mascot-cutout.webp" alt="The bindit otter mascot holding a purple binder" width="240" height="288" fetchPriority="high" />
             </div>
