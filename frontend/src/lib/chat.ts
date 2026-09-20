@@ -24,6 +24,25 @@ export type ChatAttachment = {
   size: number
 }
 
+export type ChatReadReceipt = {
+  group_id: string
+  student_id: string
+  last_read_at: string
+}
+
+export type ChatTypingState = {
+  group_id: string
+  student_id: string
+  display_name: string
+  typing_until: string
+}
+
+export type ChatUnread = {
+  group_id: string
+  unread_count: number
+  last_message_at: string | null
+}
+
 type SupabaseConfig = { supabase_url: string; supabase_anon_key: string }
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
@@ -166,6 +185,70 @@ export async function deleteGroupImage(path: string, session: AuthSession) {
   })
 }
 
+function authHeaders(config: SupabaseConfig, session: AuthSession) {
+  return { apikey: config.supabase_anon_key, Authorization: `Bearer ${session.access_token}` }
+}
+
+export async function listChatUnreads(session: AuthSession): Promise<ChatUnread[]> {
+  const config = await getConfig()
+  const response = await fetch(`${config.supabase_url}/rest/v1/rpc/get_group_chat_unread_counts`, {
+    method: 'POST',
+    headers: { ...authHeaders(config, session), 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!response.ok) return []
+  const rows = await response.json() as Array<ChatUnread & { unread_count: number | string }>
+  return rows.map((row) => ({ ...row, unread_count: Number(row.unread_count) || 0 }))
+}
+
+export async function markGroupRead(groupId: string, session: AuthSession) {
+  const config = await getConfig()
+  await fetch(`${config.supabase_url}/rest/v1/study_group_chat_reads?on_conflict=group_id,student_id`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(config, session),
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify({ group_id: groupId, student_id: session.user.id, last_read_at: new Date().toISOString() }),
+  })
+}
+
+export async function listGroupReadReceipts(groupId: string, session: AuthSession): Promise<ChatReadReceipt[]> {
+  const config = await getConfig()
+  const url = new URL(`${config.supabase_url}/rest/v1/study_group_chat_reads`)
+  url.searchParams.set('select', 'group_id,student_id,last_read_at')
+  url.searchParams.set('group_id', `eq.${groupId}`)
+  const response = await fetch(url, { headers: authHeaders(config, session) })
+  if (!response.ok) return []
+  return response.json() as Promise<ChatReadReceipt[]>
+}
+
+export async function listGroupTyping(groupId: string, session: AuthSession): Promise<ChatTypingState[]> {
+  const config = await getConfig()
+  const url = new URL(`${config.supabase_url}/rest/v1/study_group_chat_typing`)
+  url.searchParams.set('select', 'group_id,student_id,display_name,typing_until')
+  url.searchParams.set('group_id', `eq.${groupId}`)
+  url.searchParams.set('typing_until', `gt.${new Date().toISOString()}`)
+  const response = await fetch(url, { headers: authHeaders(config, session) })
+  if (!response.ok) return []
+  return response.json() as Promise<ChatTypingState[]>
+}
+
+export async function setGroupTyping(groupId: string, displayName: string, typing: boolean, session: AuthSession) {
+  const config = await getConfig()
+  const typingUntil = new Date(Date.now() + (typing ? 5000 : -1000)).toISOString()
+  await fetch(`${config.supabase_url}/rest/v1/study_group_chat_typing?on_conflict=group_id,student_id`, {
+    method: 'POST',
+    headers: {
+      ...authHeaders(config, session),
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify({ group_id: groupId, student_id: session.user.id, display_name: displayName, typing_until: typingUntil }),
+  })
+}
+
 export async function subscribeToGroupMessages(
   groupId: string,
   session: AuthSession,
@@ -221,6 +304,58 @@ export async function subscribeToGroupMessages(
     })
   }
 
+  open()
+  return () => {
+    closed = true
+    if (heartbeat) window.clearInterval(heartbeat)
+    socket?.close()
+  }
+}
+
+export async function subscribeToAllGroupMessages(
+  session: AuthSession,
+  onMessage: (message: ChatMessage) => void,
+) {
+  const config = await getConfig()
+  let closed = false
+  let socket: WebSocket | null = null
+  let heartbeat: number | null = null
+  const topic = 'realtime:public:study_group_messages'
+  const open = () => {
+    if (closed) return
+    const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
+    socket = new WebSocket(wsUrl)
+    socket.addEventListener('open', () => {
+      socket?.send(JSON.stringify({
+        topic,
+        event: 'phx_join',
+        payload: {
+          config: {
+            broadcast: { self: false },
+            presence: { key: '' },
+            postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'study_group_messages' }],
+          },
+          access_token: session.access_token,
+        },
+        ref: '1',
+      }))
+      heartbeat = window.setInterval(() => socket?.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) })), 25_000)
+    })
+    socket.addEventListener('message', (event) => {
+      try {
+        const packet = JSON.parse(String(event.data)) as { event?: string; payload?: { data?: { record?: ChatMessage } } }
+        const record = packet.payload?.data?.record
+        if (packet.event === 'postgres_changes' && record) onMessage(record)
+      } catch {
+        // Ignore malformed realtime frames.
+      }
+    })
+    socket.addEventListener('close', () => {
+      if (heartbeat) window.clearInterval(heartbeat)
+      heartbeat = null
+      if (!closed) window.setTimeout(open, 1200)
+    })
+  }
   open()
   return () => {
     closed = true

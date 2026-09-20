@@ -3,10 +3,13 @@ import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent }
 import { getStudyGroups, type StudyGroup } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import {
-  deleteGroupImage, getGroupImageUrl, listGroupMessages, sendGroupMessage,
-  subscribeToGroupMessages, uploadGroupImage, type ChatMessage,
+  deleteGroupImage, getGroupImageUrl, listChatUnreads, listGroupMessages,
+  listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
+  setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
+  uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
 import './Chat.css'
+import './ChatEnhancements.css'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
@@ -59,18 +62,32 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState(false)
+  const [unreads, setUnreads] = useState<Record<string, number>>({})
+  const [receipts, setReceipts] = useState<ChatReadReceipt[]>([])
+  const [typingUsers, setTypingUsers] = useState<ChatTypingState[]>([])
+  const [toast, setToast] = useState<{ groupId: string; groupName: string; preview: string } | null>(null)
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepth = useRef(0)
+  const activeGroupIdRef = useRef('')
+  const typingTimerRef = useRef<number | null>(null)
+  const lastTypingSignalRef = useRef(0)
   const activeGroup = useMemo(() => groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null, [groups, activeGroupId])
+  const ownDisplayName = activeGroup?.members.find((member) => member.student_id === session?.user.id)?.display_name || session?.user.user_metadata?.username || 'You'
+
+  useEffect(() => { activeGroupIdRef.current = activeGroup?.id || '' }, [activeGroup?.id])
 
   useEffect(() => {
     if (!session) { setLoading(false); return }
     setLoading(true)
     void getStudyGroups(session.access_token, true)
-      .then((next) => { setGroups(next); setActiveGroupId((current) => current || next[0]?.id || '') })
+      .then((next) => {
+        setGroups(next); setActiveGroupId((current) => current || next[0]?.id || '')
+        return listChatUnreads(session)
+      })
+      .then((rows) => setUnreads(Object.fromEntries(rows.map((row) => [row.group_id, row.unread_count]))))
       .catch(() => setStatus('Could not load your study groups.'))
       .finally(() => setLoading(false))
   }, [session])
@@ -80,13 +97,78 @@ export function Chat({ session }: { session: AuthSession | null }) {
     let stop = () => {}
     let cancelled = false
     setStatus('')
-    void listGroupMessages(activeGroup.id, session)
-      .then((rows) => { if (!cancelled) setMessages(rows) })
+    void Promise.all([listGroupMessages(activeGroup.id, session), listGroupReadReceipts(activeGroup.id, session), listGroupTyping(activeGroup.id, session)])
+      .then(([rows, nextReceipts, nextTyping]) => {
+        if (cancelled) return
+        setMessages(rows); setReceipts(nextReceipts); setTypingUsers(nextTyping)
+        setUnreads((current) => ({ ...current, [activeGroup.id]: 0 }))
+        void markGroupRead(activeGroup.id, session)
+      })
       .catch((error) => { if (!cancelled) setStatus(error instanceof Error ? error.message : 'Could not load this chat.') })
-    void subscribeToGroupMessages(activeGroup.id, session, (message) => setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]))
+    void subscribeToGroupMessages(activeGroup.id, session, (message) => {
+      setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message])
+      if (document.visibilityState === 'visible') void markGroupRead(activeGroup.id, session)
+    })
       .then((unsubscribe) => { if (cancelled) unsubscribe(); else stop = unsubscribe })
+    return () => {
+      cancelled = true; stop(); setTypingUsers([]); setReceipts([])
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current)
+      void setGroupTyping(activeGroup.id, ownDisplayName, false, session)
+    }
+  }, [session, activeGroup, ownDisplayName])
+
+  useEffect(() => {
+    if (!session || !activeGroup) return
+    let cancelled = false
+    const refreshPresence = () => {
+      void Promise.all([listGroupReadReceipts(activeGroup.id, session), listGroupTyping(activeGroup.id, session)])
+        .then(([nextReceipts, nextTyping]) => {
+          if (!cancelled) { setReceipts(nextReceipts); setTypingUsers(nextTyping) }
+        })
+    }
+    const timer = window.setInterval(refreshPresence, 1800)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [session, activeGroup])
+
+  useEffect(() => {
+    if (!session || !groups.length) return
+    let stop = () => {}
+    let cancelled = false
+    void subscribeToAllGroupMessages(session, (message) => {
+      if (message.sender_id === session.user.id) return
+      if (message.group_id === activeGroupIdRef.current && document.visibilityState === 'visible') return
+      setUnreads((current) => ({ ...current, [message.group_id]: (current[message.group_id] || 0) + 1 }))
+      const group = groups.find((item) => item.id === message.group_id)
+      const sender = group?.members.find((member) => member.student_id === message.sender_id)?.display_name || 'A group member'
+      setToast({ groupId: message.group_id, groupName: group?.name || 'Study group', preview: message.body || `${sender} shared an image` })
+    }).then((unsubscribe) => { if (cancelled) unsubscribe(); else stop = unsubscribe })
     return () => { cancelled = true; stop() }
-  }, [session, activeGroup?.id])
+  }, [session, groups])
+
+  useEffect(() => {
+    if (!session || !activeGroup) return
+    const markVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      setUnreads((current) => ({ ...current, [activeGroup.id]: 0 }))
+      void markGroupRead(activeGroup.id, session)
+    }
+    document.addEventListener('visibilitychange', markVisible)
+    return () => document.removeEventListener('visibilitychange', markVisible)
+  }, [session, activeGroup])
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 4500)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      setTypingUsers((current) => current.filter((item) => new Date(item.typing_until).getTime() > now))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: messages.length > 1 ? 'smooth' : 'auto' }) }, [messages.length, activeGroupId])
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
@@ -104,6 +186,20 @@ export function Chat({ session }: { session: AuthSession | null }) {
   function clearAttachment() {
     setAttachment(null); setPreviewUrl(''); setUploadProgress(0)
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  function signalTyping(nextDraft: string) {
+    setDraft(nextDraft)
+    if (!session || !activeGroup) return
+    const now = Date.now()
+    if (nextDraft && now - lastTypingSignalRef.current > 1800) {
+      lastTypingSignalRef.current = now
+      void setGroupTyping(activeGroup.id, ownDisplayName, true, session)
+    }
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current)
+    typingTimerRef.current = window.setTimeout(() => {
+      void setGroupTyping(activeGroup.id, ownDisplayName, false, session)
+    }, 2500)
   }
 
   function onDragEnter(event: DragEvent) {
@@ -137,7 +233,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
       uploadedPath = uploaded?.path ?? ''
       const message = await sendGroupMessage(activeGroup.id, body, session, uploaded)
       setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message])
-      setDraft(''); clearAttachment()
+      setDraft(''); clearAttachment(); void setGroupTyping(activeGroup.id, ownDisplayName, false, session)
     } catch (error) {
       if (uploadedPath) void deleteGroupImage(uploadedPath, session)
       setUploadProgress(0)
@@ -153,12 +249,18 @@ export function Chat({ session }: { session: AuthSession | null }) {
   if (loading) return <section className="chat-page chat-empty"><div className="chat-loader" /><p>Opening your chats…</p></section>
   if (!groups.length) return <section className="chat-page chat-empty"><h1>No chats yet</h1><p>Create or join a study group first. Each group gets its own private chat.</p><a href="#profile">Go to study groups</a></section>
 
+  const activeTyping = typingUsers.filter((item) => item.student_id !== session.user.id)
+  const lastOwnMessage = [...messages].reverse().find((message) => message.sender_id === session.user.id)
+  const seenBy = lastOwnMessage
+    ? receipts.filter((receipt) => receipt.student_id !== session.user.id && new Date(receipt.last_read_at) >= new Date(lastOwnMessage.created_at)).length
+    : 0
+
   return (
     <section className={`chat-page ${dragging ? 'is-dragging' : ''}`} aria-label="Study group chat" onDragEnter={onDragEnter} onDragOver={(event) => event.preventDefault()} onDragLeave={onDragLeave} onDrop={onDrop}>
       <aside className="chat-list">
         <div className="chat-list__heading"><span className="chat-list__eyebrow">Workspace</span><h1>Messages</h1><p>{groups.length} active group{groups.length === 1 ? '' : 's'}</p></div>
         <div className="chat-list__groups">
-          {groups.map((group, index) => <button key={group.id} className={group.id === activeGroup?.id ? 'is-active' : ''} onClick={() => setActiveGroupId(group.id)}><span className={`chat-group-mark tone-${index % 4}`}>{group.name.slice(0, 1).toUpperCase()}<i /></span><span><strong>{group.name}</strong><small>{group.members.length} member{group.members.length === 1 ? '' : 's'}</small></span><i className="chat-list__chevron">›</i></button>)}
+          {groups.map((group, index) => <button key={group.id} className={group.id === activeGroup?.id ? 'is-active' : ''} onClick={() => { setActiveGroupId(group.id); setUnreads((current) => ({ ...current, [group.id]: 0 })) }}><span className={`chat-group-mark tone-${index % 4}`}>{group.name.slice(0, 1).toUpperCase()}<i /></span><span><strong>{group.name}</strong><small>{group.members.length} member{group.members.length === 1 ? '' : 's'}</small></span>{unreads[group.id] ? <b className="chat-unread" aria-label={`${unreads[group.id]} unread messages`}>{unreads[group.id] > 99 ? '99+' : unreads[group.id]}</b> : <i className="chat-list__chevron">›</i>}</button>)}
         </div>
         <div className="chat-list__privacy"><span>⌁</span><div><strong>Private by default</strong><small>Only group members can see these messages and images.</small></div></div>
       </aside>
@@ -178,8 +280,9 @@ export function Chat({ session }: { session: AuthSession | null }) {
             const grouped = previous?.sender_id === message.sender_id && new Date(message.created_at).getTime() - new Date(previous.created_at).getTime() < 5 * 60 * 1000
             const member = activeGroup?.members.find((item) => item.student_id === message.sender_id)
             const name = own ? 'You' : message.sender?.display_name || member?.display_name || 'Group member'
-            return <article key={message.id} className={`chat-message ${own ? 'is-own' : ''} ${grouped ? 'is-grouped' : ''}`}>{!grouped ? <div className="chat-avatar">{name.slice(0, 1).toUpperCase()}</div> : <div className="chat-avatar is-spacer" />}<div className="chat-message__content">{!grouped ? <p><strong>{name}</strong><time>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></p> : null}<div className={`chat-bubble ${message.attachment_path ? 'has-image' : ''}`}>{message.attachment_path ? <MessageImage message={message} session={session} /> : null}{message.body ? <span>{message.body}</span> : null}</div></div></article>
+            return <article key={message.id} className={`chat-message ${own ? 'is-own' : ''} ${grouped ? 'is-grouped' : ''}`}>{!grouped ? <div className="chat-avatar">{name.slice(0, 1).toUpperCase()}</div> : <div className="chat-avatar is-spacer" />}<div className="chat-message__content">{!grouped ? <p><strong>{name}</strong><time>{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></p> : null}<div className={`chat-bubble ${message.attachment_path ? 'has-image' : ''}`}>{message.attachment_path ? <MessageImage message={message} session={session} /> : null}{message.body ? <span>{message.body}</span> : null}</div>{message.id === lastOwnMessage?.id ? <small className="chat-seen">{seenBy ? `Seen by ${seenBy}` : 'Delivered'}</small> : null}</div></article>
           })}
+          {activeTyping.length ? <div className="chat-typing" role="status"><span><i /><i /><i /></span><p>{activeTyping.length === 1 ? `${activeTyping[0].display_name} is typing` : `${activeTyping.length} people are typing`}</p></div> : null}
           <div ref={bottomRef} />
         </div>
 
@@ -188,13 +291,14 @@ export function Chat({ session }: { session: AuthSession | null }) {
           <form className="chat-composer" onSubmit={submit}>
             <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={(event: ChangeEvent<HTMLInputElement>) => chooseImage(event.target.files?.[0])} hidden />
             <button className="chat-attach" type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach an image" title="Attach an image"><PaperclipIcon /></button>
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} onPaste={onPaste} placeholder={activeGroup ? `Message ${activeGroup.name}` : 'Message'} maxLength={2000} rows={1} onKeyDown={onComposerKeyDown} />
+            <textarea value={draft} onChange={(event) => signalTyping(event.target.value)} onPaste={onPaste} placeholder={activeGroup ? `Message ${activeGroup.name}` : 'Message'} maxLength={2000} rows={1} onKeyDown={onComposerKeyDown} />
             <span className="chat-composer__hint">Drop, paste, or attach a photo</span>
             <button className="chat-send" disabled={(!draft.trim() && !attachment) || sending} aria-label={sending ? 'Sending message' : 'Send message'}>{sending ? <i /> : <SendIcon />}</button>
           </form>
           {status ? <p className="chat-status" role="status">{status}</p> : null}
         </div>
         {dragging ? <div className="chat-drop-overlay"><div><ImageIcon /><strong>Drop your image here</strong><span>JPG, PNG, WebP, or GIF · up to 10 MB</span></div></div> : null}
+        {toast ? <button className="chat-toast" type="button" onClick={() => { setActiveGroupId(toast.groupId); setToast(null) }}><span>{toast.groupName.slice(0, 1).toUpperCase()}</span><div><strong>{toast.groupName}</strong><p>{toast.preview}</p></div><i>Open</i></button> : null}
       </div>
     </section>
   )
