@@ -4,8 +4,12 @@ export type ChatMessage = {
   id: string
   group_id: string
   sender_id: string
-  body: string
+  body: string | null
   created_at: string
+  attachment_path?: string | null
+  attachment_name?: string | null
+  attachment_type?: string | null
+  attachment_size?: number | null
   sender?: {
     username: string
     display_name: string
@@ -13,9 +17,17 @@ export type ChatMessage = {
   }
 }
 
+export type ChatAttachment = {
+  path: string
+  name: string
+  type: string
+  size: number
+}
+
 type SupabaseConfig = { supabase_url: string; supabase_anon_key: string }
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
+const CHAT_BUCKET = 'study-group-images'
 let configPromise: Promise<SupabaseConfig> | null = null
 
 function getConfig() {
@@ -28,24 +40,44 @@ function getConfig() {
 
 export async function listGroupMessages(groupId: string, session: AuthSession): Promise<ChatMessage[]> {
   const config = await getConfig()
-  const url = new URL(`${config.supabase_url}/rest/v1/study_group_messages`)
-  url.searchParams.set('select', 'id,group_id,sender_id,body,created_at,sender:profiles!study_group_messages_sender_id_fkey(username,display_name,avatar_path)')
-  url.searchParams.set('group_id', `eq.${groupId}`)
-  url.searchParams.set('order', 'created_at.asc')
-  url.searchParams.set('limit', '200')
-  const response = await fetch(url, {
-    headers: {
-      apikey: config.supabase_anon_key,
-      Authorization: `Bearer ${session.access_token}`,
-    },
-  })
+  const request = (select: string) => {
+    const url = new URL(`${config.supabase_url}/rest/v1/study_group_messages`)
+    url.searchParams.set('select', select)
+    url.searchParams.set('group_id', `eq.${groupId}`)
+    url.searchParams.set('order', 'created_at.asc')
+    url.searchParams.set('limit', '200')
+    return fetch(url, {
+      headers: {
+        apikey: config.supabase_anon_key,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    })
+  }
+  let response = await request('id,group_id,sender_id,body,created_at,attachment_path,attachment_name,attachment_type,attachment_size,sender:profiles!study_group_messages_sender_id_fkey(username,display_name,avatar_path)')
+  if (!response.ok && response.status === 400) {
+    response = await request('id,group_id,sender_id,body,created_at,sender:profiles!study_group_messages_sender_id_fkey(username,display_name,avatar_path)')
+  }
   if (!response.ok) throw new Error('Could not load this chat.')
   return response.json() as Promise<ChatMessage[]>
 }
 
-export async function sendGroupMessage(groupId: string, body: string, session: AuthSession): Promise<ChatMessage> {
+export async function sendGroupMessage(groupId: string, body: string, session: AuthSession, attachment?: ChatAttachment): Promise<ChatMessage> {
   const config = await getConfig()
-  const response = await fetch(`${config.supabase_url}/rest/v1/study_group_messages?select=id,group_id,sender_id,body,created_at`, {
+  const select = attachment
+    ? 'id,group_id,sender_id,body,created_at,attachment_path,attachment_name,attachment_type,attachment_size'
+    : 'id,group_id,sender_id,body,created_at'
+  const payload: Record<string, string | number | null> = {
+    group_id: groupId,
+    sender_id: session.user.id,
+    body: body.trim() || null,
+  }
+  if (attachment) {
+    payload.attachment_path = attachment.path
+    payload.attachment_name = attachment.name
+    payload.attachment_type = attachment.type
+    payload.attachment_size = attachment.size
+  }
+  const response = await fetch(`${config.supabase_url}/rest/v1/study_group_messages?select=${select}`, {
     method: 'POST',
     headers: {
       apikey: config.supabase_anon_key,
@@ -53,7 +85,7 @@ export async function sendGroupMessage(groupId: string, body: string, session: A
       'Content-Type': 'application/json',
       Prefer: 'return=representation',
     },
-    body: JSON.stringify({ group_id: groupId, sender_id: session.user.id, body: body.trim() }),
+    body: JSON.stringify(payload),
   })
   if (!response.ok) {
     const error = await response.json().catch(() => null) as { message?: string } | null
@@ -61,6 +93,77 @@ export async function sendGroupMessage(groupId: string, body: string, session: A
   }
   const rows = await response.json() as ChatMessage[]
   return rows[0]
+}
+
+function storagePath(path: string) {
+  return path.split('/').map(encodeURIComponent).join('/')
+}
+
+export function uploadGroupImage(
+  groupId: string,
+  file: File,
+  session: AuthSession,
+  onProgress: (progress: number) => void,
+): Promise<ChatAttachment> {
+  return getConfig().then((config) => new Promise((resolve, reject) => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'image'
+    const path = `${groupId}/${session.user.id}/${crypto.randomUUID()}-${safeName}`
+    const request = new XMLHttpRequest()
+    request.open('POST', `${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`)
+    request.setRequestHeader('apikey', config.supabase_anon_key)
+    request.setRequestHeader('Authorization', `Bearer ${session.access_token}`)
+    request.setRequestHeader('Content-Type', file.type)
+    request.setRequestHeader('x-upsert', 'false')
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100))
+    })
+    request.addEventListener('load', () => {
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(100)
+        resolve({ path, name: file.name, type: file.type, size: file.size })
+        return
+      }
+      let message = 'The image could not be uploaded.'
+      try {
+        const payload = JSON.parse(request.responseText) as { message?: string; error?: string }
+        message = payload.message || payload.error || message
+      } catch {
+        // Keep the friendly fallback for non-JSON storage errors.
+      }
+      reject(new Error(message))
+    })
+    request.addEventListener('error', () => reject(new Error('The upload was interrupted. Check your connection and try again.')))
+    request.send(file)
+  }))
+}
+
+export async function getGroupImageUrl(path: string, session: AuthSession) {
+  const config = await getConfig()
+  const response = await fetch(`${config.supabase_url}/storage/v1/object/sign/${CHAT_BUCKET}/${storagePath(path)}`, {
+    method: 'POST',
+    headers: {
+      apikey: config.supabase_anon_key,
+      Authorization: `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ expiresIn: 3600 }),
+  })
+  if (!response.ok) throw new Error('Image unavailable')
+  const payload = await response.json() as { signedURL?: string; signedUrl?: string }
+  const signedPath = payload.signedURL || payload.signedUrl
+  if (!signedPath) throw new Error('Image unavailable')
+  return signedPath.startsWith('http') ? signedPath : `${config.supabase_url}/storage/v1${signedPath}`
+}
+
+export async function deleteGroupImage(path: string, session: AuthSession) {
+  const config = await getConfig()
+  await fetch(`${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`, {
+    method: 'DELETE',
+    headers: {
+      apikey: config.supabase_anon_key,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+  })
 }
 
 export async function subscribeToGroupMessages(
