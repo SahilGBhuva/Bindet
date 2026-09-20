@@ -19,7 +19,6 @@ import './landing/sections.css'
 type LandingProps = {
   onSignUp: (reason?: string) => void
   onLogIn: () => void
-  onGuest: () => void
 }
 
 /* The quiet paper ground behind the auth screens. */
@@ -39,9 +38,9 @@ const APP_MOBILE_BREAKPOINT = 860
  * The hero artwork: the real app pages running on sandboxed demo data, scaled to
  * fit one large surface that rises from under the fold. Interactive on larger
  * screens; a static render on phones, where taps while scrolling would misfire
- * and the real app is one tap away as a guest.
+ * and account creation stays one tap away.
  */
-function HeroProduct({ onLocked, onGuest }: { onLocked: (action: string) => void; onGuest: () => void }) {
+function HeroProduct({ onLocked }: { onLocked: (action: string) => void }) {
   const root = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.5)
@@ -88,7 +87,7 @@ function HeroProduct({ onLocked, onGuest }: { onLocked: (action: string) => void
         <figcaption className="lp-product__strip">
           <span className="lp-product__live"><i aria-hidden="true" />{phone ? 'A live render of the app' : 'Live demo'}</span>
           {phone ? (
-            <button className="lp-textlink" type="button" onClick={onGuest}>Try the real thing as a guest →</button>
+            <button className="lp-textlink" type="button" onClick={() => onLocked('Open the full app')}>Sign up to continue →</button>
           ) : (
             <span className="lp-product__hint">This is the real app. Switch pages, flip a flashcard, answer a quiz. Nothing is saved.</span>
           )}
@@ -103,7 +102,7 @@ function HeroProduct({ onLocked, onGuest }: { onLocked: (action: string) => void
   )
 }
 
-export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
+export function Landing({ onSignUp, onLogIn }: LandingProps) {
   const root = useRef<HTMLDivElement>(null)
   useReveal(root)
   const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
@@ -138,10 +137,10 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
             </p>
             <div className="lp-hero__cta">
               <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Get started</button>
-              <button className="lp-btn lp-btn--quiet lp-btn--lg" type="button" onClick={onGuest}>Try it as a guest</button>
+              <button className="lp-btn lp-btn--quiet lp-btn--lg" type="button" onClick={onLogIn}>Log in</button>
             </div>
           </div>
-          <HeroProduct onLocked={(action) => onSignUp(action)} onGuest={onGuest} />
+          <HeroProduct onLocked={(action) => onSignUp(action)} />
         </section>
 
         <section className="lp-scattered" aria-labelledby="lp-scattered-title">
@@ -166,7 +165,7 @@ export function Landing({ onSignUp, onLogIn, onGuest }: LandingProps) {
           </h2>
           <div className="lp-final__actions" data-reveal>
             <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Get started</button>
-            <button className="lp-textlink" type="button" onClick={onGuest}>or try it as a guest →</button>
+            <button className="lp-textlink" type="button" onClick={onLogIn}>Already have an account? Log in →</button>
           </div>
           <img className="lp-final__otter" data-reveal src="/bindit-mascot-cutout.webp" alt="The bindit otter carrying a purple binder" width="240" height="288" loading="lazy" decoding="async" />
         </section>

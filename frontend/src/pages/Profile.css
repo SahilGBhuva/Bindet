@@ -1,19 +1,5 @@
 /* Profile: identity, friends and study groups. Shared building blocks live in styles/ui.css. */
 
-.profile__guest {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-6);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
-  border-color: var(--color-accent);
-  background: var(--color-accent-subtle);
-  color: var(--color-text);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
 .profile__header {
   align-items: center;
 }
@@ -478,12 +464,6 @@
 }
 
 @media (max-width: 720px) {
-  .profile__guest {
-    flex-direction: column;
-    align-items: flex-start;
-    padding: var(--space-4);
-  }
-
   .profile__header .ui-button {
     align-self: flex-start;
   }

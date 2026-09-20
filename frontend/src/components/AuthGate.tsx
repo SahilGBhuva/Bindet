@@ -15,7 +15,6 @@ import './GuestAuth.css'
 
 type Mode = 'login' | 'signup'
 type GateView = 'landing' | 'auth' | 'confirm'
-const GUEST_KEY = 'bindit-guest-mode'
 const RESEND_SECS = 60
 
 function AuthBrand() {
@@ -30,7 +29,6 @@ function AuthBrand() {
 export function AuthGate({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(() => consumeAuthRedirectSession() ?? loadAuthSession())
   const [loading, setLoading] = useState(Boolean(session))
-  const [guestMode, setGuestMode] = useState(() => localStorage.getItem(GUEST_KEY) === '1')
   const [view, setView] = useState<GateView>('landing')
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
@@ -44,6 +42,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [resendIn, setResendIn] = useState(0)
   // Why sign-up opened, when it came from a locked action in the landing page demo.
   const [signupReason, setSignupReason] = useState('')
+
+  useEffect(() => {
+    localStorage.removeItem('bindit-guest-mode')
+  }, [])
 
   const passwordScore = useMemo(() => {
     let score = 0
@@ -88,13 +90,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setShowPassword(false)
   }
 
-  function continueAsGuest() {
-    localStorage.setItem(GUEST_KEY, '1')
-    setGuestMode(true)
-    setError('')
-    setMessage('')
-  }
-
   function startConfirm(nextEmail: string, note: string) {
     setPendingEmail(nextEmail)
     setCode('')
@@ -131,7 +126,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!session && !guestMode) {
+  if (!session) {
     async function submit(event: FormEvent) {
       event.preventDefault()
       setBusy(true)
@@ -282,16 +277,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 {busy ? 'Working…' : mode === 'login' ? 'Log in' : 'Get started'}
               </button>
             </form>
-            <div className="auth-guest-separator"><span>or</span></div>
-            <button className="lp-btn lp-btn--quiet lp-btn--lg auth-guest" type="button" disabled={busy} onClick={continueAsGuest}>
-              Continue as guest
-            </button>
           </section>
         </main>
       )
     }
 
-    return <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} onGuest={continueAsGuest} />
+    return <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
   }
 
   return <AuthContext.Provider value={{ session, setSession }}>{children}</AuthContext.Provider>

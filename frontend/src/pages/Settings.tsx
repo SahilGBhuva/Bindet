@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { getAccountProfile, saveAccountProfile, type Profile } from '../lib/api'
 import { requestPasswordReset, signIn, signOut, signUp, type AuthSession } from '../lib/auth'
-import { getStudentId } from '../lib/session'
 import './Settings.css'
 
 const GOALS = [
@@ -87,11 +86,10 @@ export function Settings({ session, onSession }: SettingsProps) {
       const saved = await saveAccountProfile(session.access_token, {
         username: username.toLowerCase(),
         display_name: displayName,
-        guest_id: getStudentId(),
         daily_goal: dailyGoal,
       })
       setProfile(saved)
-      setMessage('Profile saved. Guest progress is claimed at most once.')
+      setMessage('Profile saved.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not save your profile.')
     } finally {
@@ -102,7 +100,7 @@ export function Settings({ session, onSession }: SettingsProps) {
   function logout() {
     signOut()
     onSession(null)
-    setMessage('Signed out. You can keep using bindit as a guest.')
+    setMessage('Signed out.')
   }
 
   const authTitle = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create an account' : 'Reset your password'
@@ -194,7 +192,7 @@ export function Settings({ session, onSession }: SettingsProps) {
               <div className="settings__footer">
                 {message ? <p className="settings__status" role="status">{message}</p> : null}
                 <button className="ui-button ui-button--primary" type="submit" disabled={busy}>
-                  {busy ? 'Saving…' : profile ? 'Update profile' : 'Save profile and claim guest progress'}
+                  {busy ? 'Saving…' : profile ? 'Update profile' : 'Save profile'}
                 </button>
               </div>
             </form>
@@ -221,7 +219,7 @@ export function Settings({ session, onSession }: SettingsProps) {
               <div className="settings__field">
                 <div className="settings__field-text">
                   <span className="settings__label">Sign out</span>
-                  <span className="settings__hint">You can keep using bindit as a guest on this device.</span>
+                  <span className="settings__hint">You’ll need to log in again to use bindit.</span>
                 </div>
                 <button className="ui-button" type="button" onClick={logout}>Sign out</button>
               </div>

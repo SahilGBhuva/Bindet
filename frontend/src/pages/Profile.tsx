@@ -302,19 +302,12 @@ export function Profile({ session, onError }: ProfileProps) {
   const { level, inLevel, toNext } = xpLevel(totalXp)
   const loginStreak = profile?.login_streak ?? stats?.login_streak ?? 0
   const unitStats = stats?.topics ?? []
-  const username = profile?.username ?? 'Guest'
+  const username = profile?.username ?? 'Learner'
   const tag = profile?.friend_code ?? '—'
   const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0] ?? null
 
   return (
     <div className="ui-page profile">
-      {!session ? (
-        <div className="ui-panel profile__guest" role="note">
-          <span>Log in to save your progress and get a friend code.</span>
-          <a className="ui-button ui-button--primary ui-button--sm" href="#settings">Log in</a>
-        </div>
-      ) : null}
-
       <header className="ui-page-header profile__header">
         <div className="profile__identity">
           <AvatarControl onError={onError} />

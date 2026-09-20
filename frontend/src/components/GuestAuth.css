@@ -251,29 +251,8 @@
   color: var(--color-green-text);
 }
 
-.auth-submit,
-.auth-guest {
+.auth-submit {
   width: 100%;
-}
-
-.auth-guest-separator {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin: var(--space-5) 0 var(--space-4);
-  color: var(--color-text-tertiary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.auth-guest-separator::before,
-.auth-guest-separator::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--color-border);
 }
 
 .auth-links {

@@ -290,7 +290,7 @@ export function recordDailyLogin(studentId: string, accessToken?: string) {
 
 export function saveAccountProfile(
   accessToken: string,
-  profile: { username: string; display_name: string; guest_id: string; daily_goal?: number; avatar_path?: string },
+  profile: { username: string; display_name: string; guest_id?: string; daily_goal?: number; avatar_path?: string },
 ) {
   return request<Profile>('/api/account/profile', {
     method: 'PUT',
