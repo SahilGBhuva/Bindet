@@ -11,6 +11,9 @@
 .sheet {
   position: relative;
   min-width: 0;
+  min-height: 100vh;
+  overflow: clip;
+  animation: sheet-enter 180ms cubic-bezier(.2,0,0,1);
 }
 .sheet.is-tools { --page-accent: var(--accent-tools); }
 .sheet.is-progress { --page-accent: var(--accent-progress); }
@@ -35,6 +38,8 @@
   text-align: center;
 }
 
+.app-skeleton{width:min(1180px,100%);margin:0 auto;padding:38px 34px}.app-skeleton>span{display:block;width:230px;height:32px;margin-bottom:28px;border-radius:9px;background:#e8e8ec;animation:skeleton-pulse 1.2s ease-in-out infinite}.app-skeleton>div{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:25px}.app-skeleton i{display:block;height:92px;border-radius:14px;background:#ececef;animation:skeleton-pulse 1.2s ease-in-out infinite}.app-skeleton>section{display:grid;grid-template-columns:1fr 1fr;gap:14px}.app-skeleton>section i{height:210px}.app-skeleton i:nth-child(2){animation-delay:100ms}.app-skeleton i:nth-child(3){animation-delay:200ms}.app-skeleton i:nth-child(4){animation-delay:300ms}@keyframes skeleton-pulse{0%,100%{opacity:.55}50%{opacity:1}}@keyframes sheet-enter{from{opacity:.72;transform:translateY(2px)}}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -44,4 +49,8 @@
   }
 
   .app-shell > .sheet { min-width: 0; }
+  .sheet{min-height:calc(100vh - 94px)}
+  .app-skeleton{padding:25px 18px}.app-skeleton>div,.app-skeleton>section{grid-template-columns:1fr}
 }
+
+@media (prefers-reduced-motion: reduce){.sheet{animation:none}.app-skeleton i,.app-skeleton>span{animation:none}}
