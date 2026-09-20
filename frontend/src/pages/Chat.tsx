@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ClipboardEvent, DragEvent, FormEvent, KeyboardEvent } from 'react'
-import { getStudyGroups, type StudyGroup } from '../lib/api'
+import { getCachedStudyGroups, getStudyGroups, type StudyGroup } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import {
-  deleteGroupImage, getGroupImageUrl, listChatUnreads, listGroupMessages,
+  deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
   setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
@@ -53,8 +53,9 @@ function validateImage(file: File) {
 }
 
 export function Chat({ session }: { session: AuthSession | null }) {
-  const [groups, setGroups] = useState<StudyGroup[]>([])
-  const [activeGroupId, setActiveGroupId] = useState('')
+  const initialGroups = session ? getCachedStudyGroups(session.access_token) ?? [] : []
+  const [groups, setGroups] = useState<StudyGroup[]>(initialGroups)
+  const [activeGroupId, setActiveGroupId] = useState(initialGroups[0]?.id ?? '')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [attachment, setAttachment] = useState<File | null>(null)
@@ -67,7 +68,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const [typingUsers, setTypingUsers] = useState<ChatTypingState[]>([])
   const [toast, setToast] = useState<{ groupId: string; groupName: string; preview: string } | null>(null)
   const [status, setStatus] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initialGroups.length)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragDepth = useRef(0)
@@ -81,15 +82,23 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   useEffect(() => {
     if (!session) { setLoading(false); return }
-    setLoading(true)
-    void getStudyGroups(session.access_token, true)
+    const cached = getCachedStudyGroups(session.access_token)
+    if (cached?.length) {
+      setGroups(cached)
+      setActiveGroupId((current) => current || cached[0]?.id || '')
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+    void getStudyGroups(session.access_token)
       .then((next) => {
         setGroups(next); setActiveGroupId((current) => current || next[0]?.id || '')
-        return listChatUnreads(session)
       })
-      .then((rows) => setUnreads(Object.fromEntries(rows.map((row) => [row.group_id, row.unread_count]))))
       .catch(() => setStatus('Could not load your study groups.'))
       .finally(() => setLoading(false))
+    void listChatUnreads(session)
+      .then((rows) => setUnreads(Object.fromEntries(rows.map((row) => [row.group_id, row.unread_count]))))
+      .catch(() => undefined)
   }, [session])
 
   useEffect(() => {
@@ -97,14 +106,20 @@ export function Chat({ session }: { session: AuthSession | null }) {
     let stop = () => {}
     let cancelled = false
     setStatus('')
-    void Promise.all([listGroupMessages(activeGroup.id, session), listGroupReadReceipts(activeGroup.id, session), listGroupTyping(activeGroup.id, session)])
-      .then(([rows, nextReceipts, nextTyping]) => {
+    setMessages(getCachedGroupMessages(activeGroup.id, session) ?? [])
+    void listGroupMessages(activeGroup.id, session)
+      .then((rows) => {
         if (cancelled) return
-        setMessages(rows); setReceipts(nextReceipts); setTypingUsers(nextTyping)
+        setMessages(rows)
         setUnreads((current) => ({ ...current, [activeGroup.id]: 0 }))
         void markGroupRead(activeGroup.id, session)
       })
       .catch((error) => { if (!cancelled) setStatus(error instanceof Error ? error.message : 'Could not load this chat.') })
+    void Promise.all([listGroupReadReceipts(activeGroup.id, session), listGroupTyping(activeGroup.id, session)])
+      .then(([nextReceipts, nextTyping]) => {
+        if (!cancelled) { setReceipts(nextReceipts); setTypingUsers(nextTyping) }
+      })
+      .catch(() => undefined)
     void subscribeToGroupMessages(activeGroup.id, session, (message) => {
       setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message])
       if (document.visibilityState === 'visible') void markGroupRead(activeGroup.id, session)

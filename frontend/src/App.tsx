@@ -3,8 +3,9 @@ import { AuthGate } from './components/AuthGate'
 import { CommandPalette } from './components/CommandPalette'
 import { useAuth } from './lib/AuthContext'
 import { SCREENS, SiteSidebar, type Screen } from './lib/SiteSidebar'
-import { recordDailyLogin } from './lib/api'
+import { getStudyGroups, recordDailyLogin } from './lib/api'
 import { getStudentId } from './lib/session'
+import { Chat } from './pages/Chat'
 import { Home } from './pages/Home'
 import './App.css'
 
@@ -12,7 +13,6 @@ const Tools = lazy(() => import('./pages/Tools').then((module) => ({ default: mo
 const Progress = lazy(() => import('./pages/Progress').then((module) => ({ default: module.Progress })))
 const Games = lazy(() => import('./pages/Games').then((module) => ({ default: module.Games })))
 const Goals = lazy(() => import('./pages/Goals').then((module) => ({ default: module.Goals })))
-const Chat = lazy(() => import('./pages/Chat').then((module) => ({ default: module.Chat })))
 const Profile = lazy(() => import('./pages/Profile').then((module) => ({ default: module.Profile })))
 const Settings = lazy(() => import('./pages/Settings').then((module) => ({ default: module.Settings })))
 const More = lazy(() => import('./pages/More').then((module) => ({ default: module.More })))
@@ -52,6 +52,18 @@ function AppShell() {
     const studentId = session?.user.id ?? getStudentId()
     void recordDailyLogin(studentId, session?.access_token).catch(() => undefined)
   }, [session?.user.id, session?.access_token])
+
+  useEffect(() => {
+    if (!session?.access_token) return
+    const warmChat = () => { void getStudyGroups(session.access_token).catch(() => undefined) }
+    const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void) => number; cancelIdleCallback?: (handle: number) => void }
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(warmChat)
+      return () => idleWindow.cancelIdleCallback?.(handle)
+    }
+    const handle = window.setTimeout(warmChat, 350)
+    return () => window.clearTimeout(handle)
+  }, [session?.access_token])
 
   return (
     <div className="app-shell">

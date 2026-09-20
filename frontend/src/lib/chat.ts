@@ -48,6 +48,19 @@ type SupabaseConfig = { supabase_url: string; supabase_anon_key: string }
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 const CHAT_BUCKET = 'study-group-images'
 let configPromise: Promise<SupabaseConfig> | null = null
+const messageCache = new Map<string, ChatMessage[]>()
+
+function messageCacheKey(groupId: string, session: AuthSession) {
+  return `${session.user.id}:${groupId}`
+}
+
+export function getCachedGroupMessages(groupId: string, session: AuthSession) {
+  return messageCache.get(messageCacheKey(groupId, session)) ?? null
+}
+
+function cacheGroupMessages(groupId: string, session: AuthSession, messages: ChatMessage[]) {
+  messageCache.set(messageCacheKey(groupId, session), messages)
+}
 
 function getConfig() {
   configPromise ??= fetch(`${API_URL}/api/auth/config`).then(async (response) => {
@@ -77,7 +90,9 @@ export async function listGroupMessages(groupId: string, session: AuthSession): 
     response = await request('id,group_id,sender_id,body,created_at,sender:profiles!study_group_messages_sender_id_fkey(username,display_name,avatar_path)')
   }
   if (!response.ok) throw new Error('Could not load this chat.')
-  return response.json() as Promise<ChatMessage[]>
+  const messages = await response.json() as ChatMessage[]
+  cacheGroupMessages(groupId, session, messages)
+  return messages
 }
 
 export async function sendGroupMessage(groupId: string, body: string, session: AuthSession, attachment?: ChatAttachment): Promise<ChatMessage> {
@@ -111,6 +126,8 @@ export async function sendGroupMessage(groupId: string, body: string, session: A
     throw new Error(error?.message ?? 'Could not send that message.')
   }
   const rows = await response.json() as ChatMessage[]
+  const cached = getCachedGroupMessages(groupId, session) ?? []
+  if (rows[0] && !cached.some((message) => message.id === rows[0].id)) cacheGroupMessages(groupId, session, [...cached, rows[0]])
   return rows[0]
 }
 
