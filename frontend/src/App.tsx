@@ -9,6 +9,7 @@ import { Tools } from './pages/Tools'
 import { Progress } from './pages/Progress'
 import { Games } from './pages/Games'
 import { Goals } from './pages/Goals'
+import { Chat } from './pages/Chat'
 import { Profile } from './pages/Profile'
 import { Settings } from './pages/Settings'
 import { More } from './pages/More'
@@ -46,6 +47,7 @@ function AppShell() {
         {screen === 'progress' ? <Progress session={session} /> : null}
         {screen === 'games' ? <Games /> : null}
         {screen === 'goals' ? <Goals /> : null}
+        {screen === 'chat' ? <Chat session={session} /> : null}
         {screen === 'profile' ? <Profile session={session} onError={setNotice} /> : null}
         {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
         {screen === 'more' ? <More /> : null}
