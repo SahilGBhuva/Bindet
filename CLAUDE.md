@@ -52,27 +52,39 @@ Tokens live in `frontend/src/index.css`; shared components live in `frontend/src
 - **Empty states:** full figure at 120px wide (`ui-empty__mascot`) for no courses, no notes, and no friends.
 - **Streaks:** a small 36px cheering mascot (`ui-mascot-cheer`) on the streak card when a streak reaches 7+ days.
 - **Elsewhere in the app:** only the small brand mark in the sidebar.
-- **Landing and auth screens:** larger uses are fine there (see below).
+- **Landing and auth screens:** a few deliberate appearances (see below).
 
 ### Logged-out landing page and auth screens
 
-The landing page (`frontend/src/components/Landing.tsx` / `Landing.css`) and the sign-in, sign-up and confirm screens (`AuthGate.tsx` / `GuestAuth.css`) are **expressive, animated, gradient-heavy, and more energetic than the app**. The old dark/cinematic style is retired. They use the same light theme and color tokens, turned up.
+The landing page (`frontend/src/components/Landing.tsx`, `Landing.css`, and the sections in `components/landing/`) and the sign-in, sign-up and confirm screens (`AuthGate.tsx` / `GuestAuth.css`) are **editorial, art-directed and mostly paper and ink**. The earlier gradient-and-blobs style and the dark/cinematic style are both retired. The rules above for the signed-in app still apply to the app, and only to the app.
 
-- **Hero:** full-viewport, with a huge headline in a seven-color spectrum gradient and a large floating mascot over soft drifting color blobs. Two pill CTAs: a gradient primary and an outlined secondary.
-- **Live demo:** the real Home, Tools, Progress and Profile pages, in a browser frame with a colored shadow and a desktop scroll tilt. It's interactive on screens wider than 860px and a static render on phones.
-  - **Sandboxed data:** the pages run on an in-memory sandbox (`components/demo/demoData.ts`) provided through the data source (`lib/dataSource.ts`). Study pages must get storage, API, clock and confirm calls from `useData()`, never import them directly, or the demo will leak.
+- **Story:** the page reads scattered → captured → connected → practiced → mastered, and the kickers number those stages. Keep new sections inside that arc.
+- **The product is the artwork:** every feature is shown with a demonstration built from real bindit UI and the demo student's material (`components/landing/story.ts`), not described in a card. Don't add feature-card grids, stock imagery, or functionality bindit doesn't have.
+- **Palette:** warm off-white ground (`--lp-ground`), white surfaces, navy ink, hairline borders. Color carries meaning only:
+  - Blue is the one primary action.
+  - Violet (the otter's binder) is for the threads and marks that bind things together.
+  - Course tones tell subjects apart.
+  - No spectrum gradients, color blobs, glows or glassmorphism.
+- **Type:** Inter 800 at very large sizes for declarative moments (`lp-display`), Instrument Serif for editorial statements (`lp-serif`), and Caveat only inside handwritten study artifacts (`lp-hand`). Headlines are short, with deliberate line breaks.
+- **Shape:** buttons are rounded rectangles (`lp-btn`). Pills are only for status chips and term tags. Mix radii: small for UI, medium for visual containers, large only for the hero product surface.
+- **Composition:** each section has its own layout. Let compositions bleed past the screen edges and fade out with masks rather than sit in hard rectangles. Leave generous empty space.
+- **Hero:** a huge headline, one sentence, two actions, then the live demo rising from under the fold with no browser chrome.
+  - **Sandboxed data:** the demo pages run on an in-memory sandbox (`components/demo/demoData.ts`) provided through the data source (`lib/dataSource.ts`). Study pages must get storage, API, clock and confirm calls from `useData()`, never import them directly, or the demo will leak.
   - **Isolation rule:** no network requests and no reads or writes of the visitor's storage from the demo.
   - **Allowed interactions:** `components/demo/LivePreview.tsx` allowlists safe controls (navigation, course/unit/view switching, flashcards, quiz choices, Progress controls, group tabs). Every other control (create, upload, rename, delete, share, settings) opens sign-up with the action as the reason.
   - **When adding controls:** a new control inside these pages is locked by default. Add it to the allowlist only if it can't create, change or send anything.
   - **Keep it real:** keep the demo the real components; don't replace it with a screenshot or a fake mockup.
-- **Sections:** colored feature cards that lift with a matching glow, a stats band with gradient count-up numbers, how-it-works steps on a gradient line, and a full-width gradient final CTA.
-- **Stats honesty:** the stats band shows the demo student's numbers and says so. Don't present made-up usage numbers as real.
-- **Motion:** entrance and scroll-reveal animations use only `transform` and `opacity`. Blobs move by `transform` only, with no `filter: blur`.
+- **Honesty:** numbers on the page come from the demo student and are computed by the product's own code (`lib/progress.ts`). Say they are demo numbers. The binding canvas only draws relationships the product keeps (notes → a unit's cards and questions → course).
+- **Study artifacts:** the mosaic and note pages are original, fictional material built in HTML and SVG. Keep real copy as HTML text, never baked into images.
+- **Illustrations:** brand drawings are simple ink line art with at most one accent (`components/landing/Illustrations.tsx`). Interface icons stay in `Icons.tsx`.
+- **Otter on the landing page:** sparingly, and always the same character: peeking over the hero product, coming up when a quiz answer is right, and walking in at the final call to action.
+- **Motion:** it should explain the product and stay nearly invisible.
+  - Use only `transform`, `opacity`, `clip-path` and `stroke-dashoffset`. No `filter: blur`, no scroll hijacking, no animation libraries.
+  - Scroll-linked motion goes through `useScrollProgress` (`components/landing/motion.ts`), which is off on phones.
   - Everything is disabled under `prefers-reduced-motion`.
   - Keep Lighthouse performance above 80 on mobile.
-- **Auth screens:** same light theme, gradient heading, blob background, and a small mascot on the card corner.
-
-The landing page's louder treatment stays on the logged-out pages. The authenticated app keeps the calmer rules above.
+- **Phones:** every composition has its own phone layout (cropped, simplified, stacked). No horizontal overflow.
+- **Auth screens:** same ground and tokens, one white card with a hairline border, a serif heading, and a small mascot on the card corner.
 
 ## Security
 
