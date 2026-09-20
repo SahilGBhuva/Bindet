@@ -15,6 +15,7 @@
 .sheet.is-progress { --page-accent: var(--accent-progress); }
 .sheet.is-games { --page-accent: var(--accent-games); }
 .sheet.is-goals { --page-accent: var(--accent-goals); }
+.sheet.is-chat { --page-accent: #6554d9; }
 .sheet.is-profile { --page-accent: var(--accent-profile); }
 .sheet.is-settings { --page-accent: var(--accent-settings); }
 .sheet.is-more { --page-accent: var(--accent-more); }
