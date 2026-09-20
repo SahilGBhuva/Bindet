@@ -205,7 +205,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               </label>
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-pill lp-pill--gradient auth-submit" type="submit" disabled={busy}>
+              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Checking…' : 'Confirm and enter'}
               </button>
             </form>
@@ -278,12 +278,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
               ) : null}
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-pill lp-pill--gradient auth-submit" type="submit" disabled={busy}>
+              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Working…' : mode === 'login' ? 'Log in' : 'Get started'}
               </button>
             </form>
             <div className="auth-guest-separator"><span>or</span></div>
-            <button className="lp-pill lp-pill--outline auth-guest" type="button" disabled={busy} onClick={continueAsGuest}>
+            <button className="lp-btn lp-btn--quiet lp-btn--lg auth-guest" type="button" disabled={busy} onClick={continueAsGuest}>
               Continue as guest
             </button>
           </section>

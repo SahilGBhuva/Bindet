@@ -25,7 +25,7 @@ export const DEMO_SESSION: AuthSession = {
   user: { id: DEMO_STUDENT, email: 'maya@demo.bindit' },
 }
 
-type UnitContent = {
+export type UnitContent = {
   preview: string
   file: string
   cards: [string, string][]
@@ -186,6 +186,9 @@ const COURSES: { name: string; tone: string; units: Record<string, UnitContent> 
   },
 ]
 
+/* Read-only view of the demo courses, so the landing page's story sections show the same material as the live demo. */
+export const DEMO_COURSES: readonly { name: string; tone: string; units: Readonly<Record<string, Readonly<UnitContent>>> }[] = COURSES
+
 export const DEMO_SUMMARY = {
   courses: COURSES.length,
   notes: COURSES.reduce((sum, course) => sum + Object.keys(course.units).length, 0),
@@ -214,7 +217,7 @@ function initialNotebook(): Notebook {
 
 function initialAttempts(): UnitAttempt[] {
   const plan: [string, string, boolean[]][] = [
-    ['AP Biology', 'Cells', [true, true, false, true, true, true, true, false, true, true]],
+    ['AP Biology', 'Cells', [true, false, ...Array<boolean>(22).fill(true)]],
     ['AP Biology', 'Genetics', [false, true, false, true, true, false, true, true]],
     ['Chemistry', 'Stoichiometry', [false, false, true, false, true, false]],
     ['Chemistry', 'Atoms', [true, true, true, false, true, true, true]],
