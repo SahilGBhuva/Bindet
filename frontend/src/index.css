@@ -1,28 +1,127 @@
+/*
+ * Design tokens for the signed-in app.
+ *
+ * Light theme: a near-white ground with white bordered cards, dark navy text and
+ * one saturated blue accent for links, active states and primary actions.
+ * The logged-out landing page (components/Landing.css) and auth screens
+ * (components/GuestAuth.css) reuse these tokens with their own, louder treatment.
+ */
 :root {
-  --ink: #e6e8ec;
-  --muted: #9299a6;
-  --wash: #08121e;
-  --paper: #07111c;
-  --surface: #0a1626;
-  --surface-2: #0e1e32;
-  --raised: #14304a;
-  --glass: rgba(20, 36, 52, 0.92);
-  --ochre: #e0a045;
-  --coral: #d36b4f;
-  --sage: #6f9a7a;
-  --plum: #6d4c8d;
-  --accent-home: #7eb8e8;
-  --accent-tools: #9b8cff;
-  --accent-progress: #6f9a7a;
-  --accent-games: #d36b4f;
-  --accent-goals: #e0a045;
-  --accent-profile: #b57ad4;
-  --accent-settings: #c8bf8a;
-  --accent-more: #a78bfa;
-  --page-accent: var(--ink);
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--ink);
-  background: #07111c;
+  /* Ground and surfaces */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1f3f7;
+  --color-surface-active: #e8edf5;
+
+  /* Borders */
+  --color-border: #e3e7ee;
+  --color-border-strong: #cfd6e1;
+
+  /* Text */
+  --color-text: #0b1b33;
+  --color-text-secondary: #46546a;
+  --color-text-tertiary: #5b687d;
+
+  /* Primary accent: links, active states and the main action. */
+  --color-accent: #0b5cff;
+  --color-accent-hover: #004ae6;
+  --color-accent-text: #0b58f5;
+  --color-accent-subtle: #e4edff;
+  --color-on-accent: #ffffff;
+  --color-dark: #0b1b33;
+  --color-dark-hover: #1d2f4d;
+  --color-on-dark: #ffffff;
+  --color-focus: rgba(11, 92, 255, 0.45);
+
+  /*
+   * Color palette for telling things apart: courses, stats, card icons, people.
+   * Base is for fills (meters, borders, badges behind white text). -text is the
+   * readable shade for text and icons (>= 4.7:1 on its tint and on white).
+   * -tint is the light background.
+   */
+  --color-blue: #0b5cff;
+  --color-blue-text: #0b58f5;
+  --color-blue-tint: #e4edff;
+  --color-violet: #7c3aed;
+  --color-violet-text: #7c3aed;
+  --color-violet-tint: #f1e9fd;
+  --color-green: #12a150;
+  --color-green-text: #0e7a3d;
+  --color-green-tint: #e5f5ec;
+  --color-orange: #ea580c;
+  --color-orange-text: #b74509;
+  --color-orange-tint: #fdede4;
+  --color-pink: #db2777;
+  --color-pink-text: #c12269;
+  --color-pink-tint: #fbe7f0;
+  --color-teal: #0d9488;
+  --color-teal-text: #0a766d;
+  --color-teal-tint: #e4f3f2;
+  --color-amber: #d97706;
+  --color-amber-text: #a15804;
+  --color-amber-tint: #fbf0e4;
+
+  /* Status colors are for meaning (right/wrong, risk). */
+  --color-positive: var(--color-green-text);
+  --color-positive-subtle: var(--color-green-tint);
+  --color-warning: var(--color-amber-text);
+  --color-warning-subtle: var(--color-amber-tint);
+  --color-danger: #c4271b;
+  --color-danger-subtle: #fdeceb;
+
+  /* Brand gradient: page titles and progress fills */
+  --gradient-brand: linear-gradient(90deg, #0b5cff 0%, #7c3aed 100%);
+
+  /* Type: bold, larger headings; body stays compact for dense lists and tables */
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 30px;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --tracking-tight: -0.015em;
+
+  /* Spacing, on a 4px grid */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Radius: moderate for cards and inputs, fully rounded for buttons, badges and avatars */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Shadow: floating layers (menus, dialogs) and the primary button. Cards use borders. */
+  --shadow-popover: 0 12px 32px rgba(11, 27, 51, 0.12), 0 0 0 1px var(--color-border);
+  --shadow-primary: 0 1px 2px rgba(11, 92, 255, 0.24), 0 6px 16px rgba(11, 92, 255, 0.28);
+  --shadow-primary-hover: 0 2px 4px rgba(11, 92, 255, 0.28), 0 10px 22px rgba(11, 92, 255, 0.34);
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --layout-sidebar-width: 232px;
+  --layout-content-max-width: 1200px;
+
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-bg);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -33,8 +132,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--color-bg);
 }
-button, input, select {
+button, input, select, textarea {
   font-family: inherit;
   color: inherit;
 }

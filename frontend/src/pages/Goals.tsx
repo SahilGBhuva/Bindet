@@ -1,25 +1,22 @@
-import './Progress.css'
+import { ComingSoonCards, Icons } from '../components/ComingSoonCards'
 
 export function Goals() {
   return (
-    <section className="board">
-      <h1>Goals</h1>
-      <p>Daily and weekly study goals will show up on this board.</p>
-      <span className="board__tabs" aria-hidden="true"><i /><i /><i /></span>
-      <div className="board__grid">
-        <article>
-          <h2>Daily</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>Weekly</h2>
-          <p>—</p>
-        </article>
-        <article>
-          <h2>Rewards</h2>
-          <p>—</p>
-        </article>
-      </div>
-    </section>
+    <div className="ui-page goals">
+      <header className="ui-page-header">
+        <div>
+          <h1 className="ui-page-title">Goals</h1>
+          <p className="ui-page-subtitle">Daily and weekly study goals will show up here.</p>
+        </div>
+      </header>
+      <ComingSoonCards
+        label="Planned goals"
+        items={[
+          { title: 'Daily', copy: 'A daily XP target, set from your daily goal in Settings.', icon: Icons.sun, tone: 'blue' },
+          { title: 'Weekly', copy: 'A bigger target that spans the whole week.', icon: Icons.calendar, tone: 'violet' },
+          { title: 'Rewards', copy: 'Something to unlock when you hit your goals.', icon: Icons.gift, tone: 'pink' },
+        ]}
+      />
+    </div>
   )
 }

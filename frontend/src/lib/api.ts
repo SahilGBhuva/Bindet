@@ -2,7 +2,8 @@ import { loadAuthSession, refreshAuthSession } from './auth'
 import { getStudentId } from './session'
 
 export type Topic = 'addition' | 'subtraction' | 'multiplication' | 'division' | 'mixed'
-export type GeneratedQuestion = { question_id: string; question: string; topic: string; difficulty: number }
+// choices is optional: when present, the quiz offers them as answer buttons (the demo questions use it).
+export type GeneratedQuestion = { question_id: string; question: string; topic: string; difficulty: number; choices?: string[] }
 export type NoteQuizContext = {
   course: string
   unit: string

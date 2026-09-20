@@ -13,7 +13,6 @@ import { Chat } from './pages/Chat'
 import { Profile } from './pages/Profile'
 import { Settings } from './pages/Settings'
 import { More } from './pages/More'
-import './pages/Home.css'
 import './App.css'
 
 function currentScreen(): Screen {

@@ -23,17 +23,32 @@ function readMigrated(key: string, legacyKey: string): string | null {
 }
 
 const emptyNotebook: Notebook = {
-  courses: [{ name: 'Biology', units: [], tone: '#2a6ea8' }],
+  courses: [{ name: 'Biology', units: [], tone: '#0b58f5' }],
   activeCourse: 'Biology',
   activeUnit: '',
   deposits: [],
 }
 
-export const COURSE_TONES = ['#2a6ea8', '#8a4aad', '#2f8f5c', '#c48a28', '#c45e4e', '#1f8a9c', '#6e4aa0']
+/*
+ * Saturated course colors, one per palette hue (blue, violet, green, orange, pink,
+ * teal, amber). Each is dark enough for white text on top (>= 5.3:1).
+ */
+export const COURSE_TONES = ['#0b58f5', '#7c3aed', '#0e7a3d', '#b74509', '#c12269', '#0a766d', '#a15804']
+
+// Muted tones saved in notebooks before the color refresh map to the same slot in the new palette.
+const LEGACY_TONES: Record<string, string> = {
+  '#2a6ea8': COURSE_TONES[0],
+  '#8a4aad': COURSE_TONES[1],
+  '#2f8f5c': COURSE_TONES[2],
+  '#c48a28': COURSE_TONES[6],
+  '#c45e4e': COURSE_TONES[3],
+  '#1f8a9c': COURSE_TONES[5],
+  '#6e4aa0': COURSE_TONES[4],
+}
 
 const PINNED_TONES: Record<string, string> = {
-  Biology: '#2a6ea8',
-  Chemistry: '#8a4aad',
+  Biology: COURSE_TONES[0],
+  Chemistry: COURSE_TONES[1],
 }
 
 function hashTone(name: string) {
@@ -42,7 +57,11 @@ function hashTone(name: string) {
   return COURSE_TONES[n % COURSE_TONES.length]
 }
 
-export function withCourseTones(courses: Course[]): Course[] {
+export function withCourseTones(input: Course[]): Course[] {
+  const courses = input.map((course) => {
+    const upgraded = course.tone ? LEGACY_TONES[course.tone.toLowerCase()] : undefined
+    return upgraded ? { ...course, tone: upgraded } : course
+  })
   const taken = new Set(courses.map((course) => course.tone).filter(Boolean) as string[])
   return courses.map((course, index) => {
     if (course.tone) return course

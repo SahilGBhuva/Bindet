@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
   consumeAuthRedirectSession,
   loadAuthSession,
@@ -10,27 +10,21 @@ import {
   type AuthSession,
 } from '../lib/auth'
 import { AuthContext } from '../lib/AuthContext'
-import './AuthGate.css'
+import { ColorBackdrop, Landing } from './Landing'
 import './GuestAuth.css'
-import '../Brand.css'
 
 type Mode = 'login' | 'signup'
 type GateView = 'landing' | 'auth' | 'confirm'
 const GUEST_KEY = 'bindit-guest-mode'
 const RESEND_SECS = 60
 
-function BrandMark() {
+function AuthBrand() {
   return (
-    <div className="lp-mark" aria-hidden="true">
-      <img src="/bindet-binder.png" alt="" />
-    </div>
+    <span className="auth-brand">
+      <img src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" />
+      bindit
+    </span>
   )
-}
-
-function trackSpotlight(event: MouseEvent<HTMLElement>) {
-  const box = event.currentTarget.getBoundingClientRect()
-  event.currentTarget.style.setProperty('--mx', `${event.clientX - box.left}px`)
-  event.currentTarget.style.setProperty('--my', `${event.clientY - box.top}px`)
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -48,6 +42,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState(false)
   const [pendingEmail, setPendingEmail] = useState('')
   const [resendIn, setResendIn] = useState(0)
+  // Why sign-up opened, when it came from a locked action in the landing page demo.
+  const [signupReason, setSignupReason] = useState('')
 
   const passwordScore = useMemo(() => {
     let score = 0
@@ -75,7 +71,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer)
   }, [resendIn])
 
-  function openAuth(nextMode: Mode = 'signup') {
+  function openAuth(nextMode: Mode = 'signup', reason = '') {
+    setSignupReason(reason)
     setMode(nextMode)
     setView('auth')
     setError('')
@@ -83,6 +80,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   function switchMode(nextMode: Mode) {
+    setSignupReason('')
     setMode(nextMode)
     setError('')
     setMessage('')
@@ -123,9 +121,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <main className="lp lp-loading">
-        <div className="lp-orb" aria-hidden="true" />
-        <p>Opening Bindet…</p>
+      <main className="auth auth--loading">
+        <ColorBackdrop />
+        <div className="auth-loading" role="status">
+          <img className="auth-loading__mascot" src="/bindit-mascot-cutout.webp" alt="" width="120" height="144" />
+          <p>Opening bindit…</p>
+        </div>
       </main>
     )
   }
@@ -180,17 +181,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     if (view === 'confirm') {
       return (
-        <main className="lp lp-auth-only">
-          <div className="lp-glow lp-glow--a" aria-hidden="true" />
-          <section className="lp-auth-card lp-spotlight" onMouseMove={trackSpotlight}>
-            <BrandMark />
-            <p className="lp-kicker">Confirm email</p>
-            <h2>Check your inbox</h2>
-            <p className="lp-lead">We sent a code to {pendingEmail}. Paste it below. You can resend after 1 minute if it never shows up.</p>
-            <form className="lp-form" onSubmit={submitCode}>
-              <label>
+        <main className="auth">
+          <ColorBackdrop />
+          <section className="auth-card" aria-labelledby="auth-title">
+            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+            <AuthBrand />
+            <p className="auth-eyebrow">Confirm email</p>
+            <h1 className="auth-title" id="auth-title">Check your inbox</h1>
+            <p className="auth-lead">We sent a code to {pendingEmail}. Paste it below. You can resend after 1 minute if it never shows up.</p>
+            <form className="auth-form" onSubmit={submitCode}>
+              <label className="auth-field">
                 <span>Confirmation code</span>
                 <input
+                  className="auth-input"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   placeholder="6-digit code"
@@ -200,18 +203,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   onChange={(event) => setCode(event.target.value)}
                 />
               </label>
-              {error ? <div className="lp-feedback is-error" role="alert">{error}</div> : null}
-              {message ? <div className="lp-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-btn lp-btn--primary" type="submit" disabled={busy}>
+              {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+              {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
+              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Checking…' : 'Confirm and enter'}
               </button>
             </form>
-            <button className="lp-resend" type="button" disabled={busy || resendIn > 0} onClick={() => void sendCodeAgain()}>
-              {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
-            </button>
-            <button className="lp-text-btn" type="button" disabled={busy} onClick={() => setView('auth')}>
-              Back to sign in
-            </button>
+            <div className="auth-links">
+              <button className="auth-text-btn" type="button" disabled={busy || resendIn > 0} onClick={() => void sendCodeAgain()}>
+                {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+              </button>
+              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => setView('auth')}>
+                Back to sign in
+              </button>
+            </div>
           </section>
         </main>
       )
@@ -219,19 +224,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
     if (view === 'auth') {
       return (
-        <main className="lp lp-auth-only">
-          <div className="lp-glow lp-glow--a" aria-hidden="true" />
-          <section className="lp-auth-card lp-spotlight" onMouseMove={trackSpotlight}>
-            <button className="lp-text-btn lp-back" type="button" onClick={() => setView('landing')}>
-              ← Back to Bindet
+        <main className="auth">
+          <ColorBackdrop />
+          <section className="auth-card" aria-labelledby="auth-title">
+            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+            <button className="auth-text-btn auth-back" type="button" onClick={() => setView('landing')}>
+              ← Back to bindit
             </button>
-            <div className="lp-auth-brand">
-              <BrandMark />
-              <span>bindet</span>
-            </div>
-            <p className="lp-kicker">{mode === 'login' ? 'Welcome back' : 'Start building'}</p>
-            <h2>{mode === 'login' ? 'Log in' : 'Create your account'}</h2>
-            <div className="lp-tabs" role="tablist" aria-label="Authentication mode">
+            <AuthBrand />
+            <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : 'Start studying'}</p>
+            <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : 'Create your account'}</h1>
+            {mode === 'signup' && signupReason ? (
+              <p className="auth-reason" role="status">
+                <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
+              </p>
+            ) : null}
+            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
               <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'is-on' : ''} disabled={busy} onClick={() => switchMode('login')}>
                 Log in
               </button>
@@ -239,15 +247,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 Sign up
               </button>
             </div>
-            <form className="lp-form" onSubmit={submit}>
-              <label>
+            <form className="auth-form" onSubmit={submit}>
+              <label className="auth-field">
                 <span>Email</span>
-                <input type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy} value={email} onChange={(event) => setEmail(event.target.value)} />
+                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy} value={email} onChange={(event) => setEmail(event.target.value)} />
               </label>
-              <label>
+              <label className="auth-field">
                 <span>Password</span>
-                <div className="lp-pass">
+                <div className="auth-pass">
                   <input
+                    className="auth-input"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                     minLength={mode === 'signup' ? 8 : 6}
@@ -262,19 +271,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 </div>
               </label>
               {mode === 'signup' && password ? (
-                <div className="lp-strength">
+                <div className={`auth-strength is-${Math.max(1, passwordScore)}`}>
                   <div>{[0, 1, 2, 3].map((index) => <span key={index} className={index < passwordScore ? 'is-on' : ''} />)}</div>
                   <small>{passwordScore <= 1 ? 'Make it stronger' : passwordScore === 2 ? 'Good password' : 'Strong password'}</small>
                 </div>
               ) : null}
-              {error ? <div className="lp-feedback is-error" role="alert">{error}</div> : null}
-              {message ? <div className="lp-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-btn lp-btn--primary" type="submit" disabled={busy}>
+              {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+              {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
+              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Working…' : mode === 'login' ? 'Log in' : 'Get started'}
               </button>
             </form>
             <div className="auth-guest-separator"><span>or</span></div>
-            <button className="lp-btn lp-btn--ghost" type="button" disabled={busy} onClick={continueAsGuest}>
+            <button className="lp-btn lp-btn--quiet lp-btn--lg auth-guest" type="button" disabled={busy} onClick={continueAsGuest}>
               Continue as guest
             </button>
           </section>
@@ -282,103 +291,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       )
     }
 
-    return (
-      <div className="lp">
-        <div className="lp-glow lp-glow--a" aria-hidden="true" />
-        <div className="lp-glow lp-glow--b" aria-hidden="true" />
-        <header className="lp-nav">
-          <a className="lp-nav__brand" href="#top" onClick={(event) => { event.preventDefault(); setView('landing') }}>
-            <BrandMark />
-            bindet
-          </a>
-          <nav className="lp-nav__links">
-            <a href="#product">Product</a>
-            <a href="#features">Features</a>
-            <button type="button" onClick={() => openAuth('login')}>Sign in</button>
-          </nav>
-          <button className="lp-btn lp-btn--nav" type="button" onClick={() => openAuth('signup')}>
-            Get started
-          </button>
-        </header>
-
-        <main>
-          <section className="lp-hero" id="top">
-            <p className="lp-kicker">The binder for how you actually study</p>
-            <h1>
-              Keep your learning
-              <span> together.</span>
-            </h1>
-            <p className="lp-lead">
-              Notes, flashcards, quizzes, and quests snap into one cinematic workspace — then cinch shut when you need the desk.
-            </p>
-            <div className="lp-hero__cta">
-              <button className="lp-btn lp-btn--primary" type="button" onClick={() => openAuth('signup')}>
-                Start building
-              </button>
-              <button className="lp-btn lp-btn--ghost" type="button" onClick={continueAsGuest}>
-                Browse as guest
-              </button>
-            </div>
-            <div className="lp-hero__frame" id="product">
-              <div className="lp-mock">
-                <div className="lp-mock__bar">
-                  <span />
-                  <span />
-                  <span />
-                  <em>Bindet · Tools</em>
-                </div>
-                <div className="lp-mock__body">
-                  <aside>
-                    <b>bindet</b>
-                    <i>Home</i>
-                    <i className="is-on">Tools</i>
-                    <i>Quests</i>
-                    <i>Profile</i>
-                  </aside>
-                  <div>
-                    <p>Now navigating</p>
-                    <strong>Math · Algebra</strong>
-                    <div className="lp-mock__pills">
-                      <span>Note taker</span>
-                      <span className="is-on">Flashcards</span>
-                      <span>Quiz</span>
-                    </div>
-                    <div className="lp-mock__cards">
-                      <article>Derivative of x²</article>
-                      <article>Chain rule</article>
-                      <article>Limit as h → 0</article>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="lp-bento" id="features">
-            <article className="lp-card lp-card--wide lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Workflow</span>
-              <h3>Courses snap. The workbench stays.</h3>
-              <p>Scroll courses on the left. Notes, cards, and quizzes live on the right — one binder, not twelve tabs.</p>
-            </article>
-            <article className="lp-card lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Speed</span>
-              <h3>Pull a lecture</h3>
-              <p>The lectern fans your deposits into Goal, Break it down, Use your notes, Check yourself.</p>
-            </article>
-            <article className="lp-card lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Automation</span>
-              <h3>Pages become practice</h3>
-              <p>Scan a page, drop extra notes, then drill flashcards and quizzes without leaving the unit.</p>
-            </article>
-            <article className="lp-card lp-card--mid lp-spotlight" onMouseMove={trackSpotlight}>
-              <span>Together</span>
-              <h3>Friend quests</h3>
-              <p>Share a code, start a goal, keep a private league with the people you actually study with.</p>
-            </article>
-          </section>
-        </main>
-      </div>
-    )
+    return <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} onGuest={continueAsGuest} />
   }
 
   return <AuthContext.Provider value={{ session, setSession }}>{children}</AuthContext.Provider>

@@ -1,15 +1,16 @@
-#root { min-height:100vh; }
+#root { min-height: 100vh; }
 
 .app-shell {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
   align-items: start;
+  background: var(--color-bg);
 }
 
-.sheet.is-home {
-  --page-accent: var(--accent-home);
-  overflow-x: clip;
+.sheet {
+  position: relative;
+  min-width: 0;
 }
 .sheet.is-tools { --page-accent: var(--accent-tools); }
 .sheet.is-progress { --page-accent: var(--accent-progress); }
@@ -21,12 +22,17 @@
 .sheet.is-more { --page-accent: var(--accent-more); }
 .sheet.is-profile .profile-page { border-color: transparent; }
 
-.sheet .board,
-.sheet .home__quote,
-.sheet.is-tools .courses,
-.sheet.is-tools .order-bar,
-.sheet.is-tools .panel {
-  border-color: var(--page-accent);
+/* Status message rendered by the shell for any page. */
+.notice {
+  width: min(520px, calc(100% - var(--space-8)));
+  margin: var(--space-4) auto 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-align: center;
 }
 
 @media (max-width: 860px) {

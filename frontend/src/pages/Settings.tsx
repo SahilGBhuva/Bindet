@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { getAccountProfile, saveAccountProfile, type Profile } from '../lib/api'
 import { requestPasswordReset, signIn, signOut, signUp, type AuthSession } from '../lib/auth'
 import { getStudentId } from '../lib/session'
-import './Progress.css'
+import './Settings.css'
 
 const GOALS = [
   { id: 10, label: 'Casual · 10 XP' },
@@ -65,7 +65,7 @@ export function Settings({ session, onSession }: SettingsProps) {
       } else {
         const result = await signUp(email.trim(), password)
         if (!result.session) {
-          setMessage('Check your inbox and press “Confirm your email.” We’ll bring you straight back to Bindit and sign you in.')
+          setMessage('Check your inbox and press “Confirm your email.” We’ll bring you straight back to bindit and sign you in.')
         } else {
           onSession(result.session)
           setMessage('Your account is ready.')
@@ -102,75 +102,133 @@ export function Settings({ session, onSession }: SettingsProps) {
   function logout() {
     signOut()
     onSession(null)
-    setMessage('Signed out. You can keep using Bindit as a guest.')
+    setMessage('Signed out. You can keep using bindit as a guest.')
   }
 
+  const authTitle = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create an account' : 'Reset your password'
+
   return (
-    <section className="board">
-      <h1>Settings</h1>
-      <p>
-        {session
-          ? `Signed in as ${session.user.email ?? 'your Bindit account'}.`
-          : 'Create an account to keep XP, streaks, and notes across devices.'}
-      </p>
+    <div className="ui-page settings">
+      <header className="ui-page-header">
+        <div>
+          <h1 className="ui-page-title">Settings</h1>
+          <p className="ui-page-subtitle">
+            {session
+              ? `Signed in as ${session.user.email ?? 'your bindit account'}.`
+              : 'Create an account to keep XP, streaks, and notes across devices.'}
+          </p>
+        </div>
+      </header>
+
       {!session ? (
-        <form className="account-form" onSubmit={submitAuth}>
-          <label>
-            Email
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
-          </label>
-          {mode !== 'reset' ? (
-            <label>
-              Password
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                minLength={8}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              />
-            </label>
-          ) : null}
-          <button type="submit" disabled={busy}>
-            {busy ? 'One moment…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email'}
-          </button>
-          {message ? <p className="account-form__status">{message}</p> : null}
-          <div className="account-form__links">
-            <button type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>
-              {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}
+        <section className="ui-section" aria-labelledby="settings-auth">
+          <div className="ui-section-head"><h2 className="ui-section-title" id="settings-auth">{authTitle}</h2></div>
+          <form className="ui-panel settings__auth" onSubmit={submitAuth}>
+            <div className="settings__stack">
+              <label className="settings__label" htmlFor="settings-email">Email</label>
+              <input id="settings-email" className="ui-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
+            </div>
+            {mode !== 'reset' ? (
+              <div className="settings__stack">
+                <label className="settings__label" htmlFor="settings-password">Password</label>
+                <input
+                  id="settings-password"
+                  className="ui-input"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                />
+              </div>
+            ) : null}
+            {message ? <p className="settings__status" role="status">{message}</p> : null}
+            <button className="ui-button ui-button--primary settings__submit" type="submit" disabled={busy}>
+              {busy ? 'One moment…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email'}
             </button>
-            <button type="button" onClick={() => { setMode('reset'); setMessage('') }}>Forgot password</button>
-          </div>
-        </form>
+            <div className="settings__links">
+              <button className="ui-link" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>
+                {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}
+              </button>
+              <button className="ui-link" type="button" onClick={() => { setMode('reset'); setMessage('') }}>Forgot password</button>
+            </div>
+          </form>
+        </section>
       ) : (
-        <form className="account-form" onSubmit={saveProfile}>
-          <label>
-            Display name
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} />
-          </label>
-          <label>
-            Username
-            <input
-              value={username}
-              onChange={(event) => setUsername(event.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-              required
-              minLength={3}
-              maxLength={24}
-            />
-          </label>
-          <label>
-            Daily goal
-            <select value={dailyGoal} onChange={(event) => setDailyGoal(Number(event.target.value))}>
-              {GOALS.map((goal) => <option key={goal.id} value={goal.id}>{goal.label}</option>)}
-            </select>
-          </label>
-          {profile ? <p className="account-form__status">Friend code {profile.friend_code}</p> : null}
-          <button type="submit" disabled={busy}>{busy ? 'Saving…' : profile ? 'Update profile' : 'Save profile and claim guest progress'}</button>
-          <button type="button" onClick={logout}>Sign out</button>
-          {message ? <p className="account-form__status">{message}</p> : null}
-        </form>
+        <>
+          <section className="ui-section" aria-labelledby="settings-profile">
+            <div className="ui-section-head"><h2 className="ui-section-title" id="settings-profile">Profile</h2></div>
+            <form className="ui-panel" onSubmit={saveProfile}>
+              <div className="settings__field">
+                <div className="settings__field-text">
+                  <label className="settings__label" htmlFor="settings-display-name">Display name</label>
+                  <span className="settings__hint">Shown to friends.</span>
+                </div>
+                <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} />
+              </div>
+              <div className="settings__field">
+                <div className="settings__field-text">
+                  <label className="settings__label" htmlFor="settings-username">Username</label>
+                  <span className="settings__hint">3 to 24 letters, numbers, or underscores.</span>
+                </div>
+                <input
+                  id="settings-username"
+                  className="ui-input settings__control"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                  required
+                  minLength={3}
+                  maxLength={24}
+                />
+              </div>
+              <div className="settings__field">
+                <div className="settings__field-text">
+                  <label className="settings__label" htmlFor="settings-daily-goal">Daily goal</label>
+                  <span className="settings__hint">How much XP to aim for each day.</span>
+                </div>
+                <select id="settings-daily-goal" className="ui-select settings__control" value={dailyGoal} onChange={(event) => setDailyGoal(Number(event.target.value))}>
+                  {GOALS.map((goal) => <option key={goal.id} value={goal.id}>{goal.label}</option>)}
+                </select>
+              </div>
+              <div className="settings__footer">
+                {message ? <p className="settings__status" role="status">{message}</p> : null}
+                <button className="ui-button ui-button--primary" type="submit" disabled={busy}>
+                  {busy ? 'Saving…' : profile ? 'Update profile' : 'Save profile and claim guest progress'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="ui-section" aria-labelledby="settings-account">
+            <div className="ui-section-head"><h2 className="ui-section-title" id="settings-account">Account</h2></div>
+            <div className="ui-panel">
+              <div className="settings__field">
+                <div className="settings__field-text">
+                  <span className="settings__label">Email</span>
+                </div>
+                <span className="settings__value">{session.user.email ?? '—'}</span>
+              </div>
+              {profile ? (
+                <div className="settings__field">
+                  <div className="settings__field-text">
+                    <span className="settings__label">Friend code</span>
+                    <span className="settings__hint">Share it so friends can add you.</span>
+                  </div>
+                  <span className="settings__value settings__code">{profile.friend_code}</span>
+                </div>
+              ) : null}
+              <div className="settings__field">
+                <div className="settings__field-text">
+                  <span className="settings__label">Sign out</span>
+                  <span className="settings__hint">You can keep using bindit as a guest on this device.</span>
+                </div>
+                <button className="ui-button" type="button" onClick={logout}>Sign out</button>
+              </div>
+            </div>
+          </section>
+        </>
       )}
-    </section>
+    </div>
   )
 }

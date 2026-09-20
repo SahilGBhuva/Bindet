@@ -1,0 +1,90 @@
+/* Home dashboard. Shared building blocks live in styles/ui.css. */
+
+.dashboard__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dashboard .ui-stats {
+  margin-bottom: var(--space-8);
+}
+
+.dashboard__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-8);
+  align-items: start;
+}
+
+.dashboard__main,
+.dashboard__side {
+  min-width: 0;
+}
+
+.dashboard__streak {
+  display: flex;
+  align-items: baseline;
+}
+
+.dashboard__streak-mascot {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-3);
+}
+
+.dashboard__next {
+  min-height: 60px;
+  padding-block: var(--space-3);
+}
+
+.dashboard__next .ui-row__meta {
+  white-space: normal;
+}
+
+.dashboard__rank {
+  flex: none;
+  width: 12px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dashboard__friend.is-you {
+  background: var(--color-accent-subtle);
+}
+
+.dashboard__friend.is-you .ui-row__title {
+  color: var(--color-accent-text);
+}
+
+.dashboard__inline-empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.dashboard__quest-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dashboard__quest-meta {
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 1040px) {
+  .dashboard__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard__actions .ui-button {
+    flex: 1;
+  }
+}
