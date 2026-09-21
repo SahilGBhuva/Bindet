@@ -9,7 +9,8 @@ from typing import Any
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
+_configured_text_model = os.getenv("OPENROUTER_MODEL", "").strip()
+OPENROUTER_MODEL = "google/gemini-3.5-flash-lite" if _configured_text_model in {"", "openrouter/auto"} else _configured_text_model
 OPENROUTER_VISION_MODEL = os.getenv("OPENROUTER_VISION_MODEL", "google/gemini-3.1-flash-lite")
 OPENROUTER_TIMEOUT = float(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "12"))
 OPENROUTER_VISION_TIMEOUT = float(os.getenv("OPENROUTER_VISION_TIMEOUT_SECONDS", "8"))
@@ -49,8 +50,16 @@ def _post(payload: dict[str, Any], *, timeout: float | None = None) -> dict[str,
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         raise AITutorError("OpenRouter request failed") from exc
 
-def _chat_json(*, system_prompt: str, data: dict[str, Any], temperature: float, max_tokens: int) -> dict[str, Any]:
-    payload = {"model": OPENROUTER_MODEL, "temperature": temperature, "max_tokens": max_tokens, "provider": {"sort": "latency", "allow_fallbacks": True}, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ","))}]}
+def _chat_json(*, system_prompt: str, data: dict[str, Any], temperature: float, max_tokens: int, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "reasoning": {"effort": "minimal"},
+        "provider": {"sort": "latency", "preferred_max_latency": 1.5, "allow_fallbacks": True, "require_parameters": True},
+        "response_format": {"type": "json_schema", "json_schema": {"name": schema_name, "strict": True, "schema": schema}},
+        "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": json.dumps(data, ensure_ascii=False, separators=(",", ":"))}],
+    }
     try:
         content = _post(payload)["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
@@ -82,7 +91,8 @@ def extract_pdf_notes(*, pdf_bytes: bytes) -> str:
 def generate_question(*, course: str, unit: str, source_labels: list[str], focus: str, difficulty: int, personalization: dict[str, Any], source_text: str = "") -> dict[str, str]:
     grounded = bool(source_text.strip())
     prompt = "You are bindet's fast expert quiz writer. Create ONE concise short-answer question. Personalize difficulty. " + ("The supplied note excerpts are primary ground truth: test content actually present there and do not add unsupported facts. " if grounded else "Use course/unit knowledge; filenames are hints only. ") + "Return ONLY JSON: {\"question\":string,\"correct_answer\":string,\"topic\":string}."
-    result = _chat_json(system_prompt=prompt, temperature=0.3, max_tokens=220, data={"course": course or "General Studies", "unit": unit or "Current Unit", "sources": source_labels[:10], "note_excerpts": source_text[:18000] if grounded else "", "focus": focus, "difficulty": difficulty, "performance": personalization})
+    schema = {"type": "object", "additionalProperties": False, "properties": {"question": {"type": "string"}, "correct_answer": {"type": "string"}, "topic": {"type": "string"}}, "required": ["question", "correct_answer", "topic"]}
+    result = _chat_json(system_prompt=prompt, temperature=0.3, max_tokens=220, schema_name="quiz_question", schema=schema, data={"course": course or "General Studies", "unit": unit or "Current Unit", "sources": source_labels[:10], "note_excerpts": source_text[:12000] if grounded else "", "focus": focus, "difficulty": difficulty, "performance": personalization})
     required = {"question", "correct_answer", "topic"}
     if set(result.keys()) != required or not all(isinstance(result[key], str) and result[key].strip() for key in required):
         raise AITutorError("AI question response did not match the required schema")
@@ -92,7 +102,9 @@ def generate_flashcards(*, course: str, unit: str, source_labels: list[str], cou
     grounded = bool(source_text.strip())
     prompt = "You are bindet's expert flashcard writer. Make high-value retrieval-practice cards. Avoid duplicates and trivia. " + ("Use the supplied note excerpts as primary ground truth and do not invent unsupported details. " if grounded else "Filenames are hints only. ") + "Return ONLY JSON {\"cards\":[{\"front\":string,\"back\":string,\"topic\":string}]} ."
     requested = max(3, min(30, count))
-    result = _chat_json(system_prompt=prompt, temperature=0.3, max_tokens=min(1800, 110 * requested), data={"course": course or "General Studies", "unit": unit or "Current Unit", "sources": source_labels[:10], "note_excerpts": source_text[:18000] if grounded else "", "count": requested, "performance": personalization})
+    card_schema = {"type": "object", "additionalProperties": False, "properties": {"front": {"type": "string"}, "back": {"type": "string"}, "topic": {"type": "string"}}, "required": ["front", "back", "topic"]}
+    schema = {"type": "object", "additionalProperties": False, "properties": {"cards": {"type": "array", "items": card_schema}}, "required": ["cards"]}
+    result = _chat_json(system_prompt=prompt, temperature=0.3, max_tokens=min(1800, 110 * requested), schema_name="flashcard_deck", schema=schema, data={"course": course or "General Studies", "unit": unit or "Current Unit", "sources": source_labels[:10], "note_excerpts": source_text[:12000] if grounded else "", "count": requested, "performance": personalization})
     if set(result.keys()) != {"cards"} or not isinstance(result["cards"], list):
         raise AITutorError("AI flashcard response did not match the required schema")
     cards = []
@@ -106,7 +118,9 @@ def generate_flashcards(*, course: str, unit: str, source_labels: list[str], cou
 
 def grade_answer(*, question: str, correct_answer: str, student_answer: str, topic: str, difficulty: int) -> dict[str, Any]:
     prompt = "You are bindet's fast school tutor/grader. Use the reference as a rubric; accept equivalent wording and meaningful partial credit. Be concise. Return ONLY JSON with keys correct:boolean, score:0-100 integer, mistake_type:string|null, explanation:string, hint:string|null, misconception:string|null."
-    result = _chat_json(system_prompt=prompt, temperature=0.05, max_tokens=260, data={"topic": topic, "difficulty": difficulty, "question": question, "reference": correct_answer, "answer": student_answer})
+    nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    schema = {"type": "object", "additionalProperties": False, "properties": {"correct": {"type": "boolean"}, "score": {"type": "integer"}, "mistake_type": nullable_string, "explanation": {"type": "string"}, "hint": nullable_string, "misconception": nullable_string}, "required": ["correct", "score", "mistake_type", "explanation", "hint", "misconception"]}
+    result = _chat_json(system_prompt=prompt, temperature=0.05, max_tokens=260, schema_name="answer_grade", schema=schema, data={"topic": topic, "difficulty": difficulty, "question": question, "reference": correct_answer, "answer": student_answer})
     required = {"correct", "score", "mistake_type", "explanation", "hint", "misconception"}
     if set(result.keys()) != required or not isinstance(result["correct"], bool):
         raise AITutorError("AI response did not match the required schema")

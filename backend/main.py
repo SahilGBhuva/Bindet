@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -40,7 +41,18 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Server-Timing", "X-Bindit-Response-Ms"],
 )
+
+
+@app.middleware("http")
+async def measure_request_time(request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = f'app;dur={elapsed_ms:.1f}'
+    response.headers["X-Bindit-Response-Ms"] = f'{elapsed_ms:.1f}'
+    return response
 
 Topic = Literal["addition", "subtraction", "multiplication", "division", "mixed"]
 

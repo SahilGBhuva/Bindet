@@ -130,6 +130,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const latestDeckKey = useRef('')
   const loadedQuizKey = useRef('')
   const quizSequence = useRef(0)
+  const prefetchedQuestions = useRef(new Map<string, Promise<GeneratedQuestion>>())
 
   const courses = notebook.courses
   const activeCourse = notebook.activeCourse
@@ -460,30 +461,45 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
   async function loadQuizQuestion() {
     const sequence = ++quizSequence.current
+    const prefetched = prefetchedQuestions.current.get(quizKey)
     setQuizBusy(true)
     setQuizError('')
     setQuizResult(null)
     setQuizAnswer('')
     try {
-      const next = await data.generateQuestion(
-        quizTopic,
-        quizDifficulty,
-        activeCourse && activeUnit
-          ? {
-              course: activeCourse,
-              unit: activeUnit,
-              files: unitNotes.map((note) => note.fileName),
-              other_units: units.filter((name) => name !== activeUnit),
-              other_courses: courses.map((course) => course.name).filter((name) => name !== activeCourse),
-            }
-          : undefined,
-      )
+      const next = await (prefetched ?? requestQuizQuestion())
+      prefetchedQuestions.current.delete(quizKey)
       if (sequence === quizSequence.current) setQuizQuestion(next)
+      primeNextQuestion()
     } catch {
+      prefetchedQuestions.current.delete(quizKey)
       if (sequence === quizSequence.current) setQuizError('Couldn’t load a question. Try again in a moment.')
     } finally {
       if (sequence === quizSequence.current) setQuizBusy(false)
     }
+  }
+
+  function requestQuizQuestion() {
+    return data.generateQuestion(
+      quizTopic,
+      quizDifficulty,
+      activeCourse && activeUnit
+        ? {
+            course: activeCourse,
+            unit: activeUnit,
+            files: unitNotes.map((note) => note.fileName),
+            other_units: units.filter((name) => name !== activeUnit),
+            other_courses: courses.map((course) => course.name).filter((name) => name !== activeCourse),
+          }
+        : undefined,
+    )
+  }
+
+  function primeNextQuestion() {
+    if (prefetchedQuestions.current.has(quizKey)) return
+    const pending = requestQuizQuestion()
+    prefetchedQuestions.current.set(quizKey, pending)
+    void pending.catch(() => prefetchedQuestions.current.delete(quizKey))
   }
 
   function checkQuizAnswer(event: FormEvent) {
