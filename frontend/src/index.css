@@ -8,24 +8,24 @@
  */
 :root {
   /* Ground and surfaces */
-  --color-bg: #f7f7f8;
-  --color-surface: #ffffff;
-  --color-surface-hover: #f2f2f4;
-  --color-surface-active: #ebeaef;
+  --color-bg: #f5f4f1;
+  --color-surface: #fcfcfa;
+  --color-surface-hover: #f0efeb;
+  --color-surface-active: #e9e8e3;
 
   /* Borders */
-  --color-border: #e5e5e8;
-  --color-border-strong: #d2d2d8;
+  --color-border: #dfded8;
+  --color-border-strong: #cac8c0;
 
   /* Text */
-  --color-text: #191a20;
-  --color-text-secondary: #5f626d;
-  --color-text-tertiary: #888b95;
+  --color-text: #171713;
+  --color-text-secondary: #65645e;
+  --color-text-tertiary: #929089;
 
   /* Primary accent: links, active states and the main action. */
-  --color-accent: #6557d9;
-  --color-accent-hover: #5548c5;
-  --color-accent-text: #5a4cc4;
+  --color-accent: #5548d9;
+  --color-accent-hover: #463abf;
+  --color-accent-text: #4d40bd;
   --color-accent-subtle: #eeecfb;
   --color-on-accent: #ffffff;
   --color-dark: #1b1c22;
@@ -116,8 +116,8 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
   /* Layout */
-  --layout-sidebar-width: 224px;
-  --layout-content-max-width: 1200px;
+  --layout-sidebar-width: 236px;
+  --layout-content-max-width: 1280px;
 
   font-family: var(--font-sans);
   color: var(--color-text);
@@ -134,6 +134,7 @@ body {
   min-height: 100vh;
   background: var(--color-bg);
 }
+::selection { background: #dcd8ff; color: #171713; }
 button, input, select, textarea {
   font-family: inherit;
   color: inherit;

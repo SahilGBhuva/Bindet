@@ -8,6 +8,7 @@ import { getStudentId } from './lib/session'
 import { Chat } from './pages/Chat'
 import { Home } from './pages/Home'
 import './App.css'
+import './Polish.css'
 
 const Tools = lazy(() => import('./pages/Tools').then((module) => ({ default: module.Tools })))
 const Progress = lazy(() => import('./pages/Progress').then((module) => ({ default: module.Progress })))

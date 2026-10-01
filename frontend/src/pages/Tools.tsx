@@ -647,12 +647,16 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     <div className="ui-page tools">
       <header className="ui-page-header">
         <div>
+          <span className="tools__eyebrow"><i /> AI study workspace</span>
           <h1 className="ui-page-title">{activeCourse || 'Tools'}</h1>
           <p className="ui-page-subtitle">
             {current ? `${plural(current.units.length, 'unit')} · ${plural(courseNoteCount, 'note')}` : 'Pick a course to get started.'}
           </p>
         </div>
-        <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Customize courses</button>
+        <div className="tools__header-actions">
+          <span className="tools__ai-state"><i /> AI ready</span>
+          <button className="ui-button ui-button--ghost" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
+        </div>
       </header>
 
       <div className="tools__layout">

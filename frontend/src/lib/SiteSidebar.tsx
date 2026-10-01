@@ -10,7 +10,7 @@ export type Screen = (typeof SCREENS)[number]
 
 const ITEMS: { id: Screen; label: string; section: string }[] = [
   { id: 'home', label: 'Home', section: 'Study' },
-  { id: 'tools', label: 'Tools', section: 'Study' },
+  { id: 'tools', label: 'Study workspace', section: 'Study' },
   { id: 'progress', label: 'Progress', section: 'Study' },
   { id: 'goals', label: 'Goals', section: 'Plan' },
   { id: 'games', label: 'Games', section: 'Plan' },
@@ -59,7 +59,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand }: SiteSideb
   return (
     <nav className="bindit-rail" aria-label="Main">
       <div className="bindit-rail__top">
-        <a className="bindit-rail__brand" href="#home" aria-label="bindit home"><span className="bindit-rail__brand-mark" aria-hidden="true"><img src="/bindit-mascot-cutout.webp" alt="" /></span><span>bindit</span><i>beta</i></a>
+        <a className="bindit-rail__brand" href="#home" aria-label="bindit home"><span className="bindit-rail__brand-mark" aria-hidden="true"><img src="/bindit-mascot-cutout.webp" alt="" /></span><span>bindit</span><i>study OS</i></a>
         {onOpenCommand ? <button className="bindit-rail__search" type="button" onClick={onOpenCommand}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Quick find</span><kbd>⌘ K</kbd></button> : null}
       </div>
       <ol className="bindit-rail__list">
