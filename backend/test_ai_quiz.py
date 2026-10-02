@@ -101,6 +101,32 @@ class PersonalizedQuizTests(unittest.TestCase):
                 main.generate_question(request, 'Bearer test')
         self.assertEqual(context.exception.status_code, 503)
 
+    def test_shared_question_bank_avoids_a_second_ai_call(self):
+        request = main.QuestionRequest(
+            topic='mixed',
+            difficulty=2,
+            notes=main.NoteContext(course='Biology', unit='Cellular Respiration'),
+        )
+        generated = {
+            'question': 'What molecule is the main energy currency of a cell?',
+            'correct_answer': 'ATP',
+            'topic': 'Cellular Respiration',
+        }
+        with patch.object(main.auth, 'authenticated_user', side_effect=[{'id': 'student-a'}, {'id': 'student-b'}]), patch.object(
+            main.ai_tutor, 'generate_question', return_value=generated
+        ) as ai:
+            first = main.generate_question(request, 'Bearer first')
+            second = main.generate_question(request, 'Bearer second')
+
+        self.assertEqual(first.question, second.question)
+        self.assertNotEqual(first.question_id, second.question_id)
+        ai.assert_called_once()
+
+    def test_note_grounded_cache_keys_are_private(self):
+        first = main.question_cache_key('student-a', 'Biology', 'Cells', 'mixed', 2, 'Private notes')
+        second = main.question_cache_key('student-b', 'Biology', 'Cells', 'mixed', 2, 'Private notes')
+        self.assertNotEqual(first, second)
+
 
 if __name__ == '__main__':
     unittest.main()

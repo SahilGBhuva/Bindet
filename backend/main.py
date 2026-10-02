@@ -70,6 +70,13 @@ def ai_session_id(*parts: str) -> str:
     return f"bindit-{hashlib.blake2s(value.encode('utf-8'), digest_size=16).hexdigest()}"
 
 
+def question_cache_key(student_id: str, course: str, unit: str, focus: str, difficulty: int, source_text: str) -> str:
+    """Share generic questions, while keeping note-grounded questions private."""
+    owner_scope = student_id if source_text.strip() else "shared"
+    source_fingerprint = hashlib.blake2s(source_text.encode("utf-8"), digest_size=12).hexdigest() if source_text else "none"
+    return ai_session_id(owner_scope, course, unit, focus, str(difficulty), source_fingerprint)
+
+
 class AnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question_id: str = Field(min_length=16, max_length=64)
@@ -758,7 +765,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
     if has_school_context:
         student_id = auth.authenticated_user(authorization)["id"]
         try:
-            database.check_social_rate_limit(student_id, "ai_question", 40, 1440)
+            database.check_social_rate_limit(student_id, "question_request", 80, 1440)
         except ValueError as error:
             raise social_error(error) from error
     else:
@@ -768,19 +775,26 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         target_topic = data.notes.unit.strip() or data.notes.course.strip()
         difficulty, personalization = quiz_personalization(student_id, data.difficulty, target_topic)
         source_labels, source_text = note_store.context_for(student_id, data.notes.course.strip(), data.notes.unit.strip())
-        try:
-            ai_question = ai_tutor.generate_question(
-                course=data.notes.course.strip(),
-                unit=data.notes.unit.strip(),
-                source_labels=source_labels,
-                focus=data.topic,
-                difficulty=difficulty,
-                personalization=personalization,
-                source_text=source_text,
-                session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
-            )
-        except ai_tutor.AITutorError as exc:
-            raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
+        cache_key = question_cache_key(student_id, data.notes.course, data.notes.unit, data.topic, difficulty, source_text)
+        cached = questions.cached_question(cache_key, student_id)
+        if cached:
+            ai_question = cached
+        else:
+            try:
+                database.check_social_rate_limit(student_id, "ai_question", 40, 1440)
+                ai_question = ai_tutor.generate_question(
+                    course=data.notes.course.strip(),
+                    unit=data.notes.unit.strip(),
+                    source_labels=source_labels,
+                    focus=data.topic,
+                    difficulty=difficulty,
+                    personalization=personalization,
+                    source_text=source_text,
+                    session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
+                )
+            except ai_tutor.AITutorError as exc:
+                raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
+            questions.save_to_bank(cache_key, ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic, difficulty)
         generated = GeneratedQuestion(
             question=ai_question["question"],
             correct_answer=ai_question["correct_answer"],
