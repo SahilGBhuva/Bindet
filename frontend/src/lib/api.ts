@@ -201,7 +201,7 @@ export function deleteNote(noteId: string, accessToken?: string) {
   return request<{ deleted: boolean }>(`/api/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' }, accessToken)
 }
 
-export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext) {
+export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string) {
   return request<GeneratedQuestion>('/api/generate-question', {
     method: 'POST',
     body: JSON.stringify({
@@ -210,7 +210,7 @@ export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQ
       student_id: getStudentId(),
       notes: notes ?? undefined,
     }),
-  })
+  }, accessToken)
 }
 
 export function generateFlashcards(

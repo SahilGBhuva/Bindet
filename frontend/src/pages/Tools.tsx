@@ -492,6 +492,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
             other_courses: courses.map((course) => course.name).filter((name) => name !== activeCourse),
           }
         : undefined,
+      accessToken,
     )
   }
 

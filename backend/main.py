@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 import time
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -61,6 +62,12 @@ Topic = Literal["addition", "subtraction", "multiplication", "division", "mixed"
 # guest request can never read or write a real account's rows.
 GUEST_ID_PREFIX = "guest:"
 GUEST_ID_MAX_LENGTH = 100 - len(GUEST_ID_PREFIX)
+
+
+def ai_session_id(*parts: str) -> str:
+    """Stable, non-identifying key for OpenRouter provider stickiness."""
+    value = "\x1f".join(part.strip().lower() for part in parts)
+    return f"bindit-{hashlib.blake2s(value.encode('utf-8'), digest_size=16).hexdigest()}"
 
 
 class AnswerRequest(BaseModel):
@@ -770,6 +777,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                 difficulty=difficulty,
                 personalization=personalization,
                 source_text=source_text,
+                session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
             )
         except ai_tutor.AITutorError as exc:
             raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
@@ -820,6 +828,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             count=data.count,
             personalization=personalization,
             source_text=source_text,
+            session_id=ai_session_id(student_id, course, unit, "flashcards"),
         )
     except ai_tutor.AITutorError as exc:
         raise HTTPException(status_code=503, detail="AI flashcard generation is temporarily unavailable. Try again in a moment.") from exc
@@ -866,6 +875,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                 student_answer=data.student_answer,
                 topic=question["topic"],
                 difficulty=question["difficulty"],
+                session_id=ai_session_id(student_id, question["topic"], "grading"),
             )
             correct = ai_result["correct"]
             score = ai_result["score"]
