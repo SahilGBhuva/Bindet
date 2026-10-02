@@ -9,15 +9,15 @@ export const SCREENS = ['home', 'tools', 'progress', 'games', 'goals', 'chat', '
 export type Screen = (typeof SCREENS)[number]
 
 const ITEMS: { id: Screen; label: string; section: string }[] = [
-  { id: 'home', label: 'Home', section: 'Study' },
-  { id: 'tools', label: 'Study workspace', section: 'Study' },
-  { id: 'progress', label: 'Progress', section: 'Study' },
-  { id: 'goals', label: 'Goals', section: 'Plan' },
-  { id: 'games', label: 'Games', section: 'Plan' },
-  { id: 'chat', label: 'Chat', section: 'Together' },
-  { id: 'profile', label: 'Friends & profile', section: 'Together' },
-  { id: 'settings', label: 'Settings', section: 'Workspace' },
-  { id: 'more', label: 'More', section: 'Workspace' },
+  { id: 'home', label: 'Overview', section: 'Highlighted' },
+  { id: 'goals', label: 'My tasks', section: 'Highlighted' },
+  { id: 'tools', label: 'Study projects', section: 'Directory' },
+  { id: 'progress', label: 'Resources & progress', section: 'Directory' },
+  { id: 'chat', label: 'Group messages', section: 'My groups' },
+  { id: 'profile', label: 'Friends & groups', section: 'My groups' },
+  { id: 'games', label: 'Practice lab', section: 'My groups' },
+  { id: 'settings', label: 'Settings', section: 'Account' },
+  { id: 'more', label: 'More', section: 'Account' },
 ]
 
 function Mark({ kind }: { kind: Screen }) {
@@ -59,7 +59,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand }: SiteSideb
   return (
     <nav className="bindit-rail" aria-label="Main">
       <div className="bindit-rail__top">
-        <a className="bindit-rail__brand" href="#home" aria-label="bindit home"><span className="bindit-rail__brand-mark" aria-hidden="true"><img src="/bindit-mascot-cutout.webp" alt="" /></span><span>bindit</span><i>study OS</i></a>
+        <a className="bindit-rail__brand" href="#home" aria-label="bindit home"><span className="bindit-rail__brand-mark" aria-hidden="true">B</span><span>bindit</span><i>workspace</i></a>
         {onOpenCommand ? <button className="bindit-rail__search" type="button" onClick={onOpenCommand}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><span>Quick find</span><kbd>⌘ K</kbd></button> : null}
       </div>
       <ol className="bindit-rail__list">

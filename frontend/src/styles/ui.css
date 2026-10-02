@@ -12,7 +12,7 @@
   width: 100%;
   max-width: var(--layout-content-max-width);
   margin: 0 auto;
-  padding: 48px clamp(24px, 4vw, 58px) 72px;
+  padding: 42px clamp(24px, 4vw, 54px) 72px;
   color: var(--color-text);
   font-size: var(--text-base);
   line-height: var(--leading-normal);
@@ -33,8 +33,8 @@
   margin: 0;
   padding-bottom: 0.06em;
   color: var(--color-text);
-  font-size: clamp(32px, 4vw, 46px);
-  font-weight: var(--weight-bold);
+  font-size: clamp(30px, 4vw, 44px);
+  font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
   letter-spacing: -0.045em;
 }
@@ -86,7 +86,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
-  box-shadow: 0 1px 2px rgba(20, 21, 18, .02), 0 14px 40px rgba(20, 21, 18, .025);
+  box-shadow: 0 1px 2px rgba(24, 32, 50, .02);
 }
 
 .ui-panel--padded {
