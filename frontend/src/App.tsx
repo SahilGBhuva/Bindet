@@ -75,7 +75,7 @@ function AppShell() {
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
           {screen === 'progress' ? <Progress session={session} /> : null}
           {screen === 'games' ? <Games /> : null}
-          {screen === 'goals' ? <Goals /> : null}
+          {screen === 'goals' ? <Goals session={session} /> : null}
           {screen === 'chat' ? <Chat session={session} /> : null}
           {screen === 'profile' ? <Profile session={session} onError={setNotice} /> : null}
           {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
