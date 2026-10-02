@@ -126,6 +126,42 @@ class QuestionResponse(BaseModel):
     difficulty: int
 
 
+class TaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    course: str = Field(default="", max_length=120)
+    unit: str = Field(default="", max_length=160)
+    status: Literal["todo", "in_progress", "review", "complete"] = "todo"
+    priority: Literal["low", "medium", "high"] = "medium"
+    due_at: datetime | None = None
+
+
+class TaskUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    course: str | None = Field(default=None, max_length=120)
+    unit: str | None = Field(default=None, max_length=160)
+    status: Literal["todo", "in_progress", "review", "complete"] | None = None
+    priority: Literal["low", "medium", "high"] | None = None
+    due_at: datetime | None = None
+
+
+class TaskResponse(BaseModel):
+    id: str
+    owner_id: str
+    title: str
+    description: str
+    course: str
+    unit: str
+    status: str
+    priority: str
+    due_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 class FlashcardRequest(BaseModel):
     student_id: str = Field(default="anonymous", min_length=1, max_length=100)
     course: str = Field(default="", max_length=120)
@@ -757,6 +793,37 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
     return profile
+
+
+@app.get("/api/tasks", response_model=list[TaskResponse])
+def get_tasks(authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    return database.list_tasks(user["id"])
+
+
+@app.post("/api/tasks", response_model=TaskResponse, status_code=201)
+def create_task(data: TaskCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    return database.create_task(user["id"], **data.model_dump())
+
+
+@app.patch("/api/tasks/{task_id}", response_model=TaskResponse)
+def update_task(task_id: str, data: TaskUpdate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return database.update_task(user["id"], task_id, data.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.delete_task(user["id"], task_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Task not found") from error
+    return {"deleted": True}
 
 
 @app.post("/api/generate-question", response_model=QuestionResponse)

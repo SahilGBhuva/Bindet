@@ -101,6 +101,19 @@ export type StudyGroup = {
   members: StudyGroupMember[]
   activity: StudyGroupActivity[]
 }
+export type StudyTask = {
+  id: string
+  owner_id: string
+  title: string
+  description: string
+  course: string
+  unit: string
+  status: 'todo' | 'in_progress' | 'review' | 'complete'
+  priority: 'low' | 'medium' | 'high'
+  due_at: string | null
+  created_at: string
+  updated_at: string
+}
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 const CACHE_WINDOW_MS = 30_000
@@ -296,6 +309,22 @@ export function saveAccountProfile(
     method: 'PUT',
     body: JSON.stringify(profile),
   }, accessToken)
+}
+
+export function getTasks(accessToken: string) {
+  return request<StudyTask[]>('/api/tasks', undefined, accessToken)
+}
+
+export function createTask(task: Pick<StudyTask, 'title' | 'description' | 'course' | 'unit' | 'status' | 'priority'> & { due_at?: string | null }, accessToken: string) {
+  return request<StudyTask>('/api/tasks', { method: 'POST', body: JSON.stringify(task) }, accessToken)
+}
+
+export function updateTask(taskId: string, changes: Partial<Pick<StudyTask, 'title' | 'description' | 'course' | 'unit' | 'status' | 'priority' | 'due_at'>>, accessToken: string) {
+  return request<StudyTask>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', body: JSON.stringify(changes) }, accessToken)
+}
+
+export function deleteTask(taskId: string, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' }, accessToken)
 }
 
 const socialCache = new Map<string, { savedAt: number; data: FriendsHub }>()

@@ -175,6 +175,21 @@ progress_claims = Table(
     Column("claimed_at", DateTime(timezone=True), nullable=False),
 )
 
+study_tasks = Table(
+    "study_tasks", metadata,
+    Column("id", String(32), primary_key=True),
+    Column("owner_id", String(100), nullable=False, index=True),
+    Column("title", String(120), nullable=False),
+    Column("description", String(500), nullable=False, default=""),
+    Column("course", String(120), nullable=False, default=""),
+    Column("unit", String(160), nullable=False, default=""),
+    Column("status", String(16), nullable=False, default="todo", index=True),
+    Column("priority", String(12), nullable=False, default="medium"),
+    Column("due_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 
 # Tables created by metadata.create_all() that must never be served unrestricted
 # through Supabase's PostgREST API. create_all() skips existing tables, so a
@@ -190,8 +205,62 @@ RLS_TABLES = (
     "social_reports",
     "study_group_members",
     "study_groups",
+    "study_tasks",
     "xp_events",
 )
+
+
+def list_tasks(owner_id: str) -> list[dict]:
+    init_db()
+    with engine().connect() as connection:
+        rows = connection.execute(select(study_tasks).where(
+            study_tasks.c.owner_id == owner_id
+        ).order_by(study_tasks.c.status.asc(), study_tasks.c.due_at.asc(), study_tasks.c.created_at.desc())).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def create_task(owner_id: str, *, title: str, description: str, course: str, unit: str, status: str, priority: str, due_at: datetime | None) -> dict:
+    init_db()
+    now = datetime.now(timezone.utc)
+    task = {
+        "id": secrets.token_hex(16), "owner_id": owner_id, "title": title.strip(),
+        "description": description.strip(), "course": course.strip(), "unit": unit.strip(),
+        "status": status, "priority": priority, "due_at": due_at, "created_at": now, "updated_at": now,
+    }
+    with engine().begin() as connection:
+        connection.execute(study_tasks.insert().values(**task))
+    return task
+
+
+def update_task(owner_id: str, task_id: str, values: dict) -> dict:
+    init_db()
+    allowed = {
+        key: value
+        for key, value in values.items()
+        if key in {"title", "description", "course", "unit", "status", "priority", "due_at"}
+        and (value is not None or key == "due_at")
+    }
+    allowed["updated_at"] = datetime.now(timezone.utc)
+    with engine().begin() as connection:
+        result = connection.execute(update(study_tasks).where(
+            study_tasks.c.id == task_id, study_tasks.c.owner_id == owner_id,
+        ).values(**allowed))
+        if not result.rowcount:
+            raise ValueError("task_not_found")
+        row = connection.execute(select(study_tasks).where(
+            study_tasks.c.id == task_id, study_tasks.c.owner_id == owner_id,
+        )).mappings().one()
+    return dict(row)
+
+
+def delete_task(owner_id: str, task_id: str) -> None:
+    init_db()
+    with engine().begin() as connection:
+        result = connection.execute(delete(study_tasks).where(
+            study_tasks.c.id == task_id, study_tasks.c.owner_id == owner_id,
+        ))
+    if not result.rowcount:
+        raise ValueError("task_not_found")
 
 
 def enable_row_level_security(connection, tables) -> None:
@@ -1297,6 +1366,7 @@ def reset_db() -> None:
     if active_engine.dialect.name != "sqlite":
         raise RuntimeError("reset_db is only available for local SQLite databases")
     with active_engine.begin() as connection:
+        connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))
         connection.execute(delete(study_groups))

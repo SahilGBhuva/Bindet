@@ -1,91 +1,101 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type FormEvent, startTransition, useEffect, useMemo, useState } from 'react'
 import type { AuthSession } from '../lib/auth'
-import type { Profile, Progress, StudyGroup } from '../lib/api'
+import { createTask, deleteTask, getTasks, updateTask, type StudyTask } from '../lib/api'
 import { useData } from '../lib/dataSource'
-import { notesFor, withCourseTones } from '../lib/session'
-import { Icons } from '../components/Icons'
 import './Goals.css'
 
-type GoalStep = { id: string; title: string; detail: string; action: string; href: string; icon: keyof Pick<typeof Icons, 'sparkle' | 'target' | 'check'> }
-const dayKey = () => new Date().toISOString().slice(0, 10)
-
-function savedChecks(identity: string) {
-  try { return JSON.parse(localStorage.getItem(`bindit:plan:${identity}:${dayKey()}`) ?? '[]') as string[] }
-  catch { return [] }
-}
+const columns: { id: StudyTask['status']; label: string }[] = [
+  { id: 'todo', label: 'To do' },
+  { id: 'in_progress', label: 'In progress' },
+  { id: 'review', label: 'Review' },
+  { id: 'complete', label: 'Complete' },
+]
+const nextStatus: Record<StudyTask['status'], StudyTask['status']> = { todo: 'in_progress', in_progress: 'review', review: 'complete', complete: 'todo' }
+const dateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
 export function Goals({ session }: { session: AuthSession | null }) {
-  const data = useData()
-  const studentId = session?.user.id ?? data.getStudentId()
-  const [profile, setProfile] = useState<Profile | null>(() => session?.access_token ? data.getCachedProfile(session.access_token) : null)
-  const [progress, setProgress] = useState<Progress | null>(() => data.getCachedProgress(studentId))
-  const [groups, setGroups] = useState<StudyGroup[]>(() => session?.access_token ? data.getCachedStudyGroups(session.access_token) ?? [] : [])
-  const [complete, setComplete] = useState<string[]>(() => savedChecks(studentId))
-  const notebook = useMemo(() => {
-    const loaded = data.loadNotebook()
-    return { ...loaded, courses: withCourseTones(loaded.courses) }
-  }, [data])
+  const token = session?.access_token
+  const notebook = useData().loadNotebook()
+  const [tasks, setTasks] = useState<StudyTask[]>([])
+  const [loading, setLoading] = useState(Boolean(token))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const [course, setCourse] = useState(notebook.activeCourse || notebook.courses[0]?.name || '')
+  const [due, setDue] = useState('')
 
   useEffect(() => {
-    if (!session?.access_token) return
-    const token = session.access_token
-    void Promise.all([data.getAccountProfile(token), data.getProgress(studentId, token), data.getStudyGroups(token)])
-      .then(([nextProfile, nextProgress, nextGroups]) => { setProfile(nextProfile); setProgress(nextProgress); setGroups(nextGroups) })
-      .catch(() => undefined)
-  }, [data, session?.access_token, studentId])
+    if (!token) return
+    let active = true
+    void getTasks(token).then((items) => { if (active) startTransition(() => setTasks(items)) }).catch(() => { if (active) setError('Could not load your assignments.') }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [token])
 
-  const activeCourse = notebook.activeCourse || notebook.courses[0]?.name || ''
-  const activeUnit = notebook.activeUnit || notebook.courses.find((course) => course.name === activeCourse)?.units[0] || ''
-  const notes = notesFor(notebook.deposits, activeCourse, activeUnit)
-  const weakTopic = progress?.weak_topics[0]?.replaceAll('_', ' ')
-  const steps: GoalStep[] = [
-    notes.length
-      ? { id: 'review', title: `Review ${activeUnit || activeCourse}`, detail: `Use the flashcards generated from ${notes.length} ${notes.length === 1 ? 'source' : 'sources'}.`, action: 'Review cards', href: '#tools', icon: 'sparkle' }
-      : { id: 'notes', title: 'Add a source to study', detail: activeUnit ? `Upload notes for ${activeUnit} so Bindit can build grounded practice.` : 'Create a unit and upload your first set of notes.', action: 'Add notes', href: '#tools', icon: 'sparkle' },
-    { id: 'quiz', title: weakTopic ? `Strengthen ${weakTopic}` : `Quiz ${activeUnit || activeCourse || 'a course'}`, detail: weakTopic ? 'A short quiz will focus on the area that needs the most attention.' : 'Answer a focused question and keep your learning streak moving.', action: 'Start quiz', href: '#tools', icon: 'target' },
-    { id: 'reflect', title: 'Check your progress', detail: 'Review your mastery map and choose the next unit worth your time.', action: 'View progress', href: '#progress', icon: 'check' },
-  ]
-  const completedCount = steps.filter((step) => complete.includes(step.id)).length
-  const completion = Math.round(completedCount / steps.length * 100)
-  const leadingGroup = groups.toSorted((a, b) => b.weekly_xp - a.weekly_xp)[0]
+  const counts = useMemo(() => Object.fromEntries(columns.map((column) => [column.id, tasks.filter((task) => task.status === column.id).length])), [tasks])
+  const finished = counts.complete ?? 0
+  const percent = tasks.length ? Math.round(finished / tasks.length * 100) : 0
 
-  function toggleStep(id: string) {
-    setComplete((current) => {
-      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
-      localStorage.setItem(`bindit:plan:${studentId}:${dayKey()}`, JSON.stringify(next))
-      return next
-    })
+  async function addTask(event: FormEvent) {
+    event.preventDefault()
+    if (!token || !title.trim() || saving) return
+    setSaving(true); setError('')
+    try {
+      const task = await createTask({ title: title.trim(), description: '', course, unit: '', status: 'todo', priority: 'medium', due_at: due ? new Date(`${due}T23:59:00`).toISOString() : null }, token)
+      setTasks((current) => [task, ...current]); setTitle(''); setDue(''); setComposerOpen(false)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not create that assignment.') }
+    finally { setSaving(false) }
+  }
+
+  async function moveTask(task: StudyTask) {
+    if (!token) return
+    const status = nextStatus[task.status]
+    setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status } : item))
+    try {
+      const saved = await updateTask(task.id, { status }, token)
+      setTasks((current) => current.map((item) => item.id === saved.id ? saved : item))
+    } catch { setTasks((current) => current.map((item) => item.id === task.id ? task : item)); setError('Could not update that assignment.') }
+  }
+
+  async function removeTask(task: StudyTask) {
+    if (!token) return
+    setTasks((current) => current.filter((item) => item.id !== task.id))
+    try { await deleteTask(task.id, token) }
+    catch { setTasks((current) => [task, ...current]); setError('Could not delete that assignment.') }
   }
 
   return (
-    <div className="ui-page goals-page">
-      <header className="ui-page-header goals-page__header">
-        <div><span className="goals-page__eyebrow">Daily study plan</span><h1 className="ui-page-title">Make today count.</h1><p className="ui-page-subtitle">A focused plan built from what you are studying—not another endless task list.</p></div>
-        <div className="goals-page__completion" aria-label={`${completion}% of today's plan complete`}><strong>{completion}%</strong><span>complete</span></div>
+    <div className="tasks-page">
+      <header className="tasks-page__header">
+        <div><span className="tasks-page__eyebrow">My tasks</span><h1>What needs your attention?</h1><p>Assignments are saved to your account and stay in sync across devices.</p></div>
+        <button className="tasks-page__new" type="button" onClick={() => setComposerOpen((open) => !open)}>+ New assignment</button>
       </header>
-      <section className="goals-page__hero" aria-labelledby="today-plan-title">
-        <div className="goals-page__hero-copy">
-          <span className="goals-page__date">Today · {profile?.daily_goal ?? 20} XP target</span><h2 id="today-plan-title">Three small wins.</h2>
-          <p>Finish this sequence in order or jump to the step that matters most. Your plan resets each day.</p>
-          <div className="ui-meter goals-page__meter" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={completedCount}><span style={{ width: `${completion}%` }} /></div>
-          <span className="goals-page__meter-label">{completedCount} of {steps.length} finished</span>
-        </div>
-        <img src="/bindit-mascot-cutout.webp" alt="Bindit's otter mascot holding a binder" />
+
+      <section className="tasks-page__summary" aria-label="Task progress">
+        <div><strong>{tasks.length - finished}</strong><span>Open assignments</span></div><div><strong>{finished}</strong><span>Completed</span></div>
+        <div className="tasks-page__progress"><span><b style={{ width: `${percent}%` }} /></span><small>{percent}% complete</small></div>
       </section>
-      <section className="goals-page__plan" aria-label="Today's study plan">
-        {steps.map((step, index) => {
-          const done = complete.includes(step.id)
-          return <article key={step.id} className={`goals-page__step${done ? ' is-complete' : ''}`}>
-            <button className="goals-page__check" type="button" aria-label={`${done ? 'Mark incomplete' : 'Mark complete'}: ${step.title}`} aria-pressed={done} onClick={() => toggleStep(step.id)}>{done ? Icons.check : <span>{index + 1}</span>}</button>
-            <span className="goals-page__step-icon" aria-hidden="true">{Icons[step.icon]}</span>
-            <div className="goals-page__step-copy"><h3>{step.title}</h3><p>{step.detail}</p></div><a className="ui-button" href={step.href}>{step.action}</a>
-          </article>
-        })}
-      </section>
-      <section className="goals-page__signals" aria-label="Goal signals">
-        <article className="goals-page__signal"><span className="goals-page__signal-icon ui-tone--orange">{Icons.flame}</span><div><span>Learning streak</span><strong>{progress?.login_streak ?? 0} {progress?.login_streak === 1 ? 'day' : 'days'}</strong></div></article>
-        <article className="goals-page__signal"><span className="goals-page__signal-icon ui-tone--violet">{Icons.sparkle}</span><div><span>Active focus</span><strong>{activeUnit || activeCourse || 'Add a course'}</strong></div></article>
-        <article className="goals-page__signal"><span className="goals-page__signal-icon ui-tone--green">{Icons.users}</span><div><span>{leadingGroup ? leadingGroup.name : 'Study together'}</span><strong>{leadingGroup ? `${leadingGroup.weekly_xp} / ${leadingGroup.weekly_goal_xp} XP` : 'Create a group'}</strong></div></article>
+
+      {composerOpen ? <form className="task-composer" onSubmit={addTask}>
+        <label><span>Assignment</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Finish cellular respiration review" maxLength={120} /></label>
+        <label><span>Course</span><select value={course} onChange={(event) => setCourse(event.target.value)}><option value="">No course</option>{notebook.courses.map((item) => <option key={item.name}>{item.name}</option>)}</select></label>
+        <label><span>Due date</span><input type="date" value={due} onChange={(event) => setDue(event.target.value)} /></label>
+        <button type="submit" disabled={saving || !title.trim()}>{saving ? 'Saving…' : 'Add task'}</button>
+      </form> : null}
+      {error ? <p className="tasks-page__error" role="status">{error}</p> : null}
+
+      <section className="task-board" aria-label="Assignment board">
+        {columns.map((column) => <div className="task-column" key={column.id}>
+          <header><span>{column.label}</span><b>{counts[column.id] ?? 0}</b></header>
+          <div className="task-column__body">
+            {loading ? <div className="task-card is-loading" /> : tasks.filter((task) => task.status === column.id).map((task) => <article className="task-card" key={task.id}>
+              <div className="task-card__meta"><span className={`is-${task.priority}`}>{task.priority}</span>{task.due_at ? <time>{dateFormat.format(new Date(task.due_at))}</time> : null}</div>
+              <h2>{task.title}</h2>{task.course ? <p>{task.course}{task.unit ? ` · ${task.unit}` : ''}</p> : <p>Personal assignment</p>}
+              <footer><button type="button" onClick={() => void moveTask(task)}>{task.status === 'complete' ? 'Reopen' : 'Move forward'} <span>→</span></button><button type="button" className="task-card__delete" onClick={() => void removeTask(task)} aria-label={`Delete ${task.title}`}>×</button></footer>
+            </article>)}
+            {!loading && !tasks.some((task) => task.status === column.id) ? <button className="task-column__empty" type="button" onClick={() => setComposerOpen(true)}>+ Add task</button> : null}
+          </div>
+        </div>)}
       </section>
     </div>
   )
