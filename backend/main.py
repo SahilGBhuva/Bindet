@@ -126,6 +126,10 @@ class QuestionResponse(BaseModel):
     difficulty: int
 
 
+TASK_CREATE_LIMIT = 300
+TASK_WRITE_LIMIT = 900
+
+
 class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
@@ -202,6 +206,11 @@ class TopicStat(BaseModel):
     accuracy: float
 
 
+class DailyXp(BaseModel):
+    day: str
+    xp: int
+
+
 class ProgressResponse(BaseModel):
     student_id: str
     total_xp: int
@@ -214,6 +223,7 @@ class ProgressResponse(BaseModel):
     best_login_streak: int = 0
     weak_topics: list[str]
     topics: list[TopicStat] = Field(default_factory=list)
+    recent_xp: list[DailyXp] = Field(default_factory=list)
 
 
 class AccountProfileUpdate(BaseModel):
@@ -500,6 +510,8 @@ def social_error(error: ValueError) -> HTTPException:
         "group_full": (409, "That study group already has 20 members"),
         "group_limit_reached": (409, "You can join up to 8 study groups"),
         "group_owner_cannot_leave": (409, "Group owners cannot leave their group"),
+        "invalid_task_title": (400, "Give the assignment a title"),
+        "task_limit_reached": (409, "You have reached the assignment limit. Delete finished assignments to add more."),
     }
     status, message = messages.get(str(error), (400, "Could not update that profile"))
     return HTTPException(status_code=status, detail=message)
@@ -804,16 +816,23 @@ def get_tasks(authorization: Annotated[str | None, Header()] = None):
 @app.post("/api/tasks", response_model=TaskResponse, status_code=201)
 def create_task(data: TaskCreate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
-    return database.create_task(user["id"], **data.model_dump())
+    try:
+        database.check_social_rate_limit(user["id"], "task_create", TASK_CREATE_LIMIT, 1440)
+        return database.create_task(user["id"], **data.model_dump())
+    except ValueError as error:
+        raise social_error(error) from error
 
 
 @app.patch("/api/tasks/{task_id}", response_model=TaskResponse)
 def update_task(task_id: str, data: TaskUpdate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
         return database.update_task(user["id"], task_id, data.model_dump(exclude_unset=True))
     except ValueError as error:
-        raise HTTPException(status_code=404, detail="Task not found") from error
+        if str(error) == "task_not_found":
+            raise HTTPException(status_code=404, detail="Task not found") from error
+        raise social_error(error) from error
 
 
 @app.delete("/api/tasks/{task_id}")
@@ -993,23 +1012,27 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
 
 
 @app.get("/api/progress/me", response_model=ProgressResponse)
-def get_my_progress(authorization: Annotated[str | None, Header()] = None):
+def get_my_progress(authorization: Annotated[str | None, Header()] = None, tz_offset: int = 0):
     user = auth.authenticated_user(authorization)
     record = database.get_progress(user["id"])
     if record is None:
         raise HTTPException(status_code=404, detail="No progress found for this student")
-    return progress_response(user["id"], record)
+    response = progress_response(user["id"], record)
+    response.recent_xp = [DailyXp(**row) for row in database.recent_xp(user["id"], tz_offset_minutes=tz_offset)]
+    return response
 
 
 @app.get("/api/progress/{student_id}", response_model=ProgressResponse)
-def get_progress(student_id: str, authorization: Annotated[str | None, Header()] = None):
+def get_progress(student_id: str, authorization: Annotated[str | None, Header()] = None, tz_offset: int = 0):
     verified = auth.authenticated_user(authorization)["id"]
     if verified != student_id:
         raise HTTPException(status_code=403, detail="You can only view your own progress")
     record = database.get_progress(student_id)
     if record is None:
         raise HTTPException(status_code=404, detail="No progress found for this student")
-    return progress_response(student_id, record)
+    response = progress_response(student_id, record)
+    response.recent_xp = [DailyXp(**row) for row in database.recent_xp(student_id, tz_offset_minutes=tz_offset)]
+    return response
 
 
 @app.post("/api/daily-login", response_model=ProgressResponse)

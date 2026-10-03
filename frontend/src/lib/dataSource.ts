@@ -31,6 +31,8 @@ export type DataSource = {
   getCachedFriends: typeof api.getCachedFriends
   getStudyGroups: typeof api.getStudyGroups
   getCachedStudyGroups: typeof api.getCachedStudyGroups
+  getTasks: typeof api.getTasks
+  getCachedTasks: typeof api.getCachedTasks
   generateFlashcards: typeof api.generateFlashcards
   generateQuestion: typeof api.generateQuestion
   analyzeAnswer: typeof api.analyzeAnswer
@@ -73,6 +75,8 @@ export const realData: DataSource = {
   getCachedFriends: api.getCachedFriends,
   getStudyGroups: api.getStudyGroups,
   getCachedStudyGroups: api.getCachedStudyGroups,
+  getTasks: api.getTasks,
+  getCachedTasks: api.getCachedTasks,
   generateFlashcards: api.generateFlashcards,
   generateQuestion: api.generateQuestion,
   analyzeAnswer: api.analyzeAnswer,

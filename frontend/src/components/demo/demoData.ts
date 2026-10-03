@@ -1,4 +1,4 @@
-import type { AnswerResult, Flashcard, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup } from '../../lib/api'
+import type { AnswerResult, Flashcard, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, StudyTask } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { COURSE_TONES } from '../../lib/session'
@@ -249,6 +249,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     student_id: DEMO_STUDENT, total_xp: 2480, attempts: 214, correct_answers: 180, accuracy: 84.1,
     streak: 5, best_streak: 11, login_streak: 12, best_login_streak: 12, weak_topics: ['Stoichiometry'],
     topics: [{ topic: 'Stoichiometry', attempts: 22, correct_answers: 14, accuracy: 63.6 }],
+    recent_xp: [40, 25, 0, 55, 30, 45, 20].map((xp, index) => ({ day: iso(6 - index).slice(0, 10), xp })),
   }
   const profile: Profile = {
     student_id: DEMO_STUDENT, username: 'maya_r', display_name: 'Maya Rodriguez', avatar_path: '', friend_code: 'BND-DEMO-2026',
@@ -296,6 +297,18 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     },
   ]
 
+  const tasks: StudyTask[] = [
+    { title: 'Genetics problem set', course: 'AP Biology', unit: 'Genetics', status: 'in_progress', priority: 'high', due: -1 },
+    { title: 'Stoichiometry lab write-up', course: 'Chemistry', unit: 'Stoichiometry', status: 'todo', priority: 'high', due: -2 },
+    { title: 'Revolution DBQ outline', course: 'US History', unit: 'Revolution', status: 'review', priority: 'medium', due: -4 },
+    { title: 'Log rules worksheet', course: 'Algebra II', unit: 'Logarithms', status: 'todo', priority: 'low', due: -6 },
+    { title: 'Cells vocabulary review', course: 'AP Biology', unit: 'Cells', status: 'complete', priority: 'low', due: 2 },
+  ].map((task, index) => ({
+    id: `demo-task-${index}`, owner_id: DEMO_STUDENT, title: task.title, description: '', course: task.course, unit: task.unit,
+    status: task.status as StudyTask['status'], priority: task.priority as StudyTask['priority'],
+    due_at: iso(task.due), created_at: iso(10), updated_at: iso(1),
+  }))
+
   const wait = <T,>(value: T, ms = 0) => new Promise<T>((resolve) => { setTimeout(() => resolve(value), ms) })
   const locked = (action: string) => () => {
     onLocked(action)
@@ -327,6 +340,8 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     getCachedFriends: () => structuredClone(hub),
     getStudyGroups: () => wait(structuredClone(groups)),
     getCachedStudyGroups: () => structuredClone(groups),
+    getTasks: () => wait(structuredClone(tasks)),
+    getCachedTasks: () => structuredClone(tasks),
 
     generateFlashcards: (context) => {
       const content = findContent(context.course, context.unit)

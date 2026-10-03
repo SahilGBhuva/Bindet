@@ -49,6 +49,27 @@ class FriendsTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending")
         self.assertEqual(database.pending_friend_requests("sam-id")[0]["username"], "alex")
 
+    def test_recent_xp_groups_events_by_local_day(self):
+        from datetime import datetime, timedelta, timezone
+        database.update_progress("alex-id", "Biology", True, 30)
+        now = datetime.now(timezone.utc)
+        days = database.recent_xp("alex-id", days=7, now=now)
+        self.assertEqual(len(days), 7)
+        self.assertEqual(days[-1]["xp"], 30)
+        self.assertEqual(sum(day["xp"] for day in days), 30)
+        # Twelve hours west of UTC, an event just after UTC midnight still belongs to the previous local day.
+        midnight = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc) + timedelta(minutes=5)
+        with database.engine().begin() as connection:
+            connection.execute(database.xp_events.insert().values(student_id="sam-id", xp=5, created_at=midnight))
+        west = database.recent_xp("sam-id", days=3, tz_offset_minutes=720, now=midnight + timedelta(minutes=1))
+        self.assertEqual(west[-1], {"day": (now.date() - timedelta(days=1)).isoformat(), "xp": 5})
+
+    def test_progress_route_includes_recent_xp(self):
+        database.update_progress("alex-id", "Biology", True, 20)
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+            response = main.get_progress("alex-id", "Bearer test", tz_offset=0)
+        self.assertEqual(response.recent_xp[-1].xp, 20)
+
     def test_cannot_start_quest_with_non_friend(self):
         with self.assertRaisesRegex(ValueError, "friend_not_found"):
             database.create_friend_quest("alex-id", "sam-id", 100)

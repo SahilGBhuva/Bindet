@@ -47,6 +47,34 @@ class TaskTests(unittest.TestCase):
             self.assertEqual(main.delete_task(created["id"], "Bearer a"), {"deleted": True})
             self.assertEqual(main.get_tasks("Bearer a"), [])
 
+    def test_due_date_can_be_cleared_and_timestamps_are_utc(self):
+        due = datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc)
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-a"}):
+            created = main.create_task(main.TaskCreate(title="Essay", due_at=due), "Bearer a")
+            listed = main.get_tasks("Bearer a")[0]
+            self.assertEqual(listed["due_at"], due)
+            self.assertIsNotNone(listed["created_at"].tzinfo)
+            cleared = main.update_task(created["id"], main.TaskUpdate(due_at=None), "Bearer a")
+        self.assertIsNone(cleared["due_at"])
+
+    def test_blank_titles_are_rejected(self):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-a"}):
+            with self.assertRaises(main.HTTPException) as raised:
+                main.create_task(main.TaskCreate(title="   "), "Bearer a")
+            self.assertEqual(raised.exception.status_code, 400)
+            created = main.create_task(main.TaskCreate(title="Real"), "Bearer a")
+            with self.assertRaises(main.HTTPException) as raised:
+                main.update_task(created["id"], main.TaskUpdate(title="  "), "Bearer a")
+            self.assertEqual(raised.exception.status_code, 400)
+
+    def test_task_creation_is_rate_limited(self):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-a"}), patch.object(main, "TASK_CREATE_LIMIT", 2):
+            main.create_task(main.TaskCreate(title="One"), "Bearer a")
+            main.create_task(main.TaskCreate(title="Two"), "Bearer a")
+            with self.assertRaises(main.HTTPException) as raised:
+                main.create_task(main.TaskCreate(title="Three"), "Bearer a")
+        self.assertEqual(raised.exception.status_code, 429)
+
 
 if __name__ == "__main__":
     unittest.main()

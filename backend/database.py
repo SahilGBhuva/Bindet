@@ -210,24 +210,42 @@ RLS_TABLES = (
 )
 
 
+MAX_TASKS_PER_OWNER = 2000
+
+
+def _task_row(row) -> dict:
+    """SQLite drops tzinfo; stored task timestamps are UTC, so label them before they reach the client."""
+    task = dict(row)
+    for key in ("due_at", "created_at", "updated_at"):
+        value = task.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            task[key] = value.replace(tzinfo=timezone.utc)
+    return task
+
+
 def list_tasks(owner_id: str) -> list[dict]:
     init_db()
     with engine().connect() as connection:
         rows = connection.execute(select(study_tasks).where(
             study_tasks.c.owner_id == owner_id
         ).order_by(study_tasks.c.status.asc(), study_tasks.c.due_at.asc(), study_tasks.c.created_at.desc())).mappings().all()
-    return [dict(row) for row in rows]
+    return [_task_row(row) for row in rows]
 
 
 def create_task(owner_id: str, *, title: str, description: str, course: str, unit: str, status: str, priority: str, due_at: datetime | None) -> dict:
     init_db()
     now = datetime.now(timezone.utc)
+    if not title.strip():
+        raise ValueError("invalid_task_title")
     task = {
         "id": secrets.token_hex(16), "owner_id": owner_id, "title": title.strip(),
         "description": description.strip(), "course": course.strip(), "unit": unit.strip(),
         "status": status, "priority": priority, "due_at": due_at, "created_at": now, "updated_at": now,
     }
     with engine().begin() as connection:
+        owned = connection.execute(select(func.count()).select_from(study_tasks).where(study_tasks.c.owner_id == owner_id)).scalar_one()
+        if owned >= MAX_TASKS_PER_OWNER:
+            raise ValueError("task_limit_reached")
         connection.execute(study_tasks.insert().values(**task))
     return task
 
@@ -240,6 +258,9 @@ def update_task(owner_id: str, task_id: str, values: dict) -> dict:
         if key in {"title", "description", "course", "unit", "status", "priority", "due_at"}
         and (value is not None or key == "due_at")
     }
+    allowed = {key: value.strip() if isinstance(value, str) else value for key, value in allowed.items()}
+    if "title" in allowed and not allowed["title"]:
+        raise ValueError("invalid_task_title")
     allowed["updated_at"] = datetime.now(timezone.utc)
     with engine().begin() as connection:
         result = connection.execute(update(study_tasks).where(
@@ -250,7 +271,7 @@ def update_task(owner_id: str, task_id: str, values: dict) -> dict:
         row = connection.execute(select(study_tasks).where(
             study_tasks.c.id == task_id, study_tasks.c.owner_id == owner_id,
         )).mappings().one()
-    return dict(row)
+    return _task_row(row)
 
 
 def delete_task(owner_id: str, task_id: str) -> None:
@@ -672,6 +693,30 @@ def get_progress(student_id: str) -> dict | None:
             for row in topics
         },
     }
+
+
+def recent_xp(student_id: str, days: int = 14, tz_offset_minutes: int = 0, now: datetime | None = None) -> list[dict]:
+    """XP per local day for the last `days` days, oldest first.
+
+    tz_offset_minutes follows JavaScript's Date.getTimezoneOffset(): UTC minus local time.
+    """
+    init_db()
+    offset = timedelta(minutes=max(-840, min(840, tz_offset_minutes)))
+    now = now or datetime.now(timezone.utc)
+    local_today = (now - offset).date()
+    start_local = local_today - timedelta(days=days - 1)
+    start_utc = datetime.combine(start_local, datetime.min.time(), tzinfo=timezone.utc) + offset
+    with engine().connect() as connection:
+        rows = connection.execute(select(xp_events.c.xp, xp_events.c.created_at).where(
+            xp_events.c.student_id == student_id, xp_events.c.created_at >= start_utc,
+        )).all()
+    totals = {start_local + timedelta(days=index): 0 for index in range(days)}
+    for xp, created_at in rows:
+        stamp = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        day = (stamp - offset).date()
+        if day in totals:
+            totals[day] += int(xp)
+    return [{"day": day.isoformat(), "xp": xp} for day, xp in totals.items()]
 
 
 def create_profile(student_id: str, username: str, display_name: str) -> dict:

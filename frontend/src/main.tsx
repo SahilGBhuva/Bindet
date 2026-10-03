@@ -4,6 +4,10 @@ import './index.css'
 // Shared primitives load before any page stylesheet so pages can refine them.
 import './styles/ui.css'
 import App from './App.tsx'
+import { applyTheme, watchSystemTheme } from './lib/theme'
+
+applyTheme()
+watchSystemTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

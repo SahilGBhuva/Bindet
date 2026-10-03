@@ -54,6 +54,8 @@ export type Progress = {
   best_login_streak: number
   weak_topics: string[]
   topics: TopicStat[]
+  // XP per local day, oldest first. Present on server responses; the demo may omit it.
+  recent_xp?: { day: string; xp: number }[]
 }
 export type Profile = {
   student_id: string
@@ -116,6 +118,12 @@ export type StudyTask = {
 }
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
+
+/* Server timestamps are UTC. Some database drivers omit the zone, so add it before parsing. */
+export function parseServerTime(value: string | null | undefined): number {
+  if (!value) return NaN
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(value) ? value : `${value}Z`)
+}
 const CACHE_WINDOW_MS = 30_000
 
 function tokenSubject(accessToken: string) {
@@ -267,7 +275,7 @@ export async function getProgress(studentId: string, accessToken?: string, force
   const headers = new Headers()
   const token = await resolvedToken(accessToken)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(`${API_URL}/api/progress/${encodeURIComponent(studentId)}`, { headers })
+  const response = await fetch(`${API_URL}/api/progress/${encodeURIComponent(studentId)}?tz_offset=${new Date().getTimezoneOffset()}`, { headers })
   if (response.status === 404) return null
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: string } | null
@@ -311,8 +319,26 @@ export function saveAccountProfile(
   }, accessToken)
 }
 
-export function getTasks(accessToken: string) {
-  return request<StudyTask[]>('/api/tasks', undefined, accessToken)
+const taskCache = new Map<string, { savedAt: number; data: StudyTask[] }>()
+
+export function getCachedTasks(accessToken: string) {
+  const identity = tokenSubject(accessToken)
+  return taskCache.get(identity)?.data ?? readSessionCache<StudyTask[]>(`bindit:tasks:${identity}`)?.data ?? null
+}
+
+/* Keeps optimistic edits in the cache so the next visit shows them immediately. */
+export function setCachedTasks(accessToken: string, data: StudyTask[]) {
+  const identity = tokenSubject(accessToken)
+  taskCache.set(identity, { savedAt: Date.now(), data })
+  writeSessionCache(`bindit:tasks:${identity}`, data)
+}
+
+export async function getTasks(accessToken: string, force = false) {
+  const cached = taskCache.get(tokenSubject(accessToken)) ?? readSessionCache<StudyTask[]>(`bindit:tasks:${tokenSubject(accessToken)}`)
+  if (!force && cached && Date.now() - cached.savedAt < CACHE_WINDOW_MS) return cached.data
+  const data = await request<StudyTask[]>('/api/tasks', undefined, accessToken)
+  setCachedTasks(accessToken, data)
+  return data
 }
 
 export function createTask(task: Pick<StudyTask, 'title' | 'description' | 'course' | 'unit' | 'status' | 'priority'> & { due_at?: string | null }, accessToken: string) {

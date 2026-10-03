@@ -1,79 +1,94 @@
 /*
- * Design tokens for the signed-in app.
+ * bindit design tokens.
  *
- * Light theme: a near-white ground with white bordered cards, dark navy text and
- * one saturated blue accent for links, active states and primary actions.
- * The logged-out landing page (components/Landing.css) and auth screens
- * (components/GuestAuth.css) reuse these tokens with their own, louder treatment.
+ * Paper and ink: a warm off-white ground, white sheets with hairline rules, near-black
+ * ink for text and the primary action, and one violet "binder" thread for brand,
+ * selection and progress. Course and people colors tell things apart; status colors
+ * carry meaning. Nothing else is colored.
+ *
+ * Themes: index.html sets data-theme="light" | "dark" on <html> before first paint
+ * (lib/theme.ts keeps it in sync with the saved preference and the OS setting), so
+ * every component reads the same tokens in both themes.
  */
 :root {
+  color-scheme: light;
+
   /* Ground and surfaces */
-  --color-bg: #f6f7f9;
-  --color-surface: #fcfcfa;
-  --color-surface-hover: #f0efeb;
-  --color-surface-active: #e9e8e3;
+  --color-bg: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f1efea;
+  --color-surface-hover: #f2f1ec;
+  --color-surface-active: #e9e7e1;
 
-  /* Borders */
-  --color-border: #dfded8;
-  --color-border-strong: #cac8c0;
+  /* Rules */
+  --color-border: #e5e2da;
+  --color-border-strong: #d1cdc3;
 
-  /* Text */
-  --color-text: #171713;
-  --color-text-secondary: #65645e;
-  --color-text-tertiary: #929089;
+  /* Ink */
+  --color-text: #18181b;
+  --color-text-secondary: #5b5a56;
+  --color-text-tertiary: #87867f;
 
-  /* Primary accent: links, active states and the main action. */
-  --color-accent: #172034;
-  --color-accent-hover: #2d394f;
-  --color-accent-text: #344159;
-  --color-accent-subtle: #e8edf5;
+  /* Primary action: solid ink. */
+  --color-accent: #1c1d24;
+  --color-accent-hover: #34353f;
   --color-on-accent: #ffffff;
-  --color-dark: #1b1c22;
-  --color-dark-hover: #303139;
+  --color-dark: #1c1d24;
+  --color-dark-hover: #34353f;
   --color-on-dark: #ffffff;
-  --color-focus: rgba(23, 32, 52, 0.3);
+
+  /* The binder thread: brand, links, selection, progress. */
+  --color-brand: #5b4dd8;
+  --color-brand-text: #4a3dc2;
+  --color-brand-tint: #eeebfc;
+  --color-accent-text: var(--color-brand-text);
+  --color-accent-subtle: var(--color-brand-tint);
+  --color-focus: rgba(91, 77, 216, .55);
 
   /*
-   * Color palette for telling things apart: courses, stats, card icons, people.
-   * Base is for fills (meters, borders, badges behind white text). -text is the
-   * readable shade for text and icons (>= 4.7:1 on its tint and on white).
-   * -tint is the light background.
+   * Palette for telling things apart: courses, people, card types.
+   * Base fills meters and badges behind white text; -text is the readable shade
+   * (>= 4.5:1 on its tint and on the surface); -tint is the quiet background.
    */
-  --color-blue: #0b5cff;
-  --color-blue-text: #0b58f5;
-  --color-blue-tint: #e4edff;
-  --color-violet: #7c3aed;
-  --color-violet-text: #7c3aed;
-  --color-violet-tint: #f1e9fd;
-  --color-green: #12a150;
-  --color-green-text: #0e7a3d;
-  --color-green-tint: #e5f5ec;
-  --color-orange: #ea580c;
-  --color-orange-text: #b74509;
-  --color-orange-tint: #fdede4;
-  --color-pink: #db2777;
-  --color-pink-text: #c12269;
-  --color-pink-tint: #fbe7f0;
-  --color-teal: #0d9488;
-  --color-teal-text: #0a766d;
-  --color-teal-tint: #e4f3f2;
-  --color-amber: #d97706;
-  --color-amber-text: #a15804;
-  --color-amber-tint: #fbf0e4;
+  --color-blue: #2f63e0;
+  --color-blue-text: #2553c4;
+  --color-blue-tint: #e8eefc;
+  --color-violet: #6d4fd6;
+  --color-violet-text: #5b3fc4;
+  --color-violet-tint: #efebfb;
+  --color-green: #1f8a52;
+  --color-green-text: #17703f;
+  --color-green-tint: #e6f3eb;
+  --color-orange: #d6541b;
+  --color-orange-text: #ad4211;
+  --color-orange-tint: #fbece4;
+  --color-pink: #c93370;
+  --color-pink-text: #ad2a5f;
+  --color-pink-tint: #f9e8ef;
+  --color-teal: #12867a;
+  --color-teal-text: #0e6c63;
+  --color-teal-tint: #e3f1ef;
+  --color-amber: #c27407;
+  --color-amber-text: #935605;
+  --color-amber-tint: #f8efe0;
 
-  /* Status colors are for meaning (right/wrong, risk). */
+  /* Status: meaning only, always paired with a label or icon. */
   --color-positive: var(--color-green-text);
   --color-positive-subtle: var(--color-green-tint);
   --color-warning: var(--color-amber-text);
   --color-warning-subtle: var(--color-amber-tint);
-  --color-danger: #c4271b;
-  --color-danger-subtle: #fdeceb;
+  --color-danger: #c0341f;
+  --color-danger-subtle: #fbeae6;
 
-  /* Brand gradient: page titles and progress fills */
-  --gradient-brand: linear-gradient(90deg, #191a20 0%, #51479b 100%);
+  /* Progress fills use the binder thread. */
+  --gradient-brand: var(--color-brand);
 
-  /* Type: bold, larger headings; body stays compact for dense lists and tables */
+  /* Type: Inter for interface, Instrument Serif for editorial moments. */
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Instrument Serif", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
   --text-base: 14px;
@@ -81,6 +96,7 @@
   --text-lg: 18px;
   --text-xl: 22px;
   --text-2xl: 30px;
+  --text-display: clamp(34px, 3.8vw, 46px);
   --leading-tight: 1.2;
   --leading-normal: 1.5;
   --weight-regular: 400;
@@ -88,8 +104,9 @@
   --weight-semibold: 600;
   --weight-bold: 700;
   --tracking-tight: -0.015em;
+  --tracking-label: .08em;
 
-  /* Spacing, on a 4px grid */
+  /* Spacing on a 4px grid */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -100,42 +117,156 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  /* Radius: moderate for cards and inputs, fully rounded for buttons, badges and avatars */
+  /* Radius: small for controls, medium for sheets. Pills are for status chips only. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-full: 999px;
 
-  /* Shadow: floating layers (menus, dialogs) and the primary button. Cards use borders. */
-  --shadow-popover: 0 12px 32px rgba(11, 27, 51, 0.12), 0 0 0 1px var(--color-border);
-  --shadow-primary: 0 1px 2px rgba(11, 92, 255, 0.24), 0 6px 16px rgba(11, 92, 255, 0.28);
-  --shadow-primary-hover: 0 2px 4px rgba(11, 92, 255, 0.28), 0 10px 22px rgba(11, 92, 255, 0.34);
+  /* Elevation: sheets use rules; only floating layers cast shadows. */
+  --shadow-xs: 0 1px 1px rgba(24, 22, 16, .04);
+  --shadow-sm: 0 1px 2px rgba(24, 22, 16, .05), 0 0 0 1px rgba(24, 22, 16, .02);
+  --shadow-popover: 0 16px 40px rgba(24, 22, 16, .12), 0 2px 6px rgba(24, 22, 16, .06), 0 0 0 1px var(--color-border);
+  --shadow-primary: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 1px 2px rgba(24, 22, 16, .18);
+  --shadow-primary-hover: 0 1px 0 rgba(255, 255, 255, .08) inset, 0 4px 10px rgba(24, 22, 16, .16);
 
-  /* Motion */
-  --duration-fast: 120ms;
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* Motion: short, eased, and never in the way. */
+  --duration-instant: 80ms;
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
 
   /* Layout */
-  --layout-sidebar-width: 218px;
-  --layout-content-max-width: 1380px;
+  --layout-sidebar-width: 236px;
+  --layout-content-max-width: 1240px;
 
   font-family: var(--font-sans);
   color: var(--color-text);
   background: var(--color-bg);
   font-synthesis: none;
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #111113;
+  --color-surface: #18181b;
+  --color-surface-raised: #1e1e22;
+  --color-surface-sunken: #141416;
+  --color-surface-hover: #212125;
+  --color-surface-active: #2a2a2f;
+
+  --color-border: #2a2a2f;
+  --color-border-strong: #3a3a40;
+
+  --color-text: #ecebe7;
+  --color-text-secondary: #a8a7a1;
+  --color-text-tertiary: #7a7973;
+
+  --color-accent: #ecebe7;
+  --color-accent-hover: #ffffff;
+  --color-on-accent: #141416;
+  --color-dark: #ecebe7;
+  --color-dark-hover: #ffffff;
+  --color-on-dark: #141416;
+
+  --color-brand: #8b7ff0;
+  --color-brand-text: #a99ff6;
+  --color-brand-tint: #25223a;
+  --color-focus: rgba(169, 159, 246, .6);
+
+  --color-blue: #4d7ee8;
+  --color-blue-text: #8fb0f5;
+  --color-blue-tint: #1b2335;
+  --color-violet: #7d63e0;
+  --color-violet-text: #b3a3f4;
+  --color-violet-tint: #241f38;
+  --color-green: #2a9a5f;
+  --color-green-text: #7fd0a1;
+  --color-green-tint: #16271e;
+  --color-orange: #dd6a2f;
+  --color-orange-text: #f0a47a;
+  --color-orange-tint: #2d1d15;
+  --color-pink: #d04a80;
+  --color-pink-text: #ef9bbd;
+  --color-pink-tint: #2d1821;
+  --color-teal: #1b9a8c;
+  --color-teal-text: #7dd1c6;
+  --color-teal-tint: #142624;
+  --color-amber: #cf8a1c;
+  --color-amber-text: #edc07a;
+  --color-amber-tint: #2b2214;
+
+  --color-danger: #f08a78;
+  --color-danger-subtle: #2f1a17;
+
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, .3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .02);
+  --shadow-popover: 0 18px 44px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3), 0 0 0 1px var(--color-border);
+  --shadow-primary: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-primary-hover: 0 4px 12px rgba(0, 0, 0, .45);
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: auto; }
+html { scroll-behavior: auto; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   background: var(--color-bg);
+  color: var(--color-text);
 }
-::selection { background: #dcd8ff; color: #171713; }
+::selection { background: color-mix(in srgb, var(--color-brand) 24%, transparent); color: inherit; }
 button, input, select, textarea {
   font-family: inherit;
   color: inherit;
+}
+img, svg, video, canvas { max-width: 100%; }
+#root { min-height: 100vh; }
+
+/* One focus treatment everywhere: visible on keyboard, invisible on click. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  transform: translateY(-150%);
+}
+.skip-link:focus { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }

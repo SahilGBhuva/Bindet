@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
   consumeAuthRedirectSession,
   loadAuthSession,
@@ -10,25 +10,54 @@ import {
   type AuthSession,
 } from '../lib/auth'
 import { AuthContext } from '../lib/AuthContext'
-import { ColorBackdrop, Landing } from './Landing'
+import { BrandMark } from '../lib/SiteSidebar'
 import './GuestAuth.css'
 
 type Mode = 'login' | 'signup'
 type GateView = 'landing' | 'auth' | 'confirm'
 const RESEND_SECS = 60
 
+// The landing page (and its demo and 3D scene) is only downloaded by signed-out visitors.
+const Landing = lazy(() => import('./Landing').then((module) => ({ default: module.Landing })))
+
+/* The quiet editorial panel beside the form: loose notes drawn together on one spine. */
+function AuthAside({ mode }: { mode: 'login' | 'signup' | 'confirm' }) {
+  return (
+    <aside className="auth-aside" aria-hidden="true">
+      <div className="auth-aside__art">
+        <svg viewBox="0 0 360 300" className="auth-aside__svg">
+          <path className="auth-thread" d="M180 40 C120 70 70 90 60 150 M180 40 C230 80 300 90 300 150 M180 40 L180 260 M60 150 C90 200 140 230 180 260 M300 150 C270 200 220 230 180 260" />
+          <rect className="auth-sheet" x="30" y="122" width="62" height="78" rx="4" transform="rotate(-6 61 161)" />
+          <rect className="auth-sheet" x="268" y="118" width="62" height="78" rx="4" transform="rotate(5 299 157)" />
+          <rect className="auth-sheet is-card" x="146" y="226" width="68" height="46" rx="4" />
+          <rect className="auth-sheet is-spine" x="158" y="18" width="44" height="46" rx="5" />
+          <circle className="auth-node" cx="60" cy="150" r="4" /><circle className="auth-node" cx="300" cy="150" r="4" /><circle className="auth-node" cx="180" cy="260" r="4" /><circle className="auth-node is-brand" cx="180" cy="40" r="5" />
+        </svg>
+      </div>
+      <p className="auth-aside__quote">{mode === 'login' ? 'Pick up exactly where you left off.' : mode === 'confirm' ? 'One step left. Your workspace is ready.' : 'Notes, assignments, and practice, bound into one place.'}</p>
+      <ol className="auth-aside__steps">
+        <li><b>01</b>Add notes and materials</li>
+        <li><b>02</b>Bind them into courses and units</li>
+        <li><b>03</b>Generate grounded study sets</li>
+        <li><b>04</b>Practice and track mastery</li>
+      </ol>
+    </aside>
+  )
+}
+
 function AuthBrand() {
   return (
     <span className="auth-brand">
-      <img src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" />
+      <BrandMark size={24} />
       bindit
     </span>
   )
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<AuthSession | null>(() => consumeAuthRedirectSession() ?? loadAuthSession())
-  const [loading, setLoading] = useState(Boolean(session))
+  const [initialSession] = useState<AuthSession | null>(() => consumeAuthRedirectSession() ?? loadAuthSession())
+  const [session, setSession] = useState<AuthSession | null>(initialSession)
+  const [loading, setLoading] = useState(Boolean(initialSession))
   const [view, setView] = useState<GateView>('landing')
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
@@ -57,15 +86,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [password])
 
   useEffect(() => {
-    if (!session) {
-      setLoading(false)
-      return
-    }
-    void refreshAuthSession(session).then((next) => {
+    if (!initialSession) return
+    void refreshAuthSession(initialSession).then((next) => {
       setSession(next)
       setLoading(false)
     })
-  }, [])
+  }, [initialSession])
 
   useEffect(() => {
     if (resendIn <= 0) return
@@ -117,10 +143,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (loading) {
     return (
       <main className="auth auth--loading">
-        <ColorBackdrop />
         <div className="auth-loading" role="status">
-          <img className="auth-loading__mascot" src="/bindit-mascot-cutout.webp" alt="" width="120" height="144" />
-          <p>Opening bindit…</p>
+          <BrandMark size={32} />
+          <p>Opening your workspace…</p>
         </div>
       </main>
     )
@@ -177,10 +202,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (view === 'confirm') {
       return (
         <main className="auth">
-          <ColorBackdrop />
           <section className="auth-card" aria-labelledby="auth-title">
-            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
             <AuthBrand />
+            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
             <p className="auth-eyebrow">Confirm email</p>
             <h1 className="auth-title" id="auth-title">Check your inbox</h1>
             <p className="auth-lead">We sent a code to {pendingEmail}. Paste it below. You can resend after 1 minute if it never shows up.</p>
@@ -200,7 +224,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               </label>
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
+              <button className="auth-submit" type="submit" disabled={busy}>
                 {busy ? 'Checking…' : 'Confirm and enter'}
               </button>
             </form>
@@ -213,6 +237,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               </button>
             </div>
           </section>
+          <AuthAside mode="confirm" />
         </main>
       )
     }
@@ -220,13 +245,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
     if (view === 'auth') {
       return (
         <main className="auth">
-          <ColorBackdrop />
           <section className="auth-card" aria-labelledby="auth-title">
-            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
-            <button className="auth-text-btn auth-back" type="button" onClick={() => setView('landing')}>
-              ← Back to bindit
-            </button>
-            <AuthBrand />
+            <div className="auth-card__top">
+              <AuthBrand />
+              <button className="auth-text-btn auth-back" type="button" onClick={() => setView('landing')}>
+                ← Back
+              </button>
+            </div>
             <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : 'Start studying'}</p>
             <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : 'Create your account'}</h1>
             {mode === 'signup' && signupReason ? (
@@ -234,14 +259,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
               </p>
             ) : null}
-            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-              <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'is-on' : ''} disabled={busy} onClick={() => switchMode('login')}>
-                Log in
-              </button>
-              <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'is-on' : ''} disabled={busy} onClick={() => switchMode('signup')}>
-                Sign up
-              </button>
-            </div>
             <form className="auth-form" onSubmit={submit}>
               <label className="auth-field">
                 <span>Email</span>
@@ -273,16 +290,25 @@ export function AuthGate({ children }: { children: ReactNode }) {
               ) : null}
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
-              <button className="lp-btn lp-btn--primary lp-btn--lg auth-submit" type="submit" disabled={busy}>
-                {busy ? 'Working…' : mode === 'login' ? 'Log in' : 'Get started'}
+              <button className="auth-submit" type="submit" disabled={busy}>
+                {busy ? (mode === 'login' ? 'Logging in…' : 'Creating account…') : mode === 'login' ? 'Log in' : 'Create account'}
               </button>
             </form>
+            <p className="auth-switch">
+              {mode === 'login' ? 'New to bindit?' : 'Already have an account?'}{' '}
+              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'Create an account' : 'Log in'}</button>
+            </p>
           </section>
+          <AuthAside mode={mode} />
         </main>
       )
     }
 
-    return <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
+    return (
+      <Suspense fallback={<div className="auth-backdrop" aria-hidden="true" />}>
+        <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
+      </Suspense>
+    )
   }
 
   return <AuthContext.Provider value={{ session, setSession }}>{children}</AuthContext.Provider>
