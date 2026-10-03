@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,6 +24,7 @@ import database
 import questions
 import note_ingestion
 import note_store
+import rate_limit
 import tutor
 import tasks
 
@@ -51,6 +52,22 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Server-Timing", "X-Bindit-Response-Ms"],
 )
+
+
+@app.middleware("http")
+async def limit_request_rate(request, call_next):
+    """Burst guard: refuse floods before any sign-in check, database or AI work (see rate_limit.py)."""
+    address = rate_limit.address_of(request.headers, request.client.host if request.client else None)
+    rate_limit.client_address.set(address)
+    wait = rate_limit.check_request(request.url.path, request.method, address, request.headers.get("authorization"))
+    if wait:
+        seconds = rate_limit.retry_after(wait)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": f"You’re sending requests too quickly. Wait {seconds} seconds and try again."},
+            headers={"Retry-After": seconds},
+        )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -134,6 +151,9 @@ class QuestionResponse(BaseModel):
 
 
 TUTOR_HOURLY_LIMIT = 60
+NOTE_UPLOADS_PER_DAY = 60
+AI_OCR_PER_DAY = 30
+GUEST_QUESTIONS_PER_DAY = 300
 TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 TUTOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024
 
@@ -602,7 +622,16 @@ def social_error(error: ValueError) -> HTTPException:
         "invalid_notice": (400, "Write a message for the group"),
     }
     status, message = messages.get(str(error), (400, "Could not update that profile"))
-    return HTTPException(status_code=status, detail=message)
+    headers = {"Retry-After": "60"} if status == 429 else None
+    return HTTPException(status_code=status, detail=message, headers=headers)
+
+
+def limit_action(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
+    """Durable per-action limit (shared across server instances); raises a friendly 429."""
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        raise social_error(error) from error
 
 
 @app.get("/")
@@ -638,11 +667,13 @@ async def upload_note(
     authorization: Annotated[str | None, Header()] = None,
 ):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     filename = file.filename or "notes"
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
     try:
         suffix = Path(filename).suffix.lower()
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
+            limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
@@ -656,6 +687,7 @@ async def upload_note(
                 text = note_ingestion.extract_text(filename, content)
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
+                    limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
                     text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=content))
                 else:
                     raise
@@ -685,6 +717,7 @@ def get_note(note_id: str, authorization: Annotated[str | None, Header()] = None
 @app.delete("/api/notes/{note_id}")
 def delete_note(note_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "note_delete", 120)
     if not note_store.remove_note(user["id"], note_id):
         raise HTTPException(status_code=404, detail="Note not found")
     return {"deleted": True}
@@ -788,6 +821,7 @@ def tutor_messages(conversation_id: str, before: int | None = None, authorizatio
 @app.delete("/api/tutor/conversations/{conversation_id}")
 def delete_tutor_conversation(conversation_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "tutor_delete", 60)
     try:
         return {"deleted": tutor.delete_conversation(user["id"], conversation_id)}
     except ValueError as error:
@@ -828,7 +862,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     try:
         database.check_social_rate_limit(owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
     except ValueError as error:
-        raise HTTPException(status_code=429, detail="You’ve sent a lot of messages this hour. Take a short break and try again soon.") from error
+        raise HTTPException(status_code=429, detail="You’ve sent a lot of messages this hour. Take a short break and try again soon.", headers={"Retry-After": "300"}) from error
     image_parts = tutor_image_parts(data.images)
     try:
         conversation = tutor.get_conversation(owner, data.conversation_id) if data.conversation_id else tutor.start_conversation(owner, content, data.course.strip(), data.unit.strip())
@@ -980,6 +1014,7 @@ def start_friend_quest(data: FriendQuestCreate, authorization: Annotated[str | N
 @app.put("/api/account/profile", response_model=ProfileResponse)
 def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "profile_update", 30)
     try:
         profile = database.onboard_account(
             user["id"],
@@ -1174,6 +1209,9 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             raise social_error(error) from error
     else:
         student_id = verified_student_id(data.student_id, authorization)
+        if not authorization:
+            # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
+            limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
 
     if has_school_context and data.notes:
         target_topic = data.notes.unit.strip() or data.notes.course.strip()
@@ -1356,5 +1394,6 @@ def get_progress(student_id: str, authorization: Annotated[str | None, Header()]
 @app.post("/api/daily-login", response_model=ProgressResponse)
 def daily_login(data: DailyLoginRequest, authorization: Annotated[str | None, Header()] = None):
     student_id = auth.authenticated_user(authorization)["id"]
+    limit_action(student_id, "daily_login", 30)
     record = database.record_daily_login(student_id)
     return progress_response(student_id, record)
