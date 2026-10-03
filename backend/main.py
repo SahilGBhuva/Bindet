@@ -1124,6 +1124,7 @@ def add_task_comment_route(task_id: str, data: TaskCommentCreate, authorization:
 @app.delete("/api/tasks/{task_id}/comments/{comment_id}")
 def delete_task_comment_route(task_id: str, comment_id: int, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:
         return {"deleted": tasks.delete_comment(user["id"], task_id, comment_id)}
     except ValueError as error:
@@ -1145,6 +1146,7 @@ def add_task_attachment_route(task_id: str, data: TaskAttachmentCreate, authoriz
 @app.delete("/api/tasks/{task_id}/attachments/{attachment_id}")
 def delete_task_attachment_route(task_id: str, attachment_id: int, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:
         return {"deleted": tasks.remove_attachment(user["id"], task_id, attachment_id)}
     except ValueError as error:
@@ -1173,6 +1175,7 @@ def create_milestone_route(group_id: str, data: MilestoneCreate, authorization: 
 @app.delete("/api/study-groups/{group_id}/milestones/{milestone_id}")
 def delete_milestone_route(group_id: str, milestone_id: int, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:
         return {"deleted": tasks.delete_milestone(user["id"], group_id, milestone_id)}
     except ValueError as error:
