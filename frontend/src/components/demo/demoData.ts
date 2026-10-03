@@ -1,4 +1,4 @@
-import type { AnswerResult, Flashcard, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, StudyTask } from '../../lib/api'
+import type { AnswerResult, Flashcard, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { COURSE_TONES } from '../../lib/session'
@@ -297,16 +297,23 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     },
   ]
 
-  const tasks: StudyTask[] = [
-    { title: 'Genetics problem set', course: 'AP Biology', unit: 'Genetics', status: 'in_progress', priority: 'high', due: -1 },
-    { title: 'Stoichiometry lab write-up', course: 'Chemistry', unit: 'Stoichiometry', status: 'todo', priority: 'high', due: -2 },
-    { title: 'Revolution DBQ outline', course: 'US History', unit: 'Revolution', status: 'review', priority: 'medium', due: -4 },
-    { title: 'Log rules worksheet', course: 'Algebra II', unit: 'Logarithms', status: 'todo', priority: 'low', due: -6 },
-    { title: 'Cells vocabulary review', course: 'AP Biology', unit: 'Cells', status: 'complete', priority: 'low', due: 2 },
-  ].map((task, index) => ({
-    id: `demo-task-${index}`, owner_id: DEMO_STUDENT, title: task.title, description: '', course: task.course, unit: task.unit,
-    status: task.status as StudyTask['status'], priority: task.priority as StudyTask['priority'],
-    due_at: iso(task.due), created_at: iso(10), updated_at: iso(1),
+  const day = (offset: number) => new Date(DEMO_NOW + offset * DAY).toISOString().slice(0, 10)
+  const me = { student_id: DEMO_STUDENT, display_name: 'Maya Rodriguez' }
+  const priya = { student_id: 'f2', display_name: 'Priya Natarajan' }
+  const tasks: Task[] = ([
+    { title: 'Genetics problem set', course: 'AP Biology', status: 'in_progress', priority: 'high', due: 1, time: '23:59', group: null, assignees: [me] },
+    { title: 'Stoichiometry lab write-up', course: 'Chemistry', status: 'todo', priority: 'high', due: 2, time: null, group: null, assignees: [me] },
+    { title: 'Study circle: unit test review', course: 'AP Biology', status: 'todo', priority: 'medium', due: 0, time: '16:30', group: 'g1', assignees: [me, priya], kind: 'event', location: 'Library room 2' },
+    { title: 'Revolution DBQ outline', course: 'US History', status: 'review', priority: 'medium', due: 4, time: null, group: null, assignees: [me] },
+    { title: 'Make Punnett square practice set', course: 'AP Biology', status: 'todo', priority: 'medium', due: 3, time: null, group: 'g1', assignees: [priya] },
+    { title: 'Cells vocabulary review', course: 'AP Biology', status: 'done', priority: 'low', due: -2, time: null, group: null, assignees: [me] },
+  ] as const).map((task, index) => ({
+    id: `demo-task-${index}`, title: task.title, description: '', course: task.course, project: '',
+    status: task.status, priority: task.priority, due_date: day(task.due), due_time: task.time,
+    kind: ('kind' in task ? task.kind : 'task') as Task['kind'], location: 'location' in task ? task.location : '',
+    milestone_id: null, sort_order: 0, group_id: task.group, group_name: task.group === 'g1' ? 'AP Bio study circle' : null,
+    owner: me, assignees: [...task.assignees], checklist_total: 0, checklist_done: 0, comment_count: 0, attachment_count: 0,
+    created_at: iso(10), updated_at: iso(1), completed_at: task.status === 'done' ? iso(1) : null, can_edit: false, can_delete: false,
   }))
 
   const wait = <T,>(value: T, ms = 0) => new Promise<T>((resolve) => { setTimeout(() => resolve(value), ms) })

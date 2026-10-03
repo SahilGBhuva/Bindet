@@ -25,6 +25,7 @@ import questions
 import note_ingestion
 import note_store
 import tutor
+import tasks
 
 # Refuse to start in production without a durable PostgreSQL database.
 database.validate_database_configuration()
@@ -152,44 +153,81 @@ class TutorMessageRequest(BaseModel):
     images: list[TutorImage] = Field(default_factory=list, max_length=3)
 
 
-TASK_CREATE_LIMIT = 300
+TaskStatus = Literal["todo", "in_progress", "review", "done"]
+TaskPriority = Literal["low", "medium", "high", "urgent"]
+TASK_CREATE_LIMIT = 200
 TASK_WRITE_LIMIT = 900
+TASK_COMMENT_LIMIT = 120
 
 
 class TaskCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=120)
-    description: str = Field(default="", max_length=500)
+    title: str = Field(min_length=1, max_length=140)
+    description: str = Field(default="", max_length=4000)
     course: str = Field(default="", max_length=120)
-    unit: str = Field(default="", max_length=160)
-    status: Literal["todo", "in_progress", "review", "complete"] = "todo"
-    priority: Literal["low", "medium", "high"] = "medium"
-    due_at: datetime | None = None
+    project: str = Field(default="", max_length=120)
+    status: TaskStatus = "todo"
+    priority: TaskPriority = "medium"
+    due_date: str | None = Field(default=None, max_length=10)
+    due_time: str | None = Field(default=None, max_length=5)
+    group_id: str | None = Field(default=None, max_length=32)
+    assignee_ids: list[str] | None = Field(default=None, max_length=10)
+    milestone_id: int | None = None
+    kind: Literal["task", "event"] = "task"
+    location: str = Field(default="", max_length=160)
 
 
 class TaskUpdate(BaseModel):
+    """Only fields the client sends are applied; send null to clear an optional field."""
     model_config = ConfigDict(extra="forbid")
-    title: str | None = Field(default=None, min_length=1, max_length=120)
-    description: str | None = Field(default=None, max_length=500)
+    title: str | None = Field(default=None, min_length=1, max_length=140)
+    description: str | None = Field(default=None, max_length=4000)
     course: str | None = Field(default=None, max_length=120)
-    unit: str | None = Field(default=None, max_length=160)
-    status: Literal["todo", "in_progress", "review", "complete"] | None = None
-    priority: Literal["low", "medium", "high"] | None = None
-    due_at: datetime | None = None
+    project: str | None = Field(default=None, max_length=120)
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    due_date: str | None = Field(default=None, max_length=10)
+    due_time: str | None = Field(default=None, max_length=5)
+    assignee_ids: list[str] | None = Field(default=None, max_length=10)
+    milestone_id: int | None = None
+    sort_order: int | None = None
+    kind: Literal["task", "event"] | None = None
+    location: str | None = Field(default=None, max_length=160)
 
 
-class TaskResponse(BaseModel):
-    id: str
-    owner_id: str
-    title: str
-    description: str
-    course: str
-    unit: str
-    status: str
-    priority: str
-    due_at: datetime | None
-    created_at: datetime
-    updated_at: datetime
+class ChecklistItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=200)
+
+
+class ChecklistItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, min_length=1, max_length=200)
+    done: bool | None = None
+
+
+class TaskCommentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class TaskAttachmentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["link", "note"]
+    url: str = Field(default="", max_length=500)
+    label: str = Field(default="", max_length=160)
+    note_id: str = Field(default="", max_length=36)
+
+
+class GroupNotice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(min_length=1, max_length=200)
+
+
+class MilestoneCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=80)
+    due_date: str | None = Field(default=None, max_length=10)
 
 
 class FlashcardRequest(BaseModel):
@@ -536,8 +574,32 @@ def social_error(error: ValueError) -> HTTPException:
         "group_full": (409, "That study group already has 20 members"),
         "group_limit_reached": (409, "You can join up to 8 study groups"),
         "group_owner_cannot_leave": (409, "Group owners cannot leave their group"),
-        "invalid_task_title": (400, "Give the assignment a title"),
-        "task_limit_reached": (409, "You have reached the assignment limit. Delete finished assignments to add more."),
+        "task_not_found": (404, "That task could not be found"),
+        "task_forbidden": (403, "Only the task creator, its assignees, or the group owner can change this task"),
+        "invalid_task_title": (400, "Give the task a title"),
+        "invalid_task_status": (400, "Choose a valid task status"),
+        "invalid_task_priority": (400, "Choose a valid priority"),
+        "invalid_due_date": (400, "Use a valid due date"),
+        "invalid_due_time": (400, "Use a valid due time"),
+        "invalid_assignee": (400, "Tasks can only be assigned to members of the task's group"),
+        "too_many_assignees": (400, "A task can have up to 10 assignees"),
+        "task_limit_reached": (409, "You have reached the task limit. Delete finished tasks to add more."),
+        "invalid_checklist_item": (400, "Checklist items need some text"),
+        "checklist_full": (409, "A task can have up to 50 checklist items"),
+        "checklist_item_not_found": (404, "That checklist item could not be found"),
+        "invalid_comment": (400, "Write a comment first"),
+        "comment_not_found": (404, "That comment could not be found"),
+        "invalid_attachment": (400, "That attachment type is not supported"),
+        "invalid_attachment_url": (400, "Links must start with http:// or https://"),
+        "attachments_full": (409, "A task can have up to 20 attachments"),
+        "attachment_not_found": (404, "That attachment could not be found"),
+        "note_not_found": (404, "Note not found"),
+        "milestone_not_found": (404, "That milestone could not be found in this group"),
+        "invalid_milestone": (400, "Give the milestone a title"),
+        "milestone_limit_reached": (409, "A group can have up to 30 milestones"),
+        "group_owner_required": (403, "Only the group owner can do that"),
+        "invalid_task_kind": (400, "Choose task or event"),
+        "invalid_notice": (400, "Write a message for the group"),
     }
     status, message = messages.get(str(error), (400, "Could not update that profile"))
     return HTTPException(status_code=status, detail=message)
@@ -936,42 +998,169 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
     return profile
 
 
-@app.get("/api/tasks", response_model=list[TaskResponse])
-def get_tasks(authorization: Annotated[str | None, Header()] = None):
-    user = auth.authenticated_user(authorization)
-    return database.list_tasks(user["id"])
-
-
-@app.post("/api/tasks", response_model=TaskResponse, status_code=201)
-def create_task(data: TaskCreate, authorization: Annotated[str | None, Header()] = None):
+@app.get("/api/tasks")
+def list_tasks_route(group_id: str | None = None, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
-        database.check_social_rate_limit(user["id"], "task_create", TASK_CREATE_LIMIT, 1440)
-        return database.create_task(user["id"], **data.model_dump())
+        return tasks.list_tasks(user["id"], group_id)
     except ValueError as error:
         raise social_error(error) from error
 
 
-@app.patch("/api/tasks/{task_id}", response_model=TaskResponse)
-def update_task(task_id: str, data: TaskUpdate, authorization: Annotated[str | None, Header()] = None):
+@app.post("/api/tasks", status_code=201)
+def create_task_route(data: TaskCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_create", TASK_CREATE_LIMIT, 1440)
+        return tasks.create_task(user["id"], data.model_dump())
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task_route(task_id: str, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return tasks.get_task(user["id"], task_id)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.patch("/api/tasks/{task_id}")
+def update_task_route(task_id: str, data: TaskUpdate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
-        return database.update_task(user["id"], task_id, data.model_dump(exclude_unset=True))
+        return tasks.update_task(user["id"], task_id, data.model_dump(exclude_unset=True))
     except ValueError as error:
-        if str(error) == "task_not_found":
-            raise HTTPException(status_code=404, detail="Task not found") from error
         raise social_error(error) from error
 
 
 @app.delete("/api/tasks/{task_id}")
-def delete_task(task_id: str, authorization: Annotated[str | None, Header()] = None):
+def delete_task_route(task_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
-        database.delete_task(user["id"], task_id)
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return {"deleted": tasks.delete_task(user["id"], task_id)}
     except ValueError as error:
-        raise HTTPException(status_code=404, detail="Task not found") from error
-    return {"deleted": True}
+        raise social_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/checklist", status_code=201)
+def add_checklist_item_route(task_id: str, data: ChecklistItemCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return tasks.add_checklist_item(user["id"], task_id, data.text)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.patch("/api/tasks/{task_id}/checklist/{item_id}")
+def update_checklist_item_route(task_id: str, item_id: int, data: ChecklistItemUpdate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return tasks.update_checklist_item(user["id"], task_id, item_id, data.model_dump(exclude_unset=True))
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.delete("/api/tasks/{task_id}/checklist/{item_id}")
+def delete_checklist_item_route(task_id: str, item_id: int, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return {"deleted": tasks.delete_checklist_item(user["id"], task_id, item_id)}
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/comments", status_code=201)
+def add_task_comment_route(task_id: str, data: TaskCommentCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_comment", TASK_COMMENT_LIMIT, 60)
+        return tasks.add_comment(user["id"], task_id, data.body)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.delete("/api/tasks/{task_id}/comments/{comment_id}")
+def delete_task_comment_route(task_id: str, comment_id: int, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return {"deleted": tasks.delete_comment(user["id"], task_id, comment_id)}
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/tasks/{task_id}/attachments", status_code=201)
+def add_task_attachment_route(task_id: str, data: TaskAttachmentCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        # get_note only returns notes owned by the signed-in student.
+        note = note_store.get_note(user["id"], data.note_id) if data.kind == "note" and data.note_id else None
+        return tasks.add_attachment(user["id"], task_id, data.kind, data.label, data.url, note)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.delete("/api/tasks/{task_id}/attachments/{attachment_id}")
+def delete_task_attachment_route(task_id: str, attachment_id: int, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return {"deleted": tasks.remove_attachment(user["id"], task_id, attachment_id)}
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.get("/api/study-groups/{group_id}/milestones")
+def list_milestones_route(group_id: str, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return tasks.list_milestones(user["id"], group_id)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/study-groups/{group_id}/milestones", status_code=201)
+def create_milestone_route(group_id: str, data: MilestoneCreate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return tasks.create_milestone(user["id"], group_id, data.title, data.due_date)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.delete("/api/study-groups/{group_id}/milestones/{milestone_id}")
+def delete_milestone_route(group_id: str, milestone_id: int, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return {"deleted": tasks.delete_milestone(user["id"], group_id, milestone_id)}
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/study-groups/{group_id}/notify")
+def notify_group_route(group_id: str, data: GroupNotice, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "group_notice", 6, 1440)
+        return {"notified": tasks.notify_members(user["id"], group_id, data.message)}
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.get("/api/study-groups/{group_id}/analytics")
+def group_analytics_route(group_id: str, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return tasks.group_analytics(user["id"], group_id)
+    except ValueError as error:
+        raise social_error(error) from error
 
 
 @app.post("/api/generate-question", response_model=QuestionResponse)

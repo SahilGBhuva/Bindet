@@ -13,6 +13,7 @@ const loaders = {
   tools: () => import('./pages/Tools').then((module) => ({ default: module.Tools })),
   tutor: () => import('./pages/Tutor').then((module) => ({ default: module.Tutor })),
   goals: () => import('./pages/Goals').then((module) => ({ default: module.Goals })),
+  stats: () => import('./pages/ProjectStats').then((module) => ({ default: module.ProjectStats })),
   progress: () => import('./pages/Progress').then((module) => ({ default: module.Progress })),
   chat: () => import('./pages/Chat').then((module) => ({ default: module.Chat })),
   profile: () => import('./pages/Profile').then((module) => ({ default: module.Profile })),
@@ -24,6 +25,7 @@ const loaders = {
 const Tools = lazy(loaders.tools)
 const Tutor = lazy(loaders.tutor)
 const Goals = lazy(loaders.goals)
+const ProjectStats = lazy(loaders.stats)
 const Progress = lazy(loaders.progress)
 const Chat = lazy(loaders.chat)
 const Profile = lazy(loaders.profile)
@@ -110,6 +112,7 @@ function AppShell() {
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
           {screen === 'tutor' ? <Tutor session={session} /> : null}
           {screen === 'goals' ? <Goals session={session} /> : null}
+          {screen === 'stats' ? <ProjectStats session={session} /> : null}
           {screen === 'progress' ? <Progress session={session} /> : null}
           {screen === 'games' ? <Games /> : null}
           {screen === 'chat' ? <Chat session={session} /> : null}

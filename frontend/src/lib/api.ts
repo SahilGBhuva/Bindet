@@ -103,19 +103,6 @@ export type StudyGroup = {
   members: StudyGroupMember[]
   activity: StudyGroupActivity[]
 }
-export type StudyTask = {
-  id: string
-  owner_id: string
-  title: string
-  description: string
-  course: string
-  unit: string
-  status: 'todo' | 'in_progress' | 'review' | 'complete'
-  priority: 'low' | 'medium' | 'high'
-  due_at: string | null
-  created_at: string
-  updated_at: string
-}
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 
@@ -319,39 +306,6 @@ export function saveAccountProfile(
   }, accessToken)
 }
 
-const taskCache = new Map<string, { savedAt: number; data: StudyTask[] }>()
-
-export function getCachedTasks(accessToken: string) {
-  const identity = tokenSubject(accessToken)
-  return taskCache.get(identity)?.data ?? readSessionCache<StudyTask[]>(`bindit:tasks:${identity}`)?.data ?? null
-}
-
-/* Keeps optimistic edits in the cache so the next visit shows them immediately. */
-export function setCachedTasks(accessToken: string, data: StudyTask[]) {
-  const identity = tokenSubject(accessToken)
-  taskCache.set(identity, { savedAt: Date.now(), data })
-  writeSessionCache(`bindit:tasks:${identity}`, data)
-}
-
-export async function getTasks(accessToken: string, force = false) {
-  const cached = taskCache.get(tokenSubject(accessToken)) ?? readSessionCache<StudyTask[]>(`bindit:tasks:${tokenSubject(accessToken)}`)
-  if (!force && cached && Date.now() - cached.savedAt < CACHE_WINDOW_MS) return cached.data
-  const data = await request<StudyTask[]>('/api/tasks', undefined, accessToken)
-  setCachedTasks(accessToken, data)
-  return data
-}
-
-export function createTask(task: Pick<StudyTask, 'title' | 'description' | 'course' | 'unit' | 'status' | 'priority'> & { due_at?: string | null }, accessToken: string) {
-  return request<StudyTask>('/api/tasks', { method: 'POST', body: JSON.stringify(task) }, accessToken)
-}
-
-export function updateTask(taskId: string, changes: Partial<Pick<StudyTask, 'title' | 'description' | 'course' | 'unit' | 'status' | 'priority' | 'due_at'>>, accessToken: string) {
-  return request<StudyTask>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', body: JSON.stringify(changes) }, accessToken)
-}
-
-export function deleteTask(taskId: string, accessToken: string) {
-  return request<{ deleted: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' }, accessToken)
-}
 
 const socialCache = new Map<string, { savedAt: number; data: FriendsHub }>()
 const groupCache = new Map<string, { savedAt: number; data: StudyGroup[] }>()
@@ -555,4 +509,146 @@ export function streamTutorMessage(
   xhr.onerror = () => handlers.onError?.('bindit couldn’t be reached. Check your connection and try again.')
   xhr.send(JSON.stringify(body))
   return () => { finished = true; xhr.abort() }
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent'
+export type TaskPerson = { student_id: string; display_name: string }
+export type Task = {
+  id: string
+  title: string
+  description: string
+  course: string
+  project: string
+  status: TaskStatus
+  priority: TaskPriority
+  due_date: string | null
+  due_time: string | null
+  kind: 'task' | 'event'
+  location: string
+  milestone_id: number | null
+  sort_order: number
+  group_id: string | null
+  group_name: string | null
+  owner: TaskPerson
+  assignees: TaskPerson[]
+  checklist_total: number
+  checklist_done: number
+  comment_count: number
+  attachment_count: number
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+  can_edit: boolean
+  can_delete: boolean
+}
+export type TaskChecklistItem = { id: number; text: string; done: boolean }
+export type TaskComment = { id: number; author_id: string; author_name: string; body: string; created_at: string; mine: boolean }
+export type TaskActivityItem = { id: number; actor_name: string; kind: string; detail: string; created_at: string }
+export type TaskAttachment = { id: number; kind: 'link' | 'note'; label: string; url: string; note_id: string; added_by_name: string; mine: boolean; created_at: string }
+export type TaskDetail = Task & { checklist: TaskChecklistItem[]; comments: TaskComment[]; activity: TaskActivityItem[]; attachments: TaskAttachment[] }
+export type TaskInput = Partial<Pick<Task, 'title' | 'description' | 'course' | 'project' | 'status' | 'priority' | 'due_date' | 'due_time' | 'milestone_id' | 'sort_order' | 'kind' | 'location'>> & {
+  group_id?: string | null
+  assignee_ids?: string[]
+}
+export type Milestone = { id: number; title: string; due_date: string | null; total: number; done: number; percent: number }
+export type GroupAnalytics = {
+  group: { id: string; name: string; description: string; role: 'owner' | 'member' }
+  members: { student_id: string; display_name: string; username: string; role: 'owner' | 'member'; assigned: number; completed: number; active: boolean }[]
+  completion: { completed: number; unfinished: number; no_response: number }
+  pace: 'not_started' | 'done' | 'stalled' | 'on_track' | 'at_risk' | 'behind'
+  target_date: string | null
+  overview: string[]
+  totals: { total: number; done: number; overdue: number; percent: number; by_status: Record<TaskStatus, number> }
+  milestones: Milestone[]
+  series: { date: string; total: number; done: number }[]
+  velocity_per_week: number
+  projected_finish: string | null
+  activity: { id: number; task_id: string; task_title: string; kind: string; detail: string; actor_name: string; created_at: string }[]
+}
+
+const taskCache = new Map<string, { savedAt: number; data: Task[] }>()
+const analyticsCache = new Map<string, GroupAnalytics>()
+
+export function getCachedTasks(accessToken: string) {
+  const identity = tokenSubject(accessToken)
+  return taskCache.get(identity)?.data ?? readSessionCache<Task[]>(`bindit:tasks:${identity}`)?.data ?? null
+}
+
+/* Keeps optimistic edits in the cache so returning to the page shows them at once. */
+export function setCachedTasks(accessToken: string, data: Task[]) {
+  const identity = tokenSubject(accessToken)
+  taskCache.set(identity, { savedAt: Date.now(), data })
+  writeSessionCache(`bindit:tasks:${identity}`, data)
+}
+
+export async function getTasks(accessToken: string, force = false) {
+  const identity = tokenSubject(accessToken)
+  const cached = taskCache.get(identity) ?? readSessionCache<Task[]>(`bindit:tasks:${identity}`)
+  if (!force && cached && Date.now() - cached.savedAt < CACHE_WINDOW_MS) return cached.data
+  const data = await request<Task[]>('/api/tasks', undefined, accessToken)
+  setCachedTasks(accessToken, data)
+  return data
+}
+
+export function getTask(taskId: string, accessToken: string) {
+  return request<TaskDetail>(`/api/tasks/${encodeURIComponent(taskId)}`, undefined, accessToken)
+}
+
+export function createTask(task: TaskInput & { title: string }, accessToken: string) {
+  return request<Task>('/api/tasks', { method: 'POST', body: JSON.stringify(task) }, accessToken)
+}
+
+export function updateTask(taskId: string, changes: TaskInput, accessToken: string) {
+  return request<Task>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'PATCH', body: JSON.stringify(changes) }, accessToken)
+}
+
+export function deleteTask(taskId: string, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' }, accessToken)
+}
+
+export function addTaskChecklistItem(taskId: string, text: string, accessToken: string) {
+  return request<TaskChecklistItem>(`/api/tasks/${encodeURIComponent(taskId)}/checklist`, { method: 'POST', body: JSON.stringify({ text }) }, accessToken)
+}
+
+export function updateTaskChecklistItem(taskId: string, itemId: number, changes: { text?: string; done?: boolean }, accessToken: string) {
+  return request<TaskChecklistItem>(`/api/tasks/${encodeURIComponent(taskId)}/checklist/${itemId}`, { method: 'PATCH', body: JSON.stringify(changes) }, accessToken)
+}
+
+export function deleteTaskChecklistItem(taskId: string, itemId: number, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/checklist/${itemId}`, { method: 'DELETE' }, accessToken)
+}
+
+export function addTaskComment(taskId: string, body: string, accessToken: string) {
+  return request<TaskComment>(`/api/tasks/${encodeURIComponent(taskId)}/comments`, { method: 'POST', body: JSON.stringify({ body }) }, accessToken)
+}
+
+export function addTaskLink(taskId: string, url: string, label: string, accessToken: string) {
+  return request<TaskAttachment>(`/api/tasks/${encodeURIComponent(taskId)}/attachments`, { method: 'POST', body: JSON.stringify({ kind: 'link', url, label }) }, accessToken)
+}
+
+export function deleteTaskAttachment(taskId: string, attachmentId: number, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/tasks/${encodeURIComponent(taskId)}/attachments/${attachmentId}`, { method: 'DELETE' }, accessToken)
+}
+
+export function getCachedGroupAnalytics(groupId: string) {
+  return analyticsCache.get(groupId) ?? null
+}
+
+export async function getGroupAnalytics(groupId: string, accessToken: string) {
+  const data = await request<GroupAnalytics>(`/api/study-groups/${encodeURIComponent(groupId)}/analytics`, undefined, accessToken)
+  analyticsCache.set(groupId, data)
+  return data
+}
+
+export function createMilestone(groupId: string, milestone: { title: string; due_date: string | null }, accessToken: string) {
+  return request<Milestone>(`/api/study-groups/${encodeURIComponent(groupId)}/milestones`, { method: 'POST', body: JSON.stringify(milestone) }, accessToken)
+}
+
+export function deleteMilestone(groupId: string, milestoneId: number, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/study-groups/${encodeURIComponent(groupId)}/milestones/${milestoneId}`, { method: 'DELETE' }, accessToken)
+}
+
+export function notifyGroup(groupId: string, message: string, accessToken: string) {
+  return request<{ notified: number }>(`/api/study-groups/${encodeURIComponent(groupId)}/notify`, { method: 'POST', body: JSON.stringify({ message }) }, accessToken)
 }
