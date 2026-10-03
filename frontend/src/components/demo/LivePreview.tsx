@@ -75,7 +75,8 @@ function decide(target: EventTarget | null, root: HTMLElement): Decision {
     const isNav = element.classList.contains('bindit-rail__item') || element.classList.contains('bindit-rail__brand') || element.classList.contains('ui-link')
     if (isNav) {
       if (element.classList.contains('bindit-rail__brand')) return { kind: 'navigate', page: 'home' }
-      return page && DEMO_PAGES.includes(page) ? { kind: 'navigate', page } : { kind: 'ignore' }
+      // Pages outside the demo open sign-up, named after the page, instead of doing nothing.
+      return page && DEMO_PAGES.includes(page) ? { kind: 'navigate', page } : { kind: 'locked', action: `Open ${actionName(element)}` }
     }
     if (actionName(element) === 'Review flashcards') return { kind: 'navigate', page: 'tools' }
     return { kind: 'locked', action: actionName(element) }

@@ -3,7 +3,9 @@ import { LivePreview } from './demo/LivePreview'
 import { Binding } from './landing/Binding'
 import { Capture } from './landing/Capture'
 import { Mastery, Together } from './landing/Mastery'
-import { Mosaic } from './landing/Mosaic'
+import { Constellation } from './landing/Constellation'
+import { TutorStory } from './landing/TutorStory'
+import { BrandMark } from '../lib/SiteSidebar'
 import { prefersReducedMotion, useReveal, useScrollProgress } from './landing/motion'
 import { FlashcardStage, QuizStage } from './landing/Practice'
 import './Landing.css'
@@ -19,11 +21,6 @@ import './landing/sections.css'
 type LandingProps = {
   onSignUp: (reason?: string) => void
   onLogIn: () => void
-}
-
-/* The quiet paper ground behind the auth screens. */
-export function ColorBackdrop({ className = '' }: { className?: string }) {
-  return <div className={`lp-backdrop ${className}`} aria-hidden="true" />
 }
 
 /*
@@ -102,54 +99,99 @@ function HeroProduct({ onLocked }: { onLocked: (action: string) => void }) {
   )
 }
 
+const STEPS = [
+  { id: 'capture', number: '01', title: 'Add notes and materials', copy: 'PDFs, photos of your notebook, typed notes. Scanned pages are read for you.' },
+  { id: 'connected', number: '02', title: 'Bind them into courses and units', copy: 'Every note lives in a unit, every unit in a course. Nothing floats loose.' },
+  { id: 'practice', number: '03', title: 'Generate grounded study material', copy: 'Flashcards and questions are written from your own notes, not the open web.' },
+  { id: 'mastery', number: '04', title: 'Practice and track mastery', copy: 'Adaptive quizzes, instant feedback, and a clear view of what has stuck.' },
+]
+
 export function Landing({ onSignUp, onLogIn }: LandingProps) {
   const root = useRef<HTMLDivElement>(null)
+  const [scrolled, setScrolled] = useState(false)
   useReveal(root)
-  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+  const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' })
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   return (
     <div className="lp" ref={root}>
-      <header className="lp-nav">
+      <a className="skip-link" href="#lp-main">Skip to content</a>
+      <header className={`lp-nav${scrolled ? ' is-scrolled' : ''}`}>
         <a className="lp-nav__brand" href="#top" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }) }}>
-          <img src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" />
+          <BrandMark size={24} />
           bindit
         </a>
         <nav className="lp-nav__links" aria-label="Page sections">
-          <button type="button" onClick={() => scrollTo('capture')}>How it works</button>
-          <button type="button" onClick={() => scrollTo('practice')}>Practice</button>
-          <button type="button" onClick={() => scrollTo('mastery')}>Progress</button>
+          <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
+          <button type="button" onClick={() => scrollTo('product')}>The app</button>
+          <button type="button" onClick={() => scrollTo('tutor-story')}>Tutor</button>
+          <button type="button" onClick={() => scrollTo('together')}>Study groups</button>
         </nav>
         <div className="lp-nav__actions">
           <button className="lp-textlink lp-textlink--plain" type="button" onClick={onLogIn}>Log in</button>
-          <button className="lp-btn lp-btn--ink lp-btn--sm" type="button" onClick={() => onSignUp()}>Get started</button>
+          <button className="lp-btn lp-btn--ink lp-btn--sm" type="button" onClick={() => onSignUp()}>Create an account</button>
         </div>
       </header>
 
-      <main>
+      <main id="lp-main">
         <section className="lp-hero" id="top" aria-labelledby="lp-hero-title">
           <div className="lp-hero__copy">
-            <h1 className="lp-display lp-hero__title" id="lp-hero-title">
-              <span>All your notes,</span>
-              <em>bound together.</em>
+            <p className="lp-eyebrow">A study workspace for high school</p>
+            <h1 className="lp-hero__title" id="lp-hero-title">
+              Everything you’re learning, <em>bound together.</em>
             </h1>
             <p className="lp-hero__lead">
-              Upload your class notes. bindit turns them into flashcards, quizzes, and a mastery map for every course.
+              Upload your notes and bindit organizes them into courses and units, writes flashcards and quizzes from your own material, keeps your assignments in order, and shows what you have actually mastered.
             </p>
             <div className="lp-hero__cta">
-              <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Get started</button>
+              <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Create an account</button>
               <button className="lp-btn lp-btn--quiet lp-btn--lg" type="button" onClick={onLogIn}>Log in</button>
             </div>
+            <p className="lp-hero__note">Your notes stay private to your account.</p>
           </div>
-          <HeroProduct onLocked={(action) => onSignUp(action)} />
+          <div className="lp-hero__visual">
+            <Constellation />
+            <ul className="lp-legend" aria-label="What the map shows">
+              <li><i className="is-course" />Courses</li>
+              <li><i className="is-note" />Notes</li>
+              <li><i className="is-card" />Flashcards</li>
+              <li><i className="is-question" />Questions</li>
+              <li><i className="is-task" />Assignments</li>
+              <li><i className="is-concept" />Concepts</li>
+            </ul>
+          </div>
         </section>
 
-        <section className="lp-scattered" aria-labelledby="lp-scattered-title">
-          <p className="lp-kicker" data-reveal>Scattered</p>
-          <h2 className="lp-serif lp-scattered__title" id="lp-scattered-title" data-reveal>
-            A semester lives in<br /><em>too many places.</em>
-          </h2>
-          <Mosaic />
-          <p className="lp-scattered__after" data-reveal>Everything you’re learning can live together.</p>
+        <section className="lp-workflow" id="workflow" aria-labelledby="lp-workflow-title">
+          <div className="lp-workflow__head">
+            <p className="lp-eyebrow">How it works</p>
+            <h2 className="lp-serif lp-workflow__title" id="lp-workflow-title">From scattered to <em>mastered</em>, in four steps.</h2>
+          </div>
+          <ol className="lp-workflow__steps">
+            {STEPS.map((step) => (
+              <li key={step.id}>
+                <button type="button" onClick={() => scrollTo(step.id)}>
+                  <span className="lp-workflow__number">{step.number}</span>
+                  <strong>{step.title}</strong>
+                  <span>{step.copy}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section className="lp-preview" aria-labelledby="lp-preview-title">
+          <div className="lp-preview__head">
+            <p className="lp-eyebrow">The app</p>
+            <h2 className="lp-serif lp-preview__title" id="lp-preview-title">Not a mockup. <em>The real thing.</em></h2>
+            <p className="lp-fineprint">The workspace below is bindit itself, running on a demo student’s courses. Every number is computed by the product. Nothing you do here is saved.</p>
+          </div>
+          <HeroProduct onLocked={(action) => onSignUp(action)} />
         </section>
 
         <Capture />
@@ -157,23 +199,31 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
         <FlashcardStage />
         <QuizStage />
         <Mastery />
-        <Together />
+        <TutorStory />
+        <div id="together"><Together /></div>
 
         <section className="lp-final" aria-labelledby="lp-final-title">
+          <img className="lp-final__otter" data-reveal src="/bindit-mascot-cutout.webp" alt="The bindit otter carrying a purple binder" width="240" height="288" loading="lazy" decoding="async" />
           <h2 className="lp-serif lp-final__title" id="lp-final-title" data-reveal>
             Your notes are already<br /><em>a study plan.</em>
           </h2>
           <div className="lp-final__actions" data-reveal>
-            <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Get started</button>
+            <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Create an account</button>
             <button className="lp-textlink" type="button" onClick={onLogIn}>Already have an account? Log in →</button>
           </div>
-          <img className="lp-final__otter" data-reveal src="/bindit-mascot-cutout.webp" alt="The bindit otter carrying a purple binder" width="240" height="288" loading="lazy" decoding="async" />
         </section>
       </main>
 
       <footer className="lp-footer">
-        <span className="lp-footer__brand">bindit</span>
-        <span>Built for the Congressional App Challenge</span>
+        <div className="lp-footer__brand"><BrandMark size={20} /> bindit</div>
+        <nav aria-label="Footer">
+          <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
+          <button type="button" onClick={() => scrollTo('product')}>The app</button>
+          <button type="button" onClick={() => scrollTo('tutor-story')}>Tutor</button>
+          <button type="button" onClick={onLogIn}>Log in</button>
+          <button type="button" onClick={() => onSignUp()}>Create an account</button>
+        </nav>
+        <p>Built for the Congressional App Challenge.</p>
       </footer>
     </div>
   )

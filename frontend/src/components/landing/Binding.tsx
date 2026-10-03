@@ -109,7 +109,7 @@ export function Binding() {
   return (
     <section className="lp-bind lp-scrub" id="connected" ref={root} aria-labelledby="lp-bind-title">
       <div className="lp-bind__head">
-        <p className="lp-kicker" data-reveal>Connected</p>
+        <p className="lp-kicker" data-reveal>Bind them into courses and units</p>
         <h2 className="lp-display lp-bind__title" id="lp-bind-title" data-reveal>Connected.</h2>
       </div>
 

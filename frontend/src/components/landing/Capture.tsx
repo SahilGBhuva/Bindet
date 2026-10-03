@@ -40,7 +40,7 @@ export function Capture() {
   return (
     <section className="lp-capture" id="capture" aria-labelledby="lp-capture-title" style={{ '--course': cells.tone } as CSSProperties}>
       <div className="lp-capture__copy">
-        <p className="lp-kicker" data-reveal>Captured</p>
+        <p className="lp-kicker" data-reveal>Add notes and materials</p>
         <h2 className="lp-serif lp-capture__title" id="lp-capture-title" data-reveal>
           Drop in the notes.<br /><em>bindit reads them.</em>
         </h2>

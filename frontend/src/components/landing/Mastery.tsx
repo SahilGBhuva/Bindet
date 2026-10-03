@@ -84,7 +84,7 @@ export function Mastery() {
       </div>
 
       <div className="lp-mastery__copy">
-        <p className="lp-kicker" data-reveal>Mastered</p>
+        <p className="lp-kicker" data-reveal>Practice and track mastery</p>
         <h2 className="lp-serif lp-mastery__title" id="lp-mastery-title" data-reveal>Watch it<br /><em>stick.</em></h2>
         <p className="lp-mastery__lead" data-reveal>
           Every unit earns a mastery score from your quiz history. bindit shows what is sharp, what is stuck, and what to study next.

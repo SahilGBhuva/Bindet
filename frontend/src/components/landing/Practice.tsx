@@ -25,7 +25,7 @@ export function FlashcardStage() {
 
   return (
     <section className="lp-flash lp-scrub" id="practice" ref={root} aria-labelledby="lp-flash-title" style={{ '--course': genetics.tone } as CSSProperties}>
-      <p className="lp-kicker" data-reveal>Practiced</p>
+      <p className="lp-kicker" data-reveal>Generate grounded study material</p>
       <h2 className="lp-serif lp-flash__title" id="lp-flash-title" data-reveal>Flip it until <em>it sticks.</em></h2>
 
       <div className="lp-flash__stage" data-reveal>
