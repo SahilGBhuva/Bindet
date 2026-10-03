@@ -54,6 +54,8 @@ function whenIdle(callback: () => void, timeout = 1500) {
 
 function AppShell() {
   const [screen, setScreen] = useState(currentScreen)
+  // The nav highlight follows the click at once; the page itself swaps in a transition.
+  const [navScreen, setNavScreen] = useState(currentScreen)
   const [notice, setNotice] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
   const { session, setSession } = useAuth()
@@ -62,6 +64,7 @@ function AppShell() {
 
   useEffect(() => {
     const sync = () => {
+      setNavScreen(currentScreen())
       startTransition(() => setScreen(currentScreen()))
       window.scrollTo({ top: 0 })
     }
@@ -100,7 +103,7 @@ function AppShell() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
-      <SiteSidebar active={screen} session={session} onOpenCommand={openCommand} />
+      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} />
       <main className={`sheet is-${screen}`} id="main-content" tabIndex={-1} key={screen}>
         <Suspense fallback={<PageSkeleton />}>
           {screen === 'home' ? <Home session={session} /> : null}

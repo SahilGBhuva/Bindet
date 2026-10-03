@@ -233,7 +233,7 @@
 
 .profile__groups { overflow: hidden; }
 .profile__group-tabs { padding: 0 var(--space-5); }
-.profile__group-body { padding: var(--space-5); }
+.profile__group-body { padding: var(--space-5); container-type: inline-size; }
 
 .profile__group-top {
   display: flex;
@@ -618,4 +618,9 @@
   .profile__quest-start { padding-inline: var(--space-4); }
   .profile__notification { padding-inline: var(--space-4); }
   .profile__hint { padding-inline: var(--space-4); }
+}
+
+/* Members and momentum sit side by side only when the group sheet is wide enough to show names. */
+@container (max-width: 560px) {
+  .profile__group-columns { grid-template-columns: minmax(0, 1fr); }
 }

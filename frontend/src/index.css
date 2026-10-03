@@ -27,8 +27,8 @@
 
   /* Ink */
   --color-text: #18181b;
-  --color-text-secondary: #5b5a56;
-  --color-text-tertiary: #87867f;
+  --color-text-secondary: #4b4a46;
+  --color-text-tertiary: #67665f;
 
   /* Primary action: solid ink. */
   --color-accent: #1c1d24;
@@ -167,7 +167,7 @@
 
   --color-text: #ecebe7;
   --color-text-secondary: #a8a7a1;
-  --color-text-tertiary: #7a7973;
+  --color-text-tertiary: #8e8d87;
 
   --color-accent: #ecebe7;
   --color-accent-hover: #ffffff;
