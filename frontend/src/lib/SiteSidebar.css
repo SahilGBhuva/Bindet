@@ -1,4 +1,8 @@
-/* App navigation: a quiet paper rail on desktop; a top bar, tab bar and menu sheet on phones. */
+/*
+ * App navigation. Desktop: a paper rail that holds the student's own material
+ * (highlighted tasks, courses, groups, next tasks) under a compact page list,
+ * with a lockable panel the student can rearrange. Phones: a top bar, tab bar and menu sheet.
+ */
 
 .bindit-rail {
   position: sticky;
@@ -6,11 +10,11 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   width: var(--layout-sidebar-width);
   height: 100vh;
   height: 100dvh;
-  padding: 16px 12px 12px;
+  padding: 12px 12px 10px;
   overflow-y: auto;
   border-right: 1px solid var(--color-border);
   background: var(--color-bg);
@@ -18,7 +22,7 @@
   scrollbar-width: none;
 }
 
-.bindit-rail__top { display: grid; gap: 14px; }
+.bindit-rail__top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 
 .bindit-rail__brand {
   display: inline-flex;
@@ -40,36 +44,126 @@
 .bindit-mark__lines { fill: none; stroke: var(--color-text-tertiary); stroke-width: 1.4; stroke-linecap: round; }
 .bindit-mark__ring { fill: var(--color-bg); stroke: var(--color-brand); stroke-width: 1.7; }
 
-.bindit-rail__search {
+/* Settings, search and tutor: the sketch's row of small icons. */
+.bindit-rail__tools { display: flex; align-items: center; gap: 1px; }
+
+.bindit-rail__tool {
   display: grid;
-  grid-template-columns: 16px 1fr auto;
-  gap: 8px;
-  align-items: center;
-  width: 100%;
-  height: 32px;
-  padding: 0 8px 0 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--color-text-tertiary);
-  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__tool:hover,
+.bindit-rail__tool.is-active { background: var(--color-surface-hover); color: var(--color-text); }
+.bindit-rail__tool svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The student, as in the sketch: an avatar circle and a name. */
+.bindit-rail__account {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__account:hover { background: var(--color-surface-hover); }
+.bindit-rail__account > span {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--color-brand-tint);
+  color: var(--color-brand-text);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+}
+.bindit-rail__account strong { overflow: hidden; font-size: var(--text-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+
+/* Sections */
+
+.bindit-rail__block { display: grid; gap: 2px; min-width: 0; }
+.bindit-rail__block + .bindit-rail__block { padding-top: 10px; border-top: 1px solid var(--color-border); }
+
+.bindit-rail__heading { display: flex; align-items: center; gap: 2px; min-height: 26px; margin: 0; font: inherit; }
+
+.bindit-rail__toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-standard);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
-.bindit-rail__search:hover { border-color: var(--color-border-strong); color: var(--color-text-secondary); }
-.bindit-rail__search svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
-.bindit-rail__search kbd {
-  padding: 1px 5px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
-  background: var(--color-surface-sunken);
+.bindit-rail__toggle > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bindit-rail__toggle:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.bindit-rail__toggle.is-static { cursor: default; }
+.bindit-rail__toggle.is-static:hover { background: none; color: var(--color-text-secondary); }
+.bindit-rail__toggle small { color: var(--color-text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-medium); }
+
+.bindit-rail__chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: transform var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__toggle:hover .bindit-rail__chevron,
+.bindit-rail__toggle:focus-visible .bindit-rail__chevron,
+.bindit-rail__toggle[aria-expanded="false"] .bindit-rail__chevron { opacity: 1; }
+.bindit-rail__toggle[aria-expanded="false"] .bindit-rail__chevron { transform: rotate(-90deg); }
+
+.bindit-rail__count {
   color: var(--color-text-tertiary);
-  font: inherit;
-  font-size: 10px;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
 }
 
-.bindit-rail__group { display: grid; gap: 4px; }
+.bindit-rail__mini {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__mini:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.bindit-rail__mini:disabled { opacity: .35; cursor: default; }
+.bindit-rail__mini svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+.bindit-rail__controls { display: flex; align-items: center; gap: 0; }
 
 .bindit-rail__section {
   display: block;
@@ -80,16 +174,17 @@
   letter-spacing: .02em;
 }
 
-.bindit-rail__list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+/* Page links: compact, because the sketch gives the room to the student's own material. */
+.bindit-rail__list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 
 .bindit-rail__item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: var(--radius-md);
+  gap: 9px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -97,12 +192,18 @@
   transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 
-.bindit-rail__icon { display: grid; place-items: center; width: 18px; height: 18px; color: var(--color-text-tertiary); }
+.bindit-rail__icon { display: grid; place-items: center; width: 16px; height: 16px; color: var(--color-text-tertiary); }
+.bindit-rail__icon svg { width: 16px; height: 16px; }
 .bindit-rail__icon svg,
+.bindit-rail__theme svg,
+.bindit-rail__lock svg,
+.bindit-topbar svg,
+.bindit-tabbar svg,
+.bindit-sheet svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .bindit-rail__theme svg,
 .bindit-topbar svg,
 .bindit-tabbar svg,
-.bindit-sheet svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.bindit-sheet svg { width: 18px; height: 18px; }
 
 .bindit-rail__item:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .bindit-rail__item.is-active { background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-sm); }
@@ -117,15 +218,112 @@
   padding: 0 5px;
   border-radius: var(--radius-full);
   background: var(--color-brand);
-  color: #fff;
+  color: var(--color-surface);
   font-size: 10px;
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
-.bindit-rail__footer { display: grid; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-border); }
-.bindit-rail__utility { display: flex; align-items: center; gap: 2px; }
-.bindit-rail__utility .bindit-rail__item { flex: 1; }
+/* Content entries: tasks, courses and groups. */
+.bindit-rail__entries { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+
+.bindit-rail__entry {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 9px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__entry:hover { background: var(--color-surface-hover); }
+.bindit-rail__entry.is-current { background: var(--color-surface); box-shadow: var(--shadow-sm); }
+.bindit-rail__entry-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bindit-rail__glyph { display: grid; place-items: center; width: 16px; height: 16px; color: var(--color-text-tertiary); }
+.bindit-rail__glyph svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.bindit-rail__meta { color: var(--color-text-tertiary); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bindit-rail__entry.is-late .bindit-rail__meta { color: var(--color-danger); font-weight: var(--weight-medium); }
+
+.bindit-rail__course {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--course, var(--color-text-tertiary)) 16%, var(--color-surface));
+  box-shadow: inset 2px 0 0 var(--course, var(--color-text-tertiary));
+  color: var(--color-text);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+}
+
+/* A group's description sits on a nested line, like the sketch's "└ LM prime devs". */
+.bindit-rail__sub {
+  position: relative;
+  grid-column: 2 / -1;
+  overflow: hidden;
+  padding-left: 12px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bindit-rail__sub::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 6px;
+  height: 7px;
+  border-bottom: 1px solid var(--color-border-strong);
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.bindit-rail__empty { margin: 0; padding: 2px 8px 4px; color: var(--color-text-tertiary); font-size: var(--text-xs); line-height: 1.45; }
+.bindit-rail__skeleton { height: 14px; margin: 7px 8px; }
+.bindit-rail__entries li:nth-child(2) .bindit-rail__skeleton { width: 70%; }
+.bindit-rail__entries li:nth-child(3) .bindit-rail__skeleton { width: 55%; }
+
+/* Edit mode: sections show their move and hide controls; hidden ones stay listed but faded. */
+.bindit-rail.is-editing .bindit-rail__block:not(:first-of-type) .bindit-rail__heading {
+  border-radius: var(--radius-sm);
+  outline: 1px dashed var(--color-border-strong);
+  outline-offset: -1px;
+}
+.bindit-rail__block.is-hidden .bindit-rail__toggle > span:first-child { color: var(--color-text-tertiary); text-decoration: line-through; }
+
+/* Footer: the sketch's "Locked · Edit panel" switch, with help and theme beside it. */
+.bindit-rail__footer { display: flex; align-items: center; gap: 2px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--color-border); }
+
+.bindit-rail__lock {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__lock:hover { border-color: var(--color-border-strong); }
+.bindit-rail__lock.is-editing { border-color: var(--color-brand); background: var(--color-brand-tint); color: var(--color-brand-text); }
+.bindit-rail__lock-state { display: inline-flex; align-items: center; gap: 5px; font-weight: var(--weight-medium); }
+.bindit-rail__lock svg { width: 14px; height: 14px; }
+.bindit-rail__lock-action { color: var(--color-text); font-weight: var(--weight-semibold); }
+.bindit-rail__lock.is-editing .bindit-rail__lock-action { color: var(--color-brand-text); }
 
 .bindit-rail__theme {
   display: grid;
@@ -142,35 +340,6 @@
 }
 .bindit-rail__theme:hover,
 .bindit-rail__theme.is-active { background: var(--color-surface-hover); color: var(--color-text); }
-
-.bindit-rail__account {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  padding: 6px;
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  text-decoration: none;
-  transition: background-color var(--duration-fast) var(--ease-standard);
-}
-.bindit-rail__account:hover { background: var(--color-surface-hover); }
-.bindit-rail__account > span {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--color-brand-tint);
-  color: var(--color-brand-text);
-  font-size: 11px;
-  font-weight: var(--weight-semibold);
-}
-.bindit-rail__account > div { display: grid; gap: 1px; min-width: 0; }
-.bindit-rail__account strong,
-.bindit-rail__account small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bindit-rail__account strong { font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.bindit-rail__account small { color: var(--color-text-tertiary); font-size: var(--text-2xs); }
 
 /* Phone chrome is hidden on larger screens. */
 .bindit-topbar,

@@ -32,6 +32,10 @@ const ALLOWED = [
   '.progress__info',
   '.progress__info-panel button',
   '.profile__group-tabs .ui-tab',
+  // Only change what is shown: Home's project filter and arrows, sidebar section folding.
+  '.home-filter__select',
+  '.home-arrow',
+  '.bindit-rail__toggle',
 ].join(', ')
 
 const INTERACTIVE = 'a, button, input, textarea, select, summary, label, [role="tab"], [draggable="true"]'

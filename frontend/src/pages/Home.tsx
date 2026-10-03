@@ -1,26 +1,44 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { parseServerTime, type FriendsHub, type Profile, type Progress, type StudyGroup, type StudyTask } from '../lib/api'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { parseServerTime, type FriendsHub, type Profile, type StudyGroup, type Task } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
-import { buildCoursePulse, VERDICT_COPY } from '../lib/progress'
+import { withCourseTones } from '../lib/session'
+import { loadThemePreference, saveThemePreference, type ThemePreference } from '../lib/theme'
 import { courseInitial } from '../lib/tones'
-import { notesFor, withCourseTones } from '../lib/session'
 import type { Course } from '../lib/types'
 import './Home.css'
 
+/*
+ * Home, after the student's sketch: the date and notifications, a quiet landscape
+ * banner, a greeting with the time, the projects they are part of, their deadlines,
+ * and their main study group's team panel.
+ */
+
 const DAY = 86_400_000
-const longDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+const MUTE_KEY = 'bindit:home:mute-notifications'
+const monthDay = new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' })
 const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
-const weekdayShort = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' })
-const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+const clockFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 
-type NextStep = { eyebrow: string; title: string; detail: string; action: string; href: string; course?: string; unit?: string; tone?: 'urgent' | 'calm' }
+const PRIORITY_RANK: Record<Task['priority'], number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+const THEME_NEXT: Record<ThemePreference, ThemePreference> = { system: 'light', light: 'dark', dark: 'system' }
+const THEME_NAME: Record<ThemePreference, string> = { system: 'matching your system', light: 'light', dark: 'dark' }
 
-function greeting(hour: number) {
-  if (hour < 5) return 'Still up'
-  if (hour < 12) return 'Good morning'
-  if (hour < 18) return 'Good afternoon'
-  return 'Good evening'
+type Filter = 'all' | 'courses' | 'groups'
+type Kind = 'event' | 'overdue' | 'today' | 'upcoming'
+const KIND_LABEL: Record<Kind, string> = { event: 'Event', overdue: 'Overdue', today: 'Due today', upcoming: 'Upcoming' }
+
+type Project = {
+  key: string
+  type: 'course' | 'group'
+  name: string
+  href: string
+  detail: string
+  due: string
+  done: number
+  total: number
+  tone?: string
+  course?: Course
 }
 
 function startOfDay(timestamp: number) {
@@ -29,210 +47,371 @@ function startOfDay(timestamp: number) {
   return date.getTime()
 }
 
-function dueText(dueAt: string | null, now: number) {
-  if (!dueAt) return 'No due date'
-  const days = Math.round((startOfDay(parseServerTime(dueAt)) - startOfDay(now)) / DAY)
-  if (days < 0) return days === -1 ? 'Overdue · yesterday' : `Overdue · ${shortDate.format(new Date(parseServerTime(dueAt)))}`
-  if (days === 0) return 'Due today'
-  if (days === 1) return 'Due tomorrow'
-  if (days < 7) return `Due ${relative.format(days, 'day')}`
-  return `Due ${shortDate.format(new Date(parseServerTime(dueAt)))}`
+function dueAt(task: Task) {
+  if (!task.due_date) return Infinity
+  const value = Date.parse(`${task.due_date}T${task.due_time ? task.due_time.slice(0, 5) : '23:59'}`)
+  return Number.isNaN(value) ? Infinity : value
 }
 
-function timeAgo(iso: string, now: number) {
-  const minutes = Math.min(0, Math.round((parseServerTime(iso) - now) / 60_000))
-  if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute')
-  const hours = Math.round(minutes / 60)
-  if (Math.abs(hours) < 24) return relative.format(hours, 'hour')
-  return relative.format(Math.round(hours / 24), 'day')
+function byDue(a: Task, b: Task) {
+  const gap = dueAt(a) - dueAt(b)
+  return (Number.isNaN(gap) ? 0 : gap) || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]
+}
+
+function clock(timestamp: number) {
+  return clockFormat.format(new Date(timestamp)).replace(/\s?([AP]M)$/i, (_, meridiem: string) => ` ${meridiem.toLowerCase()}`)
+}
+
+function dayWord(timestamp: number, now: number) {
+  const days = Math.round((startOfDay(timestamp) - startOfDay(now)) / DAY)
+  if (days === 0) return 'today'
+  if (days === 1) return 'tomorrow'
+  if (days === -1) return 'yesterday'
+  return shortDate.format(new Date(timestamp))
+}
+
+/* "8:59 pm today", "8:00 am tomorrow", or just "Today" when no time is set. */
+function whenText(task: Task, now: number) {
+  const at = dueAt(task)
+  if (at === Infinity) return 'No date'
+  const word = dayWord(at, now)
+  if (!task.due_time) return word.charAt(0).toUpperCase() + word.slice(1)
+  return `${clock(at)} ${word}`
+}
+
+function kindOf(task: Task, now: number): Kind {
+  if (task.kind === 'event') return 'event'
+  const at = dueAt(task)
+  if (at < now) return 'overdue'
+  return startOfDay(at) === startOfDay(now) ? 'today' : 'upcoming'
+}
+
+function localDate(timestamp: number) {
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function nameInitials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'
+}
+
+function readMuted() {
+  try {
+    return localStorage.getItem(MUTE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeMuted(muted: boolean) {
+  try {
+    if (muted) localStorage.setItem(MUTE_KEY, '1')
+    else localStorage.removeItem(MUTE_KEY)
+  } catch {
+    // Storage can be unavailable; the choice still applies for this visit.
+  }
+}
+
+/* A calm line drawing: distant hills, a near hill on the left, a ground line and grass. */
+function Landscape() {
+  return (
+    <svg className="home-banner__art" viewBox="0 0 1200 220" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+      <circle className="home-banner__sun" cx="1040" cy="58" r="22" />
+      <path className="home-banner__cloud" d="M300 64c6-16 30-18 38-4 10-12 34-8 34 10h-86c0-4 6-8 14-6z" />
+      <path className="home-banner__cloud" d="M760 44c5-12 24-14 30-3 8-9 27-6 27 8h-68c0-3 5-6 11-5z" />
+      <path className="home-banner__far" d="M0 176c120-34 210-46 320-30s180 22 280 4 210-48 330-36 190 34 270 38v68H0z" />
+      <path className="home-banner__near" d="M-20 188c70-58 190-92 330-72 90 13 150 44 190 72z" />
+      <path className="home-banner__ground" d="M0 188h1200" />
+      <path className="home-banner__grass" d="M540 188l4-12 3 12m6 0 5-16 2 16m8 0 3-9 3 9M660 188l3-10 4 10m5 0 4-14 2 14M860 188l3-11 3 11m5 0 5-15 2 15m7 0 3-8 3 8M960 188l4-13 2 13m6 0 3-9 3 9M120 188l3-9 3 9m5 0 4-12 2 12" />
+      <path className="home-banner__hatch" d="M1010 188l40-24M1036 188l40-24M1062 188l40-24M1088 188l40-24M1114 188l40-24M1140 188l40-24" />
+    </svg>
+  )
 }
 
 export function Home({ session }: { session: AuthSession | null }) {
   const data = useData()
-  const studentId = session?.user.id ?? data.getStudentId()
   const token = session?.access_token
+  const studentId = session?.user.id ?? ''
   const [notebook, setNotebook] = useState(() => {
     const loaded = data.loadNotebook()
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
-  const [stats, setStats] = useState<Progress | null>(() => data.getCachedProgress(studentId))
   const [profile, setProfile] = useState<Profile | null>(() => token ? data.getCachedProfile(token) : null)
   const [social, setSocial] = useState<FriendsHub | null>(() => token ? data.getCachedFriends(token) : null)
-  const [groups, setGroups] = useState<StudyGroup[]>(() => token ? data.getCachedStudyGroups(token) ?? [] : [])
-  const [tasks, setTasks] = useState<StudyTask[] | null>(() => token ? data.getCachedTasks(token) : null)
-  const [now] = useState(() => data.now())
+  const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? data.getCachedStudyGroups(token) : [])
+  const [tasks, setTasks] = useState<Task[] | null>(() => token ? data.getCachedTasks(token) : [])
+  const [now, setNow] = useState(() => data.now())
+  const [muted, setMuted] = useState(() => data.sandboxed ? false : readMuted())
+  const [theme, setTheme] = useState<ThemePreference>(() => data.sandboxed ? 'system' : loadThemePreference())
+  const [filter, setFilter] = useState<Filter>('all')
+  const rail = useRef<HTMLUListElement>(null)
 
-  // Everything is independent, so it loads in parallel; cached values above render first.
+  // Cached values above render first; everything refreshes in parallel in the background.
   useEffect(() => {
+    if (!token) return
     let active = true
-    void data.getProgress(studentId, token, true).then((value) => { if (active) setStats(value) }).catch(() => undefined)
-    if (!token) return () => { active = false }
     void data.getAccountProfile(token).then((value) => { if (active) setProfile(value) }).catch(() => undefined)
     void data.getFriends(token).then((value) => { if (active) setSocial(value) }).catch(() => undefined)
-    void data.getStudyGroups(token).then((value) => { if (active) setGroups(value) }).catch(() => undefined)
+    void data.getStudyGroups(token).then((value) => { if (active) setGroups(value) }).catch(() => { if (active) setGroups((current) => current ?? []) })
     void data.getTasks(token, true).then((value) => { if (active) setTasks(value) }).catch(() => { if (active) setTasks((current) => current ?? []) })
     return () => { active = false }
-  }, [data, studentId, token])
+  }, [data, token])
+
+  // The clock ticks on the minute. The demo keeps its pinned time.
+  useEffect(() => {
+    if (data.sandboxed) return
+    let interval = 0
+    const tick = () => setNow(data.now())
+    const timeout = window.setTimeout(() => {
+      tick()
+      interval = window.setInterval(tick, 60_000)
+    }, 60_000 - (Date.now() % 60_000))
+    return () => { window.clearTimeout(timeout); window.clearInterval(interval) }
+  }, [data])
 
   const courses = notebook.courses
-  const activeCourse = courses.find((course) => course.name === notebook.activeCourse) ?? courses[0]
-  const activeUnit = (activeCourse && notebook.activeUnit && activeCourse.units.includes(notebook.activeUnit)) ? notebook.activeUnit : activeCourse?.units[0] ?? ''
-  const unitNotes = activeCourse ? notesFor(notebook.deposits, activeCourse.name, activeUnit) : []
-  const attempts = useMemo(() => data.loadUnitAttempts(), [data])
-  const pulses = useMemo(() => courses.map((course) => buildCoursePulse(course, notebook.deposits, attempts, stats?.topics ?? [])), [courses, notebook.deposits, attempts, stats?.topics])
-
-  const openTasks = (tasks ?? []).filter((task) => task.status !== 'complete')
-  const upcoming = openTasks.toSorted((a, b) => (a.due_at ? parseServerTime(a.due_at) : Infinity) - (b.due_at ? parseServerTime(b.due_at) : Infinity)).slice(0, 5)
-  const overdue = openTasks.filter((task) => task.due_at && startOfDay(parseServerTime(task.due_at)) < startOfDay(now))
-  const dueSoon = openTasks.filter((task) => task.due_at && parseServerTime(task.due_at) - now < 2 * DAY && !overdue.includes(task))
-
-  const dailyGoal = profile?.daily_goal ?? 20
-  const week = stats?.recent_xp?.slice(-7) ?? []
-  const todayXp = week[week.length - 1]?.xp ?? 0
-  const goalPercent = Math.min(100, Math.round(todayXp / dailyGoal * 100))
-  const streak = stats?.login_streak ?? profile?.login_streak ?? 0
-  const xp = profile?.total_xp ?? stats?.total_xp ?? 0
-  const weakTopic = stats?.weak_topics?.[0]?.replaceAll('_', ' ')
   const firstName = profile?.display_name?.split(/\s+/)[0] || session?.user.user_metadata?.username || ''
-  const isNew = !courses.length && tasks !== null && !tasks.length
+  const openTasks = (tasks ?? []).filter((task) => task.status !== 'done').toSorted(byDue)
+  const dated = openTasks.filter((task) => dueAt(task) !== Infinity)
+  const deadlines = dated.filter((task) => task.kind !== 'event' || dueAt(task) >= startOfDay(now)).slice(0, 6)
 
-  const next: NextStep = !courses.length
-    ? { eyebrow: 'Start here', title: 'Create your first course', detail: 'Add a course and a unit, then drop in your notes. Everything else in bindit is built from them.', action: 'Set up a course', href: '#tools', tone: 'calm' }
-    : overdue[0]
-      ? { eyebrow: 'Overdue', title: overdue[0].title, detail: `${overdue[0].course || 'Personal'}${overdue[0].unit ? ` · ${overdue[0].unit}` : ''} was ${dueText(overdue[0].due_at, now).replace('Overdue · ', 'due ')}. Finish it or move the date so your plan stays honest.`, action: 'Open assignment', href: '#goals', tone: 'urgent' }
-      : !unitNotes.length
-        ? { eyebrow: 'Collect', title: `Add notes to ${activeUnit || activeCourse.name}`, detail: 'Upload a PDF, a photo of your notebook, or a document. Flashcards and quiz questions come from what you add.', action: 'Add notes', href: '#tools', course: activeCourse.name, unit: activeUnit }
-        : weakTopic
-          ? { eyebrow: 'Strengthen', title: `Practice ${weakTopic}`, detail: 'Your recent answers here are below 60%. A short quiz will target exactly this.', action: 'Start a quiz', href: '#tools', course: activeCourse.name, unit: activeUnit }
-          : dueSoon[0]
-            ? { eyebrow: dueText(dueSoon[0].due_at, now), title: dueSoon[0].title, detail: `${dueSoon[0].course || 'Personal'}${dueSoon[0].unit ? ` · ${dueSoon[0].unit}` : ''}. Get it moving now and it will not be a late-night job.`, action: 'Open assignment', href: '#goals' }
-            : { eyebrow: 'Keep it fresh', title: `Review ${activeUnit || activeCourse.name}`, detail: `Flashcards from ${unitNotes.length} ${unitNotes.length === 1 ? 'source' : 'sources'} in ${activeCourse.name}. Five minutes now saves an hour before the test.`, action: 'Review flashcards', href: '#tools', course: activeCourse.name, unit: activeUnit }
+  // Notifications: the next thing on the calendar, plus unread social notifications.
+  const nextItem = dated.find((task) => dueAt(task) >= now) ?? dated[0]
+  const unread = (social?.notifications ?? []).filter((item) => !item.is_read).toSorted((a, b) => parseServerTime(b.created_at) - parseServerTime(a.created_at))
 
-  const steps = activeCourse ? [
-    { label: 'Collect', detail: unitNotes.length ? `${unitNotes.length} ${unitNotes.length === 1 ? 'source' : 'sources'}` : 'No notes yet', done: unitNotes.length > 0 },
-    { label: 'Build', detail: unitNotes.length ? 'Flashcards ready' : 'Waiting for notes', done: unitNotes.length > 0 },
-    { label: 'Prove', detail: (() => { const unit = pulses.find((pulse) => pulse.course.name === activeCourse.name)?.units.find((item) => item.name === activeUnit); return unit?.attempts ? `${Math.round(unit.mastery)}% mastery` : 'Not quizzed yet' })(), done: Boolean(pulses.find((pulse) => pulse.course.name === activeCourse.name)?.units.find((item) => item.name === activeUnit)?.attempts) },
+  function toggleMute() {
+    const next = !muted
+    setMuted(next)
+    if (!data.sandboxed) writeMuted(next)
+  }
+
+  function cycleTheme() {
+    const next = THEME_NEXT[theme]
+    setTheme(next)
+    saveThemePreference(next)
+  }
+
+  function openCourse(course: Course) {
+    const next = { ...data.loadNotebook(), activeCourse: course.name, activeUnit: course.units[0] ?? '' }
+    try {
+      data.saveNotebook(next)
+    } catch {
+      // Storage can be unavailable; Study still opens on its default course.
+    }
+    setNotebook({ ...next, courses: withCourseTones(next.courses) })
+  }
+
+  // Projects: one card per course in the notebook and per study group.
+  const projects: Project[] = [
+    ...courses.map((course): Project => {
+      const related = (tasks ?? []).filter((task) => task.course === course.name)
+      const next = related.filter((task) => task.status !== 'done').toSorted(byDue)[0]
+      const notes = notebook.deposits.filter((note) => note.course === course.name)
+      const latest = notes.map((note) => Date.parse(note.createdAt)).filter((value) => !Number.isNaN(value)).toSorted((a, b) => b - a)[0]
+      return {
+        key: `course-${course.name}`,
+        type: 'course',
+        name: course.name,
+        href: '#tools',
+        detail: `${course.units.length} ${course.units.length === 1 ? 'unit' : 'units'} · ${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`,
+        due: next && dueAt(next) !== Infinity ? `Next due ${dayWord(dueAt(next), now)}` : latest ? `Updated ${shortDate.format(new Date(latest))}` : 'No notes yet',
+        done: related.filter((task) => task.status === 'done').length,
+        total: related.length,
+        tone: course.tone,
+        course,
+      }
+    }),
+    ...(groups ?? []).map((group): Project => {
+      const related = (tasks ?? []).filter((task) => task.group_id === group.id)
+      const next = related.filter((task) => task.status !== 'done').toSorted(byDue)[0]
+      return {
+        key: `group-${group.id}`,
+        type: 'group',
+        name: group.name,
+        href: `#stats?group=${encodeURIComponent(group.id)}`,
+        detail: `${group.members.length} ${group.members.length === 1 ? 'member' : 'members'}`,
+        due: next && dueAt(next) !== Infinity ? `Next due ${dayWord(dueAt(next), now)}` : `Started ${shortDate.format(new Date(parseServerTime(group.created_at)))}`,
+        done: related.filter((task) => task.status === 'done').length,
+        total: related.length,
+      }
+    }),
+  ]
+  const shownProjects = projects.filter((project) => filter === 'all' || (filter === 'courses' ? project.type === 'course' : project.type === 'group'))
+  const projectsLoading = Boolean(token) && groups === null && !courses.length
+
+  const scrollRail = (direction: -1 | 1) => {
+    const node = rail.current
+    if (!node) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    node.scrollBy({ left: direction * Math.max(220, node.clientWidth * 0.8), behavior: reduce ? 'auto' : 'smooth' })
+  }
+
+  // The team panel shows the group with the most open work, so it is the one that needs attention.
+  const groupOpen = (group: StudyGroup) => openTasks.filter((task) => task.group_id === group.id).length
+  const group = (groups ?? []).toSorted((a, b) => groupOpen(b) - groupOpen(a))[0]
+  const groupTasks = group ? (tasks ?? []).filter((task) => task.group_id === group.id) : []
+  const groupOpenTasks = groupTasks.filter((task) => task.status !== 'done').toSorted(byDue)
+  const statsHref = group ? `#stats?group=${encodeURIComponent(group.id)}` : '#stats'
+  const assignedPeople = new Set(groupOpenTasks.flatMap((task) => task.assignees.map((person) => person.student_id)))
+  const owners = group?.members.filter((member) => member.role === 'owner') ?? []
+  const milestones = new Set(groupTasks.map((task) => task.milestone_id).filter((value) => value !== null))
+  const groupDone = groupTasks.filter((task) => task.status === 'done').length
+
+  const teamStats = group ? [
+    { label: 'Progress', detail: groupTasks.length ? `${groupDone} of ${groupTasks.length} tasks done` : 'No tasks yet' },
+    { label: 'Assigned workload', detail: groupOpenTasks.length ? `${groupOpenTasks.length} open · ${assignedPeople.size} ${assignedPeople.size === 1 ? 'person' : 'people'}` : 'Nothing open' },
+    { label: 'Roles', detail: owners.length ? `${owners.map((member) => member.display_name.split(/\s+/)[0]).join(', ')} ${owners.length === 1 ? 'leads' : 'lead'}` : `${group.members.length} members` },
+    { label: 'Major milestones', detail: milestones.size ? `${milestones.size} ${milestones.size === 1 ? 'milestone' : 'milestones'}` : 'None set' },
   ] : []
-
-  function openCourse(course: Course, unit?: string) {
-    const nextNotebook = { ...data.loadNotebook(), activeCourse: course.name, activeUnit: unit ?? course.units[0] ?? '' }
-    data.saveNotebook(nextNotebook)
-    setNotebook({ ...nextNotebook, courses: withCourseTones(nextNotebook.courses) })
-  }
-
-  // Study sessions are grouped per person per day so a busy afternoon reads as one line.
-  const sessions = new Map<string, { id: string; at: string; who: string; xp: number; count: number }>()
-  for (const item of social?.activity ?? []) {
-    const key = `${item.student_id}|${new Date(parseServerTime(item.created_at)).toDateString()}`
-    const entry = sessions.get(key)
-    if (entry) { entry.xp += item.xp; entry.count += 1; if (parseServerTime(item.created_at) > parseServerTime(entry.at)) entry.at = item.created_at }
-    else sessions.set(key, { id: `xp-${item.id}`, at: item.created_at, who: item.student_id === studentId ? 'You' : item.display_name, xp: item.xp, count: 1 })
-  }
-  const activity = [
-    ...notebook.deposits.map((note) => ({ id: `note-${note.id}`, at: note.createdAt, who: 'You', what: `added ${note.fileName}`, where: `${note.course}${note.unit ? ` · ${note.unit}` : ''}` })),
-    ...[...sessions.values()].map((entry) => ({ id: entry.id, at: entry.at, who: entry.who, what: `earned ${entry.xp} XP${entry.count > 1 ? ` in ${entry.count} answers` : ''}`, where: entry.who === 'You' ? 'Practice' : 'Friends' })),
-    ...(tasks ?? []).filter((task) => task.status === 'complete').map((task) => ({ id: `task-${task.id}`, at: task.updated_at, who: 'You', what: `finished ${task.title}`, where: task.course || 'Assignments' })),
-  ].filter((item) => item.at).toSorted((a, b) => parseServerTime(b.at) - parseServerTime(a.at)).slice(0, 6)
-
-  const group = groups.toSorted((a, b) => b.weekly_xp - a.weekly_xp)[0]
 
   return (
     <div className="ui-page home">
-      <header className="home__header">
-        <div>
-          <span className="ui-eyebrow">{longDate.format(new Date(now))}</span>
-          <h1 className="ui-page-title">{greeting(data.hourOf(now))}{firstName ? <>, <em>{firstName}</em></> : null}.</h1>
-        </div>
-        <dl className="home__vitals" aria-label="Your study vitals">
-          <div><dt>Streak</dt><dd>{streak} {streak === 1 ? 'day' : 'days'}{streak >= 7 ? <img className="ui-mascot-cheer" src="/bindit-mascot-cutout.webp" alt="" width="24" height="29" /> : null}</dd></div>
-          <div><dt>Total XP</dt><dd>{xp.toLocaleString()}</dd></div>
-          <div><dt>Accuracy</dt><dd>{stats?.attempts ? `${Math.round(stats.accuracy)}%` : '—'}</dd></div>
-        </dl>
+      <header className="home-top">
+        <p className="home-top__date"><time dateTime={localDate(now)}>{monthDay.format(new Date(now))}</time></p>
+
+        <section className={`home-notice${muted ? ' is-muted' : ''}`} aria-labelledby="home-notice-title">
+          <div className="home-notice__head">
+            <a id="home-notice-title" className="home-notice__title" href="#profile">
+              View notifications
+              {unread.length && !muted ? <span className="ui-count" aria-label={`${unread.length} unread`}>{unread.length}</span> : null}
+            </a>
+            <button type="button" className="home-notice__mute" aria-pressed={muted} onClick={toggleMute}>
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.5H3z" /><path d="M6.8 14a1.4 1.4 0 0 0 2.4 0" />
+                {muted ? <path d="M2.5 2.5l11 11" /> : null}
+              </svg>
+              {muted ? 'Muted' : 'Mute'}
+            </button>
+          </div>
+          {muted ? (
+            <p className="home-notice__quiet">Notifications are muted on this device.</p>
+          ) : tasks === null ? (
+            <span className="ui-skeleton home-notice__skeleton" aria-hidden="true" />
+          ) : (
+            <ul className="home-notice__list">
+              {nextItem ? (
+                <li>
+                  <a href="#goals">
+                    <span className={`home-kind is-${kindOf(nextItem, now)}`}>{KIND_LABEL[kindOf(nextItem, now)]}</span>
+                    <span className="home-notice__text">{nextItem.title}</span>
+                    <small>{whenText(nextItem, now)}</small>
+                  </a>
+                </li>
+              ) : null}
+              {unread[0] ? (
+                <li>
+                  <a href="#profile">
+                    <span className="home-kind is-social">New</span>
+                    <span className="home-notice__text">{unread[0].message}</span>
+                  </a>
+                </li>
+              ) : null}
+              {!nextItem && !unread[0] ? <li className="home-notice__quiet">You are all caught up.</li> : null}
+            </ul>
+          )}
+        </section>
       </header>
+
+      <section className="home-banner" aria-label="Banner">
+        <Landscape />
+        <img className="home-banner__otter" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" decoding="async" />
+        <button type="button" className="home-banner__theme" onClick={cycleTheme} title={`Theme: ${THEME_NAME[theme]}`}>
+          Change theme
+        </button>
+      </section>
+
+      <div className="home-hello">
+        <h1 className="ui-page-title">Hello{firstName ? <>, <em>{firstName}</em></> : null}</h1>
+        <time className="home-hello__clock" dateTime={new Date(now).toISOString()}>{clock(now)}</time>
+      </div>
 
       <div className="home__grid">
         <div className="home__main">
-          {tasks === null && token ? (
-            <div className="home-next is-loading" aria-busy="true" aria-label="Finding your next step"><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /></div>
-          ) : <section className={`home-next${next.tone === 'urgent' ? ' is-urgent' : ''}${isNew ? ' is-new' : ''}`} aria-labelledby="home-next-title">
-            <div className="home-next__copy">
-              <span className="home-next__eyebrow">{next.eyebrow}</span>
-              <h2 id="home-next-title">{next.title}</h2>
-              <p>{next.detail}</p>
-              <div className="home-next__actions">
-                <a className="ui-button ui-button--primary" href={next.href} onClick={() => { if (next.course) { const course = courses.find((item) => item.name === next.course); if (course) openCourse(course, next.unit) } }}>{next.action}<span aria-hidden="true">→</span></a>
-                {courses.length ? <a className="ui-button ui-button--ghost" href="#tutor">Ask the tutor</a> : null}
+          <section className="home-projects" aria-labelledby="home-projects-title">
+            <div className="home-head">
+              <h2 id="home-projects-title">Project navigation</h2>
+              <div className="home-head__tools">
+                <label className="home-filter">
+                  <span>Filters:</span>
+                  <select className="ui-select home-filter__select" value={filter} onChange={(event) => setFilter(event.target.value as Filter)}>
+                    <option value="all">None</option>
+                    <option value="courses">Courses</option>
+                    <option value="groups">Groups</option>
+                  </select>
+                </label>
+                <span className="home-projects__arrows">
+                  <button type="button" className="home-arrow" onClick={() => scrollRail(-1)} aria-label="Scroll projects left"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg></button>
+                  <button type="button" className="home-arrow" onClick={() => scrollRail(1)} aria-label="Scroll projects right"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg></button>
+                </span>
+                <a className="ui-link" href="#tools">See all <span aria-hidden="true">›</span></a>
               </div>
             </div>
-            {isNew ? (
-              <img className="home-next__mascot" src="/bindit-mascot-cutout.webp" alt="" width="120" height="144" />
-            ) : activeCourse ? (
-              <ol className="home-next__binding" data-label="Active unit" aria-label={`${activeUnit || 'No unit'} in ${activeCourse.name}`}>
-                <li className="home-next__unit" style={{ '--course': activeCourse.tone } as CSSProperties}>
-                  <span className="ui-course-mark ui-course-mark--sm">{courseInitial(activeCourse.name)}</span>
-                  <span><b>{activeUnit || 'No units yet'}</b><small>{activeCourse.name}</small></span>
-                </li>
-                {steps.map((step, index) => (
-                  <li key={step.label} className={step.done ? 'is-done' : ''}>
-                    <i aria-hidden="true">{step.done ? <svg viewBox="0 0 16 16"><path d="m4 8.5 2.5 2.5L12 5.5" /></svg> : index + 1}</i>
-                    <span><b>{step.label}</b><small>{step.detail}</small></span>
+
+            {projectsLoading ? (
+              <div className="home-rail" aria-busy="true" aria-label="Loading projects">
+                <span className="ui-skeleton home-rail__skeleton is-featured" /><span className="ui-skeleton home-rail__skeleton" /><span className="ui-skeleton home-rail__skeleton" />
+              </div>
+            ) : shownProjects.length ? (
+              <ul className="home-rail" ref={rail}>
+                {shownProjects.map((project, index) => (
+                  <li key={project.key} className={`home-project${index === 0 ? ' is-featured' : ''}`} style={project.tone ? { '--course': project.tone } as CSSProperties : undefined}>
+                    <a href={project.href} onClick={() => { if (project.course) openCourse(project.course) }}>
+                      <span className={`home-project__icon is-${project.type}`} aria-hidden="true">
+                        {project.type === 'course' ? courseInitial(project.name) : (
+                          <svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M15.5 6.2a3 3 0 0 1 0 5.6M17.5 19a5.5 5.5 0 0 0-2.4-4.5" /></svg>
+                        )}
+                      </span>
+                      <span className="home-project__type">{project.type === 'course' ? 'Course' : 'Group project'}</span>
+                      <strong className="home-project__name">{project.name}</strong>
+                      <span className="home-project__detail">{project.detail}</span>
+                      {index === 0 && project.total ? (
+                        <span className="home-project__meter">
+                          <span className="ui-meter"><span style={{ width: `${Math.round(project.done / project.total * 100)}%` }} /></span>
+                          <small>{project.done} of {project.total} tasks done</small>
+                        </span>
+                      ) : null}
+                      <span className="home-project__due">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2 1.3" /></svg>
+                        {project.due}
+                      </span>
+                    </a>
                   </li>
                 ))}
-              </ol>
-            ) : null}
-          </section>}
-
-          <section className="home-section" aria-labelledby="home-upcoming">
-            <div className="home-section__head">
-              <h2 id="home-upcoming">Upcoming</h2>
-              <a className="ui-link" href="#goals">All assignments</a>
-            </div>
-            {tasks === null ? (
-              <div className="home-list"><span className="ui-skeleton home-skeleton-row" /><span className="ui-skeleton home-skeleton-row" /><span className="ui-skeleton home-skeleton-row" /></div>
-            ) : upcoming.length ? (
-              <ul className="home-list">
-                {upcoming.map((task) => {
-                  const course = courses.find((item) => item.name === task.course)
-                  const late = overdue.includes(task)
-                  return (
-                    <li key={task.id}>
-                      <a href="#goals" className="home-task">
-                        <span className="ui-course-mark ui-course-mark--sm" style={{ '--course': course?.tone ?? 'var(--color-text-tertiary)' } as CSSProperties} aria-hidden="true">{courseInitial(task.course || '•')}</span>
-                        <span className="home-task__main"><b>{task.title}</b><small>{task.course || 'Personal'}{task.unit ? ` · ${task.unit}` : ''}</small></span>
-                        {task.priority === 'high' ? <span className="ui-badge ui-badge--warning">High</span> : null}
-                        <span className={`home-task__due${late ? ' is-late' : ''}`}>{dueText(task.due_at, now)}</span>
-                      </a>
-                    </li>
-                  )
-                })}
               </ul>
             ) : (
               <div className="home-empty">
-                <p><b>Nothing due.</b> Add assignments as they are handed out and bindit will keep them in order.</p>
-                <a className="ui-button ui-button--sm" href="#goals?new">Add an assignment</a>
+                <p><b>{filter === 'groups' ? 'No group projects yet.' : 'No projects yet.'}</b> {filter === 'groups' ? 'Join or start a study group to plan work together.' : 'Each course and study group gets a card here.'}</p>
+                <a className="ui-button ui-button--sm" href={filter === 'groups' ? '#profile' : '#tools'}>{filter === 'groups' ? 'Find a group' : 'Create a course'}</a>
               </div>
             )}
           </section>
 
-          <section className="home-section" aria-labelledby="home-courses">
-            <div className="home-section__head">
-              <h2 id="home-courses">Courses</h2>
-              <a className="ui-link" href="#tools">Open study</a>
+          <section className="home-deadlines" aria-labelledby="home-deadlines-title">
+            <span className="home-eyebrow">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 4 4 12M4 6.5V12h5.5" /></svg>
+              Recent and upcoming
+            </span>
+            <div className="home-head">
+              <h2 id="home-deadlines-title">Deadlines</h2>
+              <a className="ui-link" href="#goals">All tasks</a>
             </div>
-            {pulses.length ? (
-              <ul className="home-courses">
-                {pulses.map((pulse) => {
-                  const noteCount = notebook.deposits.filter((note) => note.course === pulse.course.name).length
+            {tasks === null ? (
+              <div className="home-list" aria-busy="true" aria-label="Loading deadlines">
+                <span className="ui-skeleton home-skeleton-row" /><span className="ui-skeleton home-skeleton-row" /><span className="ui-skeleton home-skeleton-row" />
+              </div>
+            ) : deadlines.length ? (
+              <ul className="home-list">
+                {deadlines.map((task) => {
+                  const kind = kindOf(task, now)
                   return (
-                    <li key={pulse.course.name} style={{ '--course': pulse.course.tone } as CSSProperties}>
-                      <a href="#tools" onClick={() => openCourse(pulse.course)}>
-                        <span className="home-courses__spine" aria-hidden="true" />
-                        <span className="home-courses__name">{pulse.course.name}</span>
-                        <span className="home-courses__meta">{pulse.course.units.length} {pulse.course.units.length === 1 ? 'unit' : 'units'} · {noteCount} {noteCount === 1 ? 'note' : 'notes'}</span>
-                        <span className="home-courses__mastery">
-                          <span className="ui-meter"><span style={{ width: `${pulse.live ? Math.round(pulse.mastery) : 0}%`, background: 'var(--course)' }} /></span>
-                          <small>{pulse.live ? `${Math.round(pulse.mastery)}% · ${VERDICT_COPY[pulse.verdict].label}` : VERDICT_COPY[pulse.verdict].label}</small>
+                    <li key={task.id}>
+                      <a href="#goals" className="home-deadline">
+                        <span className={`home-kind is-${kind}`}>{KIND_LABEL[kind]}</span>
+                        <span className="home-deadline__main">
+                          <b>{task.title}</b>
+                          <small>{task.group_name || task.course || 'Personal'}{task.kind === 'event' && task.location ? ` · ${task.location}` : ''}</small>
                         </span>
+                        <span className={`home-deadline__when${kind === 'overdue' ? ' is-late' : ''}`}>{whenText(task, now)}</span>
                       </a>
                     </li>
                   )
@@ -240,59 +419,67 @@ export function Home({ session }: { session: AuthSession | null }) {
               </ul>
             ) : (
               <div className="home-empty">
-                <p><b>No courses yet.</b> A course holds units, and each unit holds the notes your study sets are built from.</p>
-                <a className="ui-button ui-button--sm" href="#tools">Create a course</a>
+                <p><b>No deadlines.</b> Give tasks a due date and they line up here in order.</p>
+                <a className="ui-button ui-button--sm" href="#goals?new">Add a task</a>
               </div>
             )}
           </section>
         </div>
 
-        <aside className="home__side" aria-label="Today">
-          <section className="home-card" aria-labelledby="home-goal">
-            <div className="home-section__head"><h2 id="home-goal">Today’s goal</h2><a className="ui-link" href="#settings">Change</a></div>
-            <div className="home-goal">
-              <svg viewBox="0 0 44 44" className="home-goal__ring" role="img" aria-label={`${todayXp} of ${dailyGoal} XP today`}>
-                <circle cx="22" cy="22" r="19" className="home-goal__track" />
-                <circle cx="22" cy="22" r="19" className="home-goal__fill" style={{ strokeDasharray: `${goalPercent * 1.194} 119.4` }} />
-              </svg>
-              <div><strong>{todayXp}<span> / {dailyGoal} XP</span></strong><small>{goalPercent >= 100 ? 'Goal met. Nice work.' : `${dailyGoal - todayXp} XP to go`}</small></div>
+        <aside className="home-team" aria-labelledby="home-team-title">
+          {groups === null ? (
+            <div className="home-team__loading" aria-busy="true" aria-label="Loading your group">
+              <span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" />
             </div>
-            {week.length ? (
-              <ol className="home-week" aria-label="XP this week">
-                {week.map((day) => {
-                  const height = Math.max(6, Math.min(100, day.xp / dailyGoal * 100))
+          ) : group ? (
+            <>
+              <div className="home-team__head">
+                <h2 id="home-team-title">{group.name}</h2>
+                <a className="home-team__settings" href={statsHref} aria-label={`Project statistics for ${group.name}`} title="Project statistics">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M6 18l1.4-1.4M16.6 7.4 18 6" /></svg>
+                </a>
+              </div>
+
+              <h3 className="home-team__label" id="home-team-members">Team members</h3>
+              <ul className="home-members" aria-labelledby="home-team-members">
+                {group.members.map((member) => {
+                  const focus = groupOpenTasks.find((task) => task.assignees.some((person) => person.student_id === member.student_id))
+                  const me = member.student_id === studentId
                   return (
-                    <li key={day.day} title={`${day.xp} XP`} className={day.xp >= dailyGoal ? 'is-met' : day.xp ? 'is-some' : ''}>
-                      <span><i style={{ height: `${height}%` }} /></span>
-                      <small>{weekdayShort.format(new Date(`${day.day}T12:00:00`))}</small>
+                    <li key={member.student_id}>
+                      <span className="home-members__avatar" aria-hidden="true">{nameInitials(member.display_name)}</span>
+                      <span className="home-members__who">
+                        <b>{member.display_name}{me ? <span className="home-members__you"> (you)</span> : null}</b>
+                        <small>{member.role === 'owner' ? 'Owner' : 'Member'}</small>
+                      </span>
+                      <span className={`home-members__focus${focus ? '' : ' is-idle'}`} title={focus ? `Working on ${focus.title}` : undefined}>
+                        {focus ? focus.title : 'No open tasks'}
+                      </span>
                     </li>
                   )
                 })}
-              </ol>
-            ) : null}
-          </section>
-
-          {group ? (
-            <section className="home-card" aria-labelledby="home-group">
-              <div className="home-section__head"><h2 id="home-group">{group.name}</h2><a className="ui-link" href="#chat">Open</a></div>
-              <p className="home-card__meta">{group.members.length} {group.members.length === 1 ? 'member' : 'members'} · {group.weekly_xp} of {group.weekly_goal_xp} XP this week</p>
-              <div className="ui-meter"><span style={{ width: `${Math.min(100, group.weekly_xp / group.weekly_goal_xp * 100)}%` }} /></div>
-              <ul className="home-people" aria-label="Members">
-                {group.members.slice(0, 5).map((member) => <li key={member.student_id} title={`${member.display_name} · ${member.weekly_xp} XP`}>{member.display_name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2)}</li>)}
               </ul>
-            </section>
-          ) : null}
 
-          <section className="home-card" aria-labelledby="home-activity">
-            <div className="home-section__head"><h2 id="home-activity">Recent activity</h2></div>
-            {activity.length ? (
-              <ol className="home-activity">
-                {activity.map((item) => (
-                  <li key={item.id}><p><b>{item.who}</b> {item.what}</p><small>{item.where} · {timeAgo(item.at, now)}</small></li>
+              <h3 className="home-team__label" id="home-team-stats">Team statistics</h3>
+              <ul className="home-team__stats" aria-labelledby="home-team-stats">
+                {teamStats.map((item) => (
+                  <li key={item.label}>
+                    <a href={statsHref}>
+                      <span>{item.label}</span>
+                      <small>{item.detail}</small>
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg>
+                    </a>
+                  </li>
                 ))}
-              </ol>
-            ) : <p className="home-card__meta">Uploads, finished assignments, and your friends’ study sessions will show up here.</p>}
-          </section>
+              </ul>
+            </>
+          ) : (
+            <div className="home-team__empty">
+              <h2 id="home-team-title">Your team</h2>
+              <p>Study groups show their members, who is working on what, and how the project is going right here.</p>
+              <a className="ui-button ui-button--primary ui-button--sm" href="#profile">Find or start a group</a>
+            </div>
+          )}
         </aside>
       </div>
     </div>
