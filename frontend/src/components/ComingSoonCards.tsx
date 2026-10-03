@@ -10,18 +10,18 @@ export type ComingSoonItem = {
   tone: Tone
 }
 
-/* Feature cards for sections that are planned but not built yet. */
+/* Planned features, listed plainly in one ruled sheet. Styles live in pages/Placeholder.css. */
 export function ComingSoonCards({ items, label }: { items: ComingSoonItem[]; label: string }) {
   return (
-    <ul className="ui-cards coming-soon" aria-label={label}>
+    <ul className="ui-panel ui-list coming-soon" aria-label={label}>
       {items.map((item) => (
-        <li key={item.title} className={`ui-card ${toneClass(item.tone)}`}>
-          <span className="ui-icon">{item.icon}</span>
-          <h2 className="ui-card__title">{item.title}</h2>
-          <p className="ui-card__copy">{item.copy}</p>
-          <div className="ui-card__footer">
-            <span className="ui-badge ui-badge--tone">Coming soon</span>
-          </div>
+        <li key={item.title} className={`coming-soon__item ${toneClass(item.tone)}`}>
+          <span className="ui-icon" aria-hidden="true">{item.icon}</span>
+          <span className="coming-soon__text">
+            <span className="coming-soon__title">{item.title}</span>
+            <span className="coming-soon__copy">{item.copy}</span>
+          </span>
+          <span className="ui-badge">Planned</span>
         </li>
       ))}
     </ul>

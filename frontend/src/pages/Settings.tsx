@@ -1,18 +1,51 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { getAccountProfile, saveAccountProfile, type Profile } from '../lib/api'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
 import { requestPasswordReset, signIn, signOut, signUp, type AuthSession } from '../lib/auth'
+import { loadThemePreference, saveThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
 
 const GOALS = [
-  { id: 10, label: 'Casual · 10 XP' },
-  { id: 20, label: 'Regular · 20 XP' },
-  { id: 30, label: 'Serious · 30 XP' },
-  { id: 50, label: 'Intense · 50 XP' },
+  { id: 10, label: 'Casual' },
+  { id: 20, label: 'Regular' },
+  { id: 30, label: 'Serious' },
+  { id: 50, label: 'Intense' },
+]
+
+const THEMES: { id: ThemePreference; label: string }[] = [
+  { id: 'system', label: 'System' },
+  { id: 'light', label: 'Light' },
+  { id: 'dark', label: 'Dark' },
 ]
 
 type SettingsProps = {
   session: AuthSession | null
   onSession: (session: AuthSession | null) => void
+}
+
+type Loaded = { userId: string; profile: Profile | null; ready: boolean }
+
+/* One ruled section: what it is on the left, the settings on the right. */
+function Section({ id, title, copy, children }: { id: string; title: string; copy: string; children: ReactNode }) {
+  return (
+    <section className="settings__section" aria-labelledby={id}>
+      <div className="settings__intro">
+        <h2 id={id}>{title}</h2>
+        <p>{copy}</p>
+      </div>
+      <div className="settings__body">{children}</div>
+    </section>
+  )
+}
+
+function initialLoaded(session: AuthSession | null): Loaded | null {
+  if (!session) return null
+  const cached = getCachedProfile(session.access_token)
+  return cached ? { userId: session.user.id, profile: cached, ready: true } : null
+}
+
+function metadataName(session: AuthSession | null) {
+  const value = session?.user.user_metadata?.username
+  return typeof value === 'string' ? value : ''
 }
 
 export function Settings({ session, onSession }: SettingsProps) {
@@ -21,31 +54,55 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [displayName, setDisplayName] = useState('')
-  const [username, setUsername] = useState('')
-  const [dailyGoal, setDailyGoal] = useState(20)
+  const [loaded, setLoaded] = useState<Loaded | null>(() => initialLoaded(session))
+  const [displayName, setDisplayName] = useState(() => loaded?.profile?.display_name ?? metadataName(session))
+  const [username, setUsername] = useState(() => loaded?.profile?.username ?? metadataName(session))
+  const [profileStatus, setProfileStatus] = useState('')
+  const [goalStatus, setGoalStatus] = useState('')
+  const [privacyStatus, setPrivacyStatus] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
 
+  // The saved profile belongs to whoever is signed in now; anything else is ignored.
+  const current = loaded && session && loaded.userId === session.user.id ? loaded : null
+  const profile = current?.profile ?? null
+  const profileReady = Boolean(current?.ready)
+
+  // Cached profile renders first; the saved one replaces it in the background.
   useEffect(() => {
-    if (!session) {
-      setProfile(null)
-      return
-    }
+    if (!session) return
+    let live = true
+    const userId = session.user.id
     void getAccountProfile(session.access_token)
       .then((saved) => {
-        setProfile(saved)
+        if (!live) return
+        setLoaded({ userId, profile: saved, ready: true })
         if (saved) {
           setDisplayName(saved.display_name)
           setUsername(saved.username)
-          setDailyGoal(saved.daily_goal)
         } else {
-          const metadataName = session.user.user_metadata?.username
-          setUsername(typeof metadataName === 'string' ? metadataName : '')
-          setDisplayName(typeof metadataName === 'string' ? metadataName : '')
+          setUsername(metadataName(session))
+          setDisplayName(metadataName(session))
         }
       })
-      .catch(() => setMessage('Could not load your profile.'))
+      .catch(() => {
+        if (!live) return
+        setLoaded((value) => value?.userId === userId ? value : { userId, profile: null, ready: true })
+        setProfileStatus('Could not load your profile. Your changes will still save.')
+      })
+    return () => { live = false }
   }, [session])
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  function chooseTheme(next: ThemePreference) {
+    setTheme(next)
+    saveThemePreference(next)
+  }
 
   async function submitAuth(event: FormEvent) {
     event.preventDefault()
@@ -81,19 +138,60 @@ export function Settings({ session, onSession }: SettingsProps) {
     event.preventDefault()
     if (!session) return
     setBusy(true)
-    setMessage('')
+    setProfileStatus('')
     try {
       const saved = await saveAccountProfile(session.access_token, {
         username: username.toLowerCase(),
         display_name: displayName,
-        daily_goal: dailyGoal,
+        daily_goal: profile?.daily_goal ?? 20,
       })
-      setProfile(saved)
-      setMessage('Profile saved.')
+      setLoaded({ userId: session.user.id, profile: saved, ready: true })
+      setProfileStatus('Profile saved.')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not save your profile.')
+      setProfileStatus(error instanceof Error ? error.message : 'Could not save your profile.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Saves at once; on failure the previous goal comes back and we say so.
+  async function chooseGoal(goal: number) {
+    if (!session || !profile || goal === profile.daily_goal) return
+    const previous = profile
+    const userId = session.user.id
+    setLoaded({ userId, profile: { ...profile, daily_goal: goal }, ready: true })
+    setGoalStatus('')
+    try {
+      const saved = await saveAccountProfile(session.access_token, { username: previous.username, display_name: previous.display_name, daily_goal: goal })
+      setLoaded((value) => value?.userId === userId ? { ...value, profile: saved } : value)
+      setGoalStatus(`Daily goal set to ${goal} XP.`)
+    } catch {
+      setLoaded((value) => value?.userId === userId ? { ...value, profile: previous } : value)
+      setGoalStatus('Could not change your daily goal. It is back to what it was.')
+    }
+  }
+
+  async function togglePrivacy(field: 'discoverable' | 'allow_friend_requests') {
+    if (!session || !profile) return
+    const previous = profile
+    const userId = session.user.id
+    const next = { ...profile, [field]: !profile[field] }
+    setLoaded({ userId, profile: next, ready: true })
+    setPrivacyStatus('')
+    try {
+      await saveSocialPrivacy(next.discoverable, next.allow_friend_requests, session.access_token)
+    } catch {
+      setLoaded((value) => value?.userId === userId ? { ...value, profile: previous } : value)
+      setPrivacyStatus('Could not save that change. Try again.')
+    }
+  }
+
+  async function copyFriendCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+    } catch {
+      setCopied(false)
     }
   }
 
@@ -105,10 +203,29 @@ export function Settings({ session, onSession }: SettingsProps) {
 
   const authTitle = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create an account' : 'Reset your password'
 
+  const appearance = (
+    <Section id="settings-appearance" title="Appearance" copy="Choose how bindit looks on this device. System follows your device setting.">
+      <div className="ui-panel">
+        <div className="settings__row">
+          <div className="settings__row-text">
+            <span className="settings__label" id="settings-theme-label">Theme</span>
+            <span className="settings__hint">Saved on this device only.</span>
+          </div>
+          <div className="ui-segmented settings__segmented" role="group" aria-labelledby="settings-theme-label">
+            {THEMES.map((item) => (
+              <button key={item.id} type="button" className="ui-segmented__item" aria-pressed={theme === item.id} onClick={() => chooseTheme(item.id)}>{item.label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Section>
+  )
+
   return (
     <div className="ui-page settings">
       <header className="ui-page-header">
         <div>
+          <span className="ui-eyebrow">Account</span>
           <h1 className="ui-page-title">Settings</h1>
           <p className="ui-page-subtitle">
             {session
@@ -119,54 +236,55 @@ export function Settings({ session, onSession }: SettingsProps) {
       </header>
 
       {!session ? (
-        <section className="ui-section" aria-labelledby="settings-auth">
-          <div className="ui-section-head"><h2 className="ui-section-title" id="settings-auth">{authTitle}</h2></div>
-          <form className="ui-panel settings__auth" onSubmit={submitAuth}>
-            <div className="settings__stack">
-              <label className="settings__label" htmlFor="settings-email">Email</label>
-              <input id="settings-email" className="ui-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
-            </div>
-            {mode !== 'reset' ? (
-              <div className="settings__stack">
-                <label className="settings__label" htmlFor="settings-password">Password</label>
-                <input
-                  id="settings-password"
-                  className="ui-input"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                  minLength={8}
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                />
-              </div>
-            ) : null}
-            {message ? <p className="settings__status" role="status">{message}</p> : null}
-            <button className="ui-button ui-button--primary settings__submit" type="submit" disabled={busy}>
-              {busy ? 'One moment…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email'}
-            </button>
-            <div className="settings__links">
-              <button className="ui-link" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>
-                {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}
+        <>
+          <Section id="settings-auth" title={authTitle} copy="Sign in to keep your XP, streaks, and notes across devices.">
+            <form className="ui-panel settings__auth" onSubmit={submitAuth}>
+              <label className="ui-field" htmlFor="settings-email">
+                <span>Email</span>
+                <input id="settings-email" className="ui-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
+              </label>
+              {mode !== 'reset' ? (
+                <label className="ui-field" htmlFor="settings-password">
+                  <span>Password</span>
+                  <input
+                    id="settings-password"
+                    className="ui-input"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                    minLength={8}
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  />
+                </label>
+              ) : null}
+              {message ? <p className="settings__status" role="status">{message}</p> : null}
+              <button className="ui-button ui-button--primary settings__submit" type="submit" disabled={busy}>
+                {busy ? 'One moment…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email'}
               </button>
-              <button className="ui-link" type="button" onClick={() => { setMode('reset'); setMessage('') }}>Forgot password</button>
-            </div>
-          </form>
-        </section>
+              <div className="settings__links">
+                <button className="ui-link" type="button" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>
+                  {mode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}
+                </button>
+                <button className="ui-link" type="button" onClick={() => { setMode('reset'); setMessage('') }}>Forgot password</button>
+              </div>
+            </form>
+          </Section>
+          {appearance}
+        </>
       ) : (
         <>
-          <section className="ui-section" aria-labelledby="settings-profile">
-            <div className="ui-section-head"><h2 className="ui-section-title" id="settings-profile">Profile</h2></div>
-            <form className="ui-panel" onSubmit={saveProfile}>
-              <div className="settings__field">
-                <div className="settings__field-text">
+          <Section id="settings-profile" title="Profile" copy="How friends and study groups see you.">
+            <form className="ui-panel" onSubmit={saveProfile} aria-busy={!profileReady}>
+              <div className="settings__row">
+                <div className="settings__row-text">
                   <label className="settings__label" htmlFor="settings-display-name">Display name</label>
-                  <span className="settings__hint">Shown to friends.</span>
+                  <span className="settings__hint">Shown to friends and in group chats.</span>
                 </div>
-                <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} />
+                <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} disabled={!profileReady} />
               </div>
-              <div className="settings__field">
-                <div className="settings__field-text">
+              <div className="settings__row">
+                <div className="settings__row-text">
                   <label className="settings__label" htmlFor="settings-username">Username</label>
                   <span className="settings__hint">3 to 24 letters, numbers, or underscores.</span>
                 </div>
@@ -178,53 +296,103 @@ export function Settings({ session, onSession }: SettingsProps) {
                   required
                   minLength={3}
                   maxLength={24}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  disabled={!profileReady}
                 />
               </div>
-              <div className="settings__field">
-                <div className="settings__field-text">
-                  <label className="settings__label" htmlFor="settings-daily-goal">Daily goal</label>
-                  <span className="settings__hint">How much XP to aim for each day.</span>
-                </div>
-                <select id="settings-daily-goal" className="ui-select settings__control" value={dailyGoal} onChange={(event) => setDailyGoal(Number(event.target.value))}>
-                  {GOALS.map((goal) => <option key={goal.id} value={goal.id}>{goal.label}</option>)}
-                </select>
-              </div>
               <div className="settings__footer">
-                {message ? <p className="settings__status" role="status">{message}</p> : null}
-                <button className="ui-button ui-button--primary" type="submit" disabled={busy}>
-                  {busy ? 'Saving…' : profile ? 'Update profile' : 'Save profile'}
+                {profileStatus ? <p className="settings__status" role="status">{profileStatus}</p> : null}
+                <button className={`ui-button ui-button--primary${busy ? ' is-busy' : ''}`} type="submit" disabled={busy || !profileReady}>
+                  {profile ? 'Update profile' : 'Save profile'}
                 </button>
               </div>
             </form>
-          </section>
+          </Section>
 
-          <section className="ui-section" aria-labelledby="settings-account">
-            <div className="ui-section-head"><h2 className="ui-section-title" id="settings-account">Account</h2></div>
+          <Section id="settings-goal" title="Daily goal" copy="How much XP to aim for each day. Changes save right away.">
             <div className="ui-panel">
-              <div className="settings__field">
-                <div className="settings__field-text">
+              <div className="settings__row settings__row--stack">
+                <div className="settings__goals" role="group" aria-label="Daily XP goal">
+                  {GOALS.map((goal) => (
+                    <button
+                      key={goal.id}
+                      type="button"
+                      className="settings__goal"
+                      aria-pressed={profile?.daily_goal === goal.id}
+                      onClick={() => void chooseGoal(goal.id)}
+                      disabled={!profile}
+                    >
+                      <b>{goal.label}</b>
+                      <small>{goal.id} XP</small>
+                    </button>
+                  ))}
+                </div>
+                {!profile && profileReady ? <p className="settings__hint">Save your profile first to set a goal.</p> : null}
+                {goalStatus ? <p className="settings__status" role="status">{goalStatus}</p> : null}
+              </div>
+            </div>
+          </Section>
+
+          {appearance}
+
+          <Section id="settings-privacy" title="Privacy" copy="Control who can find you. Study group messages and images are only visible to that group's members.">
+            <div className="ui-panel">
+              {profile ? (
+                <>
+                  <label className="settings__row settings__toggle">
+                    <span className="settings__row-text">
+                      <span className="settings__label">Appear in search</span>
+                      <span className="settings__hint">Let other learners find your profile.</span>
+                    </span>
+                    <input className="ui-checkbox" type="checkbox" checked={profile.discoverable} onChange={() => void togglePrivacy('discoverable')} />
+                  </label>
+                  <label className="settings__row settings__toggle">
+                    <span className="settings__row-text">
+                      <span className="settings__label">Friend requests</span>
+                      <span className="settings__hint">Allow new people to add you.</span>
+                    </span>
+                    <input className="ui-checkbox" type="checkbox" checked={profile.allow_friend_requests} onChange={() => void togglePrivacy('allow_friend_requests')} />
+                  </label>
+                </>
+              ) : (
+                <div className="settings__row">
+                  <span className="settings__hint">{profileReady ? 'Save your profile to choose who can find you.' : 'Loading your privacy settings…'}</span>
+                </div>
+              )}
+              {privacyStatus ? <div className="settings__row"><p className="settings__status settings__status--error" role="alert">{privacyStatus}</p></div> : null}
+            </div>
+          </Section>
+
+          <Section id="settings-account" title="Account" copy="Your sign-in and the code friends use to add you.">
+            <div className="ui-panel">
+              <div className="settings__row">
+                <div className="settings__row-text">
                   <span className="settings__label">Email</span>
                 </div>
                 <span className="settings__value">{session.user.email ?? '—'}</span>
               </div>
               {profile ? (
-                <div className="settings__field">
-                  <div className="settings__field-text">
+                <div className="settings__row">
+                  <div className="settings__row-text">
                     <span className="settings__label">Friend code</span>
                     <span className="settings__hint">Share it so friends can add you.</span>
                   </div>
-                  <span className="settings__value settings__code">{profile.friend_code}</span>
+                  <div className="settings__code-wrap">
+                    <span className="settings__value settings__code">{profile.friend_code}</span>
+                    <button type="button" className="ui-button ui-button--sm" onClick={() => void copyFriendCode(profile.friend_code)}>{copied ? 'Copied' : 'Copy'}</button>
+                  </div>
                 </div>
               ) : null}
-              <div className="settings__field">
-                <div className="settings__field-text">
+              <div className="settings__row">
+                <div className="settings__row-text">
                   <span className="settings__label">Sign out</span>
-                  <span className="settings__hint">You’ll need to log in again to use bindit.</span>
+                  <span className="settings__hint">You’ll need to log in again to use bindit on this device.</span>
                 </div>
                 <button className="ui-button" type="button" onClick={logout}>Sign out</button>
               </div>
             </div>
-          </section>
+          </Section>
         </>
       )}
     </div>

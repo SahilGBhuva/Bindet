@@ -1,22 +1,48 @@
 import { ComingSoonCards, Icons } from '../components/ComingSoonCards'
+import './Placeholder.css'
 
+/* Short, real guidance on how bindit fits together. Every link opens a page that exists. */
 export function More() {
   return (
-    <div className="ui-page more">
+    <div className="ui-page placeholder more">
       <header className="ui-page-header">
         <div>
-          <h1 className="ui-page-title">More</h1>
-          <p className="ui-page-subtitle">Extra tools and pages that do not need their own spot in the sidebar.</p>
+          <span className="ui-eyebrow">Help</span>
+          <h1 className="ui-page-title">How bindit works</h1>
+          <p className="ui-page-subtitle">bindit keeps your schoolwork in one binder: notes sorted by course and unit, practice made from those notes, and the people you study with.</p>
         </div>
       </header>
-      <ComingSoonCards
-        label="More pages"
-        items={[
-          { title: 'Help', copy: 'Guides for notes, flashcards, and quizzes.', icon: Icons.help, tone: 'blue' },
-          { title: 'About', copy: 'What bindit is and how it works.', icon: Icons.info, tone: 'green' },
-          { title: 'Feedback', copy: 'Tell us what to fix or build next.', icon: Icons.message, tone: 'violet' },
-        ]}
-      />
+
+      <section className="ui-section" aria-labelledby="help-notes">
+        <div className="ui-section-head"><h2 className="ui-section-title" id="help-notes">Study from your own notes</h2></div>
+        <ol className="ui-panel placeholder__steps">
+          <li><span><b>Add a course and its units.</b> In <a href="#tools">Study</a>, create a course, then a unit for each topic or chapter.</span></li>
+          <li><span><b>Add notes to a unit.</b> Upload a photo, PDF, or document, or paste typed notes straight into the unit.</span></li>
+          <li><span><b>Practice.</b> Switch the unit to Flashcards or Quiz in <a href="#tools">Study</a>. Both are built from the notes in that unit.</span></li>
+          <li><span><b>Ask the tutor.</b> In <a href="#tutor">Tutor</a>, pick a course and unit so answers use your notes first. You can attach a photo of a problem.</span></li>
+        </ol>
+      </section>
+
+      <section className="ui-section" aria-labelledby="help-plan">
+        <div className="ui-section-head"><h2 className="ui-section-title" id="help-plan">Plan and study together</h2></div>
+        <ol className="ui-panel placeholder__steps">
+          <li><span><b>Track assignments.</b> <a href="#goals">Assignments</a> holds what is due, with a board and a list view.</span></li>
+          <li><span><b>Join a study group.</b> In <a href="#profile">Friends &amp; groups</a>, create a group or join one with its invite code.</span></li>
+          <li><span><b>Message your group.</b> Each group has a private chat in <a href="#chat">Messages</a>. Only its members can read the messages and images.</span></li>
+          <li><span><b>Make it yours.</b> Change your name, daily goal, theme, and privacy in <a href="#settings">Settings</a>.</span></li>
+        </ol>
+      </section>
+
+      <section className="ui-section" aria-labelledby="help-planned">
+        <div className="ui-section-head"><h2 className="ui-section-title" id="help-planned">Coming to this page</h2></div>
+        <ComingSoonCards
+          label="Planned help pages"
+          items={[
+            { title: 'Guides', copy: 'Step-by-step walkthroughs for notes, flashcards, quizzes, and the tutor.', icon: Icons.help, tone: 'blue' },
+            { title: 'Feedback', copy: 'A way to tell us what to fix or build next, right from the app.', icon: Icons.message, tone: 'violet' },
+          ]}
+        />
+      </section>
     </div>
   )
 }
