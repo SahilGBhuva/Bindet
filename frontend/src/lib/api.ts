@@ -441,3 +441,118 @@ export function reportSocialUser(userId: string, accessToken: string) {
     method: 'POST', body: JSON.stringify({ user_id: userId, reason: 'inappropriate_behavior', details: '' }),
   }, accessToken)
 }
+
+/* ---- Tutor ---------------------------------------------------------------- */
+
+export type TutorConversation = { id: string; title: string; course: string; unit: string; created_at: string; updated_at: string }
+export type TutorMessage = { id: number; role: 'user' | 'assistant'; content: string; attachments: string[]; model_tier: string; created_at: string }
+export type TutorStreamHandlers = {
+  onUploadProgress?: (fraction: number) => void
+  onMeta?: (meta: { conversation: TutorConversation; user_message: TutorMessage; tier: string; grounded_in: string[] }) => void
+  onDelta?: (text: string) => void
+  onDone?: (result: { message: TutorMessage; partial?: boolean }) => void
+  onError?: (message: string) => void
+}
+
+const tutorListCache = new Map<string, TutorConversation[]>()
+const tutorMessageCache = new Map<string, TutorMessage[]>()
+
+export function getCachedTutorConversations(accessToken: string) {
+  const identity = tokenSubject(accessToken)
+  return tutorListCache.get(identity) ?? readSessionCache<TutorConversation[]>(`bindit:tutor:${identity}`)?.data ?? null
+}
+
+export function setCachedTutorConversations(accessToken: string, data: TutorConversation[]) {
+  const identity = tokenSubject(accessToken)
+  tutorListCache.set(identity, data)
+  writeSessionCache(`bindit:tutor:${identity}`, data)
+}
+
+export async function getTutorConversations(accessToken: string) {
+  const data = await request<TutorConversation[]>('/api/tutor/conversations', undefined, accessToken)
+  setCachedTutorConversations(accessToken, data)
+  return data
+}
+
+export function getCachedTutorMessages(accessToken: string, conversationId: string) {
+  return tutorMessageCache.get(`${tokenSubject(accessToken)}:${conversationId}`) ?? null
+}
+
+export function setCachedTutorMessages(accessToken: string, conversationId: string, data: TutorMessage[]) {
+  tutorMessageCache.set(`${tokenSubject(accessToken)}:${conversationId}`, data)
+}
+
+export async function getTutorMessages(accessToken: string, conversationId: string, before?: number) {
+  const data = await request<TutorMessage[]>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}/messages${before ? `?before=${before}` : ''}`, undefined, accessToken)
+  if (!before) setCachedTutorMessages(accessToken, conversationId, data)
+  return data
+}
+
+export function deleteTutorConversation(accessToken: string, conversationId: string) {
+  tutorMessageCache.delete(`${tokenSubject(accessToken)}:${conversationId}`)
+  return request<{ deleted: boolean }>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' }, accessToken)
+}
+
+/* Shrinks large photos before they are attached, then returns a data URL. */
+export async function prepareTutorImage(file: File): Promise<{ name: string; dataUrl: string; size: number }> {
+  const prepared = await optimizedImage(file)
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('That image could not be read.'))
+    reader.readAsDataURL(prepared)
+  })
+  return { name: file.name || 'image', dataUrl, size: prepared.size }
+}
+
+/*
+ * Sends a tutor message and streams the reply. XHR is used (not fetch) because it
+ * reports real upload progress for attached images and exposes the response as
+ * it arrives. Returns a function that stops the reply.
+ */
+export function streamTutorMessage(
+  accessToken: string,
+  body: { conversation_id?: string; content: string; course?: string; unit?: string; images?: { name: string; data_url: string }[] },
+  handlers: TutorStreamHandlers,
+): () => void {
+  const xhr = new XMLHttpRequest()
+  let seen = 0
+  let finished = false
+  const handleBlock = (block: string) => {
+    const name = /^event: (.+)$/m.exec(block)?.[1]
+    const raw = /^data: (.+)$/m.exec(block)?.[1]
+    if (!name || !raw) return
+    const payload = JSON.parse(raw)
+    if (name === 'meta') handlers.onMeta?.(payload)
+    else if (name === 'delta') handlers.onDelta?.(payload.text)
+    else if (name === 'done') { finished = true; handlers.onDone?.(payload) }
+    else if (name === 'error') { finished = true; handlers.onError?.(payload.message) }
+  }
+  const drain = () => {
+    const text = xhr.responseText
+    let boundary = text.indexOf('\n\n', seen)
+    while (boundary !== -1) {
+      handleBlock(text.slice(seen, boundary))
+      seen = boundary + 2
+      boundary = text.indexOf('\n\n', seen)
+    }
+  }
+  xhr.open('POST', `${API_URL}/api/tutor/messages`)
+  xhr.setRequestHeader('Content-Type', 'application/json')
+  xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+  if (body.images?.length) xhr.upload.onprogress = (event) => { if (event.lengthComputable) handlers.onUploadProgress?.(event.loaded / event.total) }
+  xhr.onprogress = () => { if (xhr.status === 200) drain() }
+  xhr.onload = () => {
+    if (xhr.status !== 200) {
+      let detail = ''
+      try { detail = (JSON.parse(xhr.responseText) as { detail?: string }).detail ?? '' } catch { /* not JSON */ }
+      handlers.onError?.(detail || `The tutor could not answer (${xhr.status}).`)
+      return
+    }
+    drain()
+    if (!finished) handlers.onError?.('The reply ended unexpectedly. Try again.')
+  }
+  xhr.onerror = () => handlers.onError?.('bindit couldn’t be reached. Check your connection and try again.')
+  xhr.send(JSON.stringify(body))
+  return () => { finished = true; xhr.abort() }
+}

@@ -140,3 +140,77 @@ def grade_answer(*, question: str, correct_answer: str, student_answer: str, top
     if not result["explanation"]:
         raise AITutorError("AI returned an empty explanation")
     return result
+
+# --- Tutor chat -----------------------------------------------------------------
+
+OPENROUTER_TUTOR_STRONG_MODEL = os.getenv("OPENROUTER_TUTOR_STRONG_MODEL", "").strip()
+TUTOR_STREAM_IDLE_SECONDS = float(os.getenv("OPENROUTER_STREAM_IDLE_SECONDS", "25"))
+_COMPLEX_HINTS = ("prove", "derive", "step by step", "step-by-step", "explain why", "compare", "contrast", "essay", "analyze", "analyse", "evaluate", "show that", "solve")
+
+
+def tutor_route(text: str, has_images: bool) -> dict[str, Any]:
+    """Fast model for everyday questions; more reasoning (or a configured stronger model) for hard ones."""
+    lowered = text.lower()
+    complex_question = len(text) > 700 or (len(text) > 140 and any(hint in lowered for hint in _COMPLEX_HINTS))
+    if has_images:
+        return {"model": OPENROUTER_VISION_MODEL, "effort": "low" if complex_question else "minimal", "tier": "vision"}
+    if complex_question:
+        return {"model": OPENROUTER_TUTOR_STRONG_MODEL or OPENROUTER_MODEL, "effort": "low", "tier": "deep"}
+    return {"model": OPENROUTER_MODEL, "effort": "minimal", "tier": "fast"}
+
+
+def tutor_system_prompt(course: str, unit: str, source_labels: list[str], source_text: str) -> str:
+    grounded = bool(source_text.strip())
+    parts = [
+        "You are bindit's tutor for a high school student. Be warm, precise, and brief by default: answer first, then the minimum explanation needed.",
+        "Use short paragraphs, numbered steps for procedures, and bullet lists only when they help. Use plain text math (e.g. x^2, sqrt(x)).",
+        "Help the student learn rather than doing graded work for them: for homework-style questions, guide with steps and a check question instead of only giving the final answer.",
+        "If you are unsure, say so. Never invent sources.",
+    ]
+    if course or unit:
+        parts.append(f"Current course: {course or 'unspecified'}. Current unit: {unit or 'unspecified'}.")
+    if grounded:
+        parts.append("The student's own notes are below and are the primary source of truth. Prefer their wording and examples. When you rely on a note, mention its file name in parentheses. If the notes do not cover the question, say so briefly and answer from general knowledge.")
+        parts.append(f"NOTES ({', '.join(source_labels[:10])}):\n{source_text}")
+    return "\n".join(parts)
+
+
+def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any], session_id: str | None = None):
+    """Yield text chunks from OpenRouter as they arrive. Raises AITutorError if nothing can be produced."""
+    payload: dict[str, Any] = {
+        "model": route["model"],
+        "stream": True,
+        "temperature": 0.35,
+        "max_tokens": 1400 if route["tier"] == "deep" else 900,
+        "reasoning": {"effort": route["effort"], "exclude": True},
+        "provider": {"sort": "latency", "allow_fallbacks": True},
+        "messages": messages,
+    }
+    if session_id:
+        payload["session_id"] = session_id[:256]
+    produced = False
+    try:
+        with _client().stream("POST", OPENROUTER_URL, headers=_headers(), json=payload, timeout=httpx.Timeout(TUTOR_STREAM_IDLE_SECONDS, connect=3.0, pool=1.0)) as response:
+            if response.status_code >= 400:
+                raise AITutorError(f"OpenRouter returned {response.status_code}")
+            for line in response.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("error"):
+                    raise AITutorError("OpenRouter reported an error mid-stream")
+                choices = event.get("choices") or []
+                delta = (choices[0].get("delta") or {}).get("content") if choices else None
+                if delta:
+                    produced = True
+                    yield delta
+    except httpx.HTTPError as exc:
+        raise AITutorError("OpenRouter stream failed") from exc
+    if not produced:
+        raise AITutorError("The tutor returned an empty reply")

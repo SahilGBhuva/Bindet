@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
+
+import base64
+import binascii
+import json
 
 import ai_tutor
 import auth
@@ -19,6 +24,7 @@ import database
 import questions
 import note_ingestion
 import note_store
+import tutor
 
 # Refuse to start in production without a durable PostgreSQL database.
 database.validate_database_configuration()
@@ -124,6 +130,26 @@ class QuestionResponse(BaseModel):
     question: str
     topic: str
     difficulty: int
+
+
+TUTOR_HOURLY_LIMIT = 60
+TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+TUTOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+
+
+class TutorImage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(default="image", max_length=120)
+    data_url: str = Field(min_length=20, max_length=7_200_000)
+
+
+class TutorMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_id: str | None = Field(default=None, max_length=32)
+    content: str = Field(min_length=1, max_length=4000)
+    course: str = Field(default="", max_length=120)
+    unit: str = Field(default="", max_length=160)
+    images: list[TutorImage] = Field(default_factory=list, max_length=3)
 
 
 TASK_CREATE_LIMIT = 300
@@ -680,6 +706,109 @@ def leave_study_group(group_id: str, authorization: Annotated[str | None, Header
     except ValueError as error:
         raise social_error(error) from error
     return {"left": True}
+
+
+@app.get("/api/tutor/conversations")
+def tutor_conversations(authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    return tutor.list_conversations(user["id"])
+
+
+@app.get("/api/tutor/conversations/{conversation_id}/messages")
+def tutor_messages(conversation_id: str, before: int | None = None, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return tutor.list_messages(user["id"], conversation_id, before_id=before)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Conversation not found") from error
+
+
+@app.delete("/api/tutor/conversations/{conversation_id}")
+def delete_tutor_conversation(conversation_id: str, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        return {"deleted": tutor.delete_conversation(user["id"], conversation_id)}
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Conversation not found") from error
+
+
+def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
+    """Validate data URLs (type, size, real base64) before anything is sent to a model."""
+    parts = []
+    for image in images:
+        header, _, encoded = image.data_url.partition(",")
+        content_type = header.removeprefix("data:").removesuffix(";base64")
+        if not header.startswith("data:") or not header.endswith(";base64") or content_type not in TUTOR_IMAGE_TYPES:
+            raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise HTTPException(status_code=400, detail="That image could not be read. Try attaching it again.") from error
+        if not raw:
+            raise HTTPException(status_code=400, detail="That image is empty")
+        if len(raw) > TUTOR_IMAGE_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Images must be 5 MB or smaller")
+        parts.append({"type": "image_url", "image_url": {"url": image.data_url}})
+    return parts
+
+
+def sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, default=str, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/tutor/messages")
+def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    owner = user["id"]
+    content = data.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Write a message first")
+    try:
+        database.check_social_rate_limit(owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail="You’ve sent a lot of messages this hour. Take a short break and try again soon.") from error
+    image_parts = tutor_image_parts(data.images)
+    try:
+        conversation = tutor.get_conversation(owner, data.conversation_id) if data.conversation_id else tutor.start_conversation(owner, content, data.course.strip(), data.unit.strip())
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Conversation not found") from error
+    course = data.course.strip() or conversation["course"]
+    unit = data.unit.strip() or conversation["unit"]
+    history = tutor.history_for_model(owner, conversation["id"])
+    user_message = tutor.add_message(owner, conversation["id"], "user", content, [image.name for image in data.images])
+    # Only this student's own notes are ever used for grounding.
+    labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+    route = ai_tutor.tutor_route(content, bool(image_parts))
+    model_messages = [
+        {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
+        *history,
+        {"role": "user", "content": [{"type": "text", "text": content}, *image_parts] if image_parts else content},
+    ]
+
+    def events():
+        chunks: list[str] = []
+        saved = False
+        yield sse("meta", {"conversation": conversation, "user_message": user_message, "tier": route["tier"], "grounded_in": labels[:10]})
+        try:
+            for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
+                chunks.append(chunk)
+                yield sse("delta", {"text": chunk})
+            reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
+            saved = True
+            yield sse("done", {"message": reply})
+        except ai_tutor.AITutorError:
+            if chunks:
+                reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks) + "\n\n(The reply was cut off.)", model_tier=route["tier"])
+                saved = True
+                yield sse("done", {"message": reply, "partial": True})
+            else:
+                yield sse("error", {"message": "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."})
+        finally:
+            # The student stopped the reply or left: keep what was already written.
+            if chunks and not saved:
+                tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/friends/search")
