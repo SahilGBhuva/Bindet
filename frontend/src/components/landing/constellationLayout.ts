@@ -66,7 +66,7 @@ export function buildLayout(compact: boolean): Layout {
     nodes.push({ id, kind: 'concept', x, y, z: 0.3, course: -1 })
     // Nearest material from two different courses: knowledge connecting across subjects.
     const byCourse = [0, 1, 2].map((course) => materials
-      .filter((node) => node.course === course && node.x > 0)
+      .filter((node) => node.course === course)
       .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0])
     const near = byCourse.filter(Boolean).sort((a, b) => Math.hypot(a!.x - x, a!.y - y) - Math.hypot(b!.x - x, b!.y - y)).slice(0, 2)
     for (const node of near) links.push([id, node!.id])

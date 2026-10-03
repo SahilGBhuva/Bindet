@@ -283,7 +283,27 @@
 .lp-constellation__paper { fill: var(--lp-surface); stroke: var(--lp-line-strong); stroke-width: 1.2; }
 .lp-constellation__task { fill: var(--lp-ink); }
 .lp-constellation__concept { fill: var(--lp-bind); }
-.lp-constellation__label-svg { fill: var(--lp-ink-2); font-size: 13px; font-weight: 500; }
+.lp-constellation__label-svg { fill: var(--lp-ink-2); font-size: 13px; font-weight: 500; paint-order: stroke; stroke: var(--lp-ground); stroke-width: 6px; stroke-linejoin: round; }
+.lp-constellation__label-svg.is-compact { font-size: 17px; }
+.lp-constellation__static { max-height: 100%; }
+
+/* Phones and no-WebGL: the same map, animated in CSS. Pieces drift in from scattered
+   positions and land in order; then the threads draw from each parent to its child. */
+.lp-constellation__static.is-animated { animation: none; }
+.lp-constellation__static.is-animated .lp-cn {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-cn-bind 1.3s var(--lp-ease) var(--d, 0s) both;
+}
+.lp-constellation__static.is-animated line {
+  stroke-dasharray: 1;
+  animation: lp-cn-draw .9s var(--lp-ease) var(--d, 0s) both;
+}
+@keyframes lp-cn-bind {
+  from { opacity: 0; transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--r, 0deg)) scale(.7); }
+  35% { opacity: 1; }
+}
+@keyframes lp-cn-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 
 .lp-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin: 0; padding: 0; color: var(--lp-ink-3); font-size: var(--text-xs); list-style: none; }
 .lp-legend li { display: inline-flex; align-items: center; gap: 7px; }

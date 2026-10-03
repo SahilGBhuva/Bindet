@@ -18,7 +18,10 @@ type GateView = 'landing' | 'auth' | 'confirm'
 const RESEND_SECS = 60
 
 // The landing page (and its demo and 3D scene) is only downloaded by signed-out visitors.
-const Landing = lazy(() => import('./Landing').then((module) => ({ default: module.Landing })))
+// Without a saved session the download starts as soon as this module runs, in parallel with the first render.
+const loadLanding = () => import('./Landing').then((module) => ({ default: module.Landing }))
+const landingRequest = typeof window !== 'undefined' && !loadAuthSession() ? loadLanding() : null
+const Landing = lazy(() => landingRequest ?? loadLanding())
 
 /* The quiet editorial panel beside the form: loose notes drawn together on one spine. */
 function AuthAside({ mode }: { mode: 'login' | 'signup' | 'confirm' }) {
