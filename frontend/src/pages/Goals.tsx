@@ -88,7 +88,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [course, setCourse] = useState('all')
   const [priority, setPriority] = useState<Priority | 'all'>('all')
   const [sort, setSort] = useState<Sort>('due')
-  const [composerOpen, setComposerOpen] = useState(() => window.location.hash.includes('new'))
+  const [composerOpen, setComposerOpen] = useState(() => window.location.hash.startsWith('#goals?new'))
   const [editing, setEditing] = useState<string | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<Status | null>(null)
@@ -121,6 +121,18 @@ export function Goals({ session }: { session: AuthSession | null }) {
     const timer = window.setTimeout(() => setNotice(null), notice.undo ? 6000 : 5000)
     return () => window.clearTimeout(timer)
   }, [notice])
+
+  // "New assignment" links (#goals?new) open the composer, then the hash is tidied so a reload does not reopen it.
+  useEffect(() => {
+    const openFromHash = () => {
+      if (!window.location.hash.startsWith('#goals?new')) return
+      setComposerOpen(true)
+      window.history.replaceState(null, '', '#goals')
+    }
+    openFromHash()
+    window.addEventListener('hashchange', openFromHash)
+    return () => window.removeEventListener('hashchange', openFromHash)
+  }, [])
 
   // N opens the composer, Escape closes panels.
   useEffect(() => {
