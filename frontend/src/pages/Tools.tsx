@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import type { DragEvent, FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { AnswerResult, Flashcard, GeneratedQuestion, Topic } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
@@ -14,6 +14,7 @@ import { courseInitial } from '../lib/tones'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
+type NoteSource = 'file' | 'paste'
 
 const QUIZ_TOPICS: { id: Topic; label: string }[] = [
   { id: 'mixed', label: 'Mixed' },
@@ -69,6 +70,72 @@ function Chevron({ direction }: { direction: 'up' | 'down' }) {
   )
 }
 
+const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+
+function formatDay(value: string) {
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? '' : dayFormat.format(time)
+}
+
+/* A short label for the kind of source, read from the file name. */
+function fileKind(name: string) {
+  const extension = name.split('.').pop()?.toLowerCase() ?? ''
+  if (['png', 'jpg', 'jpeg', 'webp', 'heic', 'gif'].includes(extension)) return 'IMG'
+  if (extension === 'md') return 'MD'
+  if (['pdf', 'docx', 'txt', 'csv', 'json'].includes(extension)) return extension.toUpperCase()
+  return 'DOC'
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
+      <path d="M4 14v4.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
+  )
+}
+
+function FileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 3.5H7.5A1.5 1.5 0 0 0 6 5v14a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 18 19V7.5z" />
+      <path d="M14 3.5v4h4M9 12.5h6M9 16h4" />
+    </svg>
+  )
+}
+
+function FlipIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 0 1-13.7 5.6L4 15.5M4 20v-4.5h4.5" />
+    </svg>
+  )
+}
+
+function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d={direction === 'left' ? 'M19 12H5m6-6-6 6 6 6' : 'M5 12h14m-6-6 6 6-6 6'} />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
+    </svg>
+  )
+}
+
+function CrossIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </svg>
+  )
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
@@ -94,12 +161,15 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [renamingCourse, setRenamingCourse] = useState('')
   const [courseRenameDraft, setCourseRenameDraft] = useState('')
   const [menuCourse, setMenuCourse] = useState('')
+  // Where the open course menu was opened from: a row in the course list, or the compact phone bar.
+  const [menuPlace, setMenuPlace] = useState<'rail' | 'bar'>('rail')
   const [file, setFile] = useState<File | null>(null)
   const [pastedNotes, setPastedNotes] = useState('')
   const [dragActive, setDragActive] = useState(false)
   const [removingNoteId, setRemovingNoteId] = useState('')
   const [notice, setNotice] = useState('')
-  const [uploadBusy, setUploadBusy] = useState(false)
+  const [uploading, setUploading] = useState<'' | NoteSource>('')
+  const [uploadError, setUploadError] = useState<{ source: NoteSource; message: string; retry: boolean } | null>(null)
   const [cardIndex, setCardIndex] = useState(0)
   const [cardFlipped, setCardFlipped] = useState(false)
   const [quizTopic, setQuizTopic] = useState<Topic>('mixed')
@@ -108,7 +178,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [quizAnswer, setQuizAnswer] = useState('')
   const [quizResult, setQuizResult] = useState<AnswerResult | null>(null)
   const [quizBusy, setQuizBusy] = useState(false)
+  const [quizChecking, setQuizChecking] = useState(false)
   const [quizError, setQuizError] = useState('')
+  const [quizFailed, setQuizFailed] = useState<'' | 'load' | 'check'>('')
   const [deck, setDeck] = useState<{ key: string; cards: Flashcard[] } | null>(null)
   const [cardsBusy, setCardsBusy] = useState(false)
   const [cardsError, setCardsError] = useState('')
@@ -144,18 +216,19 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   latestDeckKey.current = deckKey
   const cards = deck?.key === deckKey ? deck.cards : []
   const card = cards.length ? cards[cardIndex % cards.length] : null
+  const uploadBusy = Boolean(uploading)
   const quizKey = `${activeCourse}|${activeUnit}|${unitNotes.length ? `notes:${unitNotes.length}` : quizTopic}|${quizDifficulty}`
 
   useEffect(() => {
     data.saveNotebook(notebook)
   }, [data, notebook])
 
+  // A status message clears itself; errors that need a decision are shown inline instead.
   useEffect(() => {
-    setNotebook((current) => {
-      if (current.courses.every((course) => course.tone)) return current
-      return { ...current, courses: withCourseTones(current.courses) }
-    })
-  }, [])
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 5000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
 
   useEffect(() => {
     if (!orderOpen) return
@@ -209,10 +282,15 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       })
   }, [accessToken, activeCourse, activeUnit, cardsRequest, data, deck, deckKey, panelFn, unitNotes.length])
 
+  // Reads the latest quiz inputs without making them reasons to request a new question.
+  const loadQuizForKey = useEffectEvent(() => {
+    void loadQuizQuestion()
+  })
+
   useEffect(() => {
     if (panelFn !== 'quiz' || loadedQuizKey.current === quizKey) return
     loadedQuizKey.current = quizKey
-    void loadQuizQuestion()
+    loadQuizForKey()
   }, [panelFn, quizKey])
 
   function addCourse(event: FormEvent) {
@@ -441,7 +519,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   function onPickFile(event: React.ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0]
     setFile(next ?? null)
-    setNotice('')
+    setUploadError(null)
   }
 
   function onDropFile(event: DragEvent<HTMLDivElement>) {
@@ -450,7 +528,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const next = event.dataTransfer.files?.[0]
     if (!next) return
     setFile(next)
-    setNotice('')
+    setUploadError(null)
   }
 
   function goCard(direction: 'next' | 'prev') {
@@ -463,7 +541,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const sequence = ++quizSequence.current
     const prefetched = prefetchedQuestions.current.get(quizKey)
     setQuizBusy(true)
+    setQuizChecking(false)
     setQuizError('')
+    setQuizFailed('')
     setQuizResult(null)
     setQuizAnswer('')
     try {
@@ -473,7 +553,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       primeNextQuestion()
     } catch {
       prefetchedQuestions.current.delete(quizKey)
-      if (sequence === quizSequence.current) setQuizError('Couldn’t load a question. Try again in a moment.')
+      if (sequence === quizSequence.current) {
+        setQuizError('Couldn’t load a question. Try again in a moment.')
+        setQuizFailed('load')
+      }
     } finally {
       if (sequence === quizSequence.current) setQuizBusy(false)
     }
@@ -511,7 +594,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   async function gradeAnswer(answer: string) {
     if (!quizQuestion || !answer.trim() || quizBusy) return
     setQuizBusy(true)
+    setQuizChecking(true)
     setQuizError('')
+    setQuizFailed('')
     try {
       const result = await data.analyzeAnswer(quizQuestion, answer, studentId.current, accessToken)
       setQuizResult(result)
@@ -522,15 +607,17 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       })
     } catch {
       setQuizError('Couldn’t check that answer. Try again in a moment.')
+      setQuizFailed('check')
     } finally {
       setQuizBusy(false)
+      setQuizChecking(false)
     }
   }
 
   async function sendUpload(event: FormEvent) {
     event.preventDefault()
     if (!file || uploadBusy) return
-    await ingestNote(file)
+    await ingestNote(file, 'file')
   }
 
   async function sendPastedNotes(event: FormEvent) {
@@ -538,20 +625,21 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const text = pastedNotes.trim()
     if (!text || uploadBusy) return
     const typedNote = new File([text], `typed-notes-${new Date().toISOString().slice(0, 10)}.txt`, { type: 'text/plain' })
-    const saved = await ingestNote(typedNote)
+    const saved = await ingestNote(typedNote, 'paste')
     if (saved) setPastedNotes('')
   }
 
-  async function ingestNote(candidate: File): Promise<boolean> {
+  async function ingestNote(candidate: File, source: NoteSource): Promise<boolean> {
     if (!activeUnit) {
-      setNotice(`Create a unit in ${activeCourse} first, then send your notes there.`)
+      setUploadError({ source, message: `Create a unit in ${activeCourse} first, then send your notes there.`, retry: false })
       return false
     }
     if (candidate.size > 10 * 1024 * 1024) {
-      setNotice('Notes must be 10 MB or smaller.')
+      setUploadError({ source, message: `“${candidate.name}” is ${formatBytes(candidate.size)}. Notes must be 10 MB or smaller.`, retry: false })
       return false
     }
-    setUploadBusy(true)
+    setUploading(source)
+    setUploadError(null)
     setNotice('')
     try {
       const uploaded = await data.uploadNote(candidate, activeCourse, activeUnit, accessToken)
@@ -570,10 +658,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setNotice(`Added “${deposit.fileName}” to ${activeCourse} → ${activeUnit}.`)
       return true
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not read that note.')
+      setUploadError({ source, message: error instanceof Error ? error.message : 'Could not read that note.', retry: true })
       return false
     } finally {
-      setUploadBusy(false)
+      setUploading('')
     }
   }
 
@@ -589,6 +677,55 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     } finally {
       setRemovingNoteId('')
     }
+  }
+
+  function toggleCourseMenu(name: string, place: 'rail' | 'bar') {
+    setMenuPlace(place)
+    setMenuCourse((open) => (open === name && menuPlace === place ? '' : name))
+  }
+
+  function clearFile() {
+    setFile(null)
+    setUploadError(null)
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
+  function onCardsKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+    const target = event.target as HTMLElement
+    if (target.closest('input, textarea, select')) return
+    event.preventDefault()
+    goCard(event.key === 'ArrowRight' ? 'next' : 'prev')
+  }
+
+  function retryQuiz() {
+    if (quizFailed === 'check' && quizQuestion && quizAnswer.trim()) void gradeAnswer(quizAnswer)
+    else void loadQuizQuestion()
+  }
+
+  const courseMenu = (course: Course, place: 'rail' | 'bar') => {
+    const open = menuCourse === course.name && menuPlace === place
+    return (
+      <div className={`tools__course-menu tools__course-menu--${place}`} ref={open ? menuRef : undefined}>
+        <button
+          className="tools__icon-button"
+          type="button"
+          aria-label={`${course.name} options`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => toggleCourseMenu(course.name, place)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+        </button>
+        {open ? (
+          <div className="ui-menu tools__menu" role="menu" aria-label={`${course.name} options`}>
+            <button className="ui-menu__item" type="button" role="menuitem" onClick={() => { setMenuCourse(''); startRenameCourse(course.name) }}>Rename</button>
+            <button className="ui-menu__item" type="button" role="menuitem" onClick={() => openCustomize(course.name)}>Customize…</button>
+            <button className="ui-menu__item ui-menu__item--danger" type="button" role="menuitem" onClick={() => confirmRemoveCourse(course)}>Delete…</button>
+          </div>
+        ) : null}
+      </div>
+    )
   }
 
   const addCourseForm = (
@@ -613,19 +750,27 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </form>
   )
 
+  const toast = notice ? (
+    <p className="app-toast" role="status">
+      {notice}
+      <button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button>
+    </p>
+  ) : null
+
   if (courses.length === 0) {
     return (
       <div className="ui-page tools">
         <header className="ui-page-header">
           <div>
-            <h1 className="ui-page-title">Tools</h1>
-            <p className="ui-page-subtitle">Organize notes by course and unit, then practice with flashcards and quizzes.</p>
+            <span className="ui-eyebrow">Study</span>
+            <h1 className="ui-page-title tools__title">Your binder</h1>
+            <p className="ui-page-subtitle">Organize notes by course and unit, then practice with flashcards and quizzes built from them.</p>
           </div>
         </header>
-        <div className="ui-panel">
+        <section className="ui-panel tools__first-run" aria-labelledby="tools-first-run-title">
           <div className="ui-empty">
-            <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
-            <p className="ui-empty__title">Add your first course</p>
+            <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+            <h2 className="ui-empty__title" id="tools-first-run-title">Start with your first course</h2>
             <p className="ui-empty__copy">Courses hold units, and each unit holds the notes your flashcards and quizzes are built from.</p>
             <form className="tools__empty-form" onSubmit={addCourse}>
               <input
@@ -638,31 +783,33 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               <button className="ui-button ui-button--primary" type="submit" disabled={!newCourse.trim()}>Add course</button>
             </form>
           </div>
-        </div>
-        {notice ? <p className="notice" role="status">{notice}</p> : null}
+        </section>
+        {toast}
       </div>
     )
   }
 
+  const cardPosition = cards.length ? (cardIndex % cards.length) + 1 : 0
+  const loadingQuestion = quizBusy && !quizChecking
+
   return (
-    <div className="ui-page tools">
+    <div className="ui-page tools" style={current ? { ['--course' as string]: courseTone(current) } : undefined}>
       <header className="ui-page-header">
-        <div>
-          <span className="tools__eyebrow"><i /> AI study workspace</span>
-          <h1 className="ui-page-title">{activeCourse || 'Tools'}</h1>
+        <div className="tools__heading">
+          <span className="ui-eyebrow">Study</span>
+          <h1 className="ui-page-title tools__title">{activeCourse || 'Your binder'}</h1>
           <p className="ui-page-subtitle">
             {current ? `${plural(current.units.length, 'unit')} · ${plural(courseNoteCount, 'note')}` : 'Pick a course to get started.'}
           </p>
         </div>
         <div className="tools__header-actions">
-          <span className="tools__ai-state"><i /> AI ready</span>
-          <button className="ui-button ui-button--ghost" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
+          <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
         </div>
       </header>
 
       <div className="tools__layout">
         <nav className="tools__courses" aria-label="Courses">
-          <h2 className="ui-section-title tools__courses-title">Courses</h2>
+          <h2 className="tools__courses-title">Courses</h2>
           <ul className="tools__course-list">
             {courses.map((course) => {
               const isActive = course.name === activeCourse
@@ -700,37 +847,23 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     >
                       <CourseMark course={course} />
                       <span className="tools__course-name">{course.name}</span>
-                      <span className="ui-count">{course.units.length}</span>
+                      <span className="ui-count" aria-label={plural(course.units.length, 'unit')}>{course.units.length}</span>
                     </button>
                   )}
-                  {renamingCourse !== course.name ? (
-                    <div className="tools__course-menu" ref={menuCourse === course.name ? menuRef : undefined}>
-                      <button
-                        className="tools__icon-button"
-                        type="button"
-                        aria-label={`${course.name} options`}
-                        aria-haspopup="menu"
-                        aria-expanded={menuCourse === course.name}
-                        onClick={() => setMenuCourse((open) => (open === course.name ? '' : course.name))}
-                      >
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
-                      </button>
-                      {menuCourse === course.name ? (
-                        <div className="ui-menu tools__menu" role="menu" aria-label={`${course.name} options`}>
-                          <button className="ui-menu__item" type="button" role="menuitem" onClick={() => { setMenuCourse(''); startRenameCourse(course.name) }}>Rename</button>
-                          <button className="ui-menu__item" type="button" role="menuitem" onClick={() => openCustomize(course.name)}>Customize…</button>
-                          <button className="ui-menu__item ui-menu__item--danger" type="button" role="menuitem" onClick={() => confirmRemoveCourse(course)}>Delete…</button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {renamingCourse !== course.name ? courseMenu(course, 'rail') : null}
                 </li>
               )
             })}
           </ul>
-          {addingCourse ? addCourseForm : (
-            <button className="tools__add-row" type="button" onClick={() => setAddingCourse(true)}>+ Add course</button>
-          )}
+          <div className="tools__course-tools">
+            {current && renamingCourse !== current.name ? courseMenu(current, 'bar') : null}
+            {addingCourse ? addCourseForm : (
+              <button className="tools__add-row" type="button" onClick={() => setAddingCourse(true)}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                <span>Add course</span>
+              </button>
+            )}
+          </div>
         </nav>
 
         <section className="ui-panel tools__workspace" aria-label={activeCourse ? `${activeCourse} workspace` : 'Workspace'}>
@@ -802,17 +935,18 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           </div>
 
           {!activeUnit ? (
-            <div className="ui-empty">
-              <p className="ui-empty__title">{units.length ? 'Pick a unit' : `No units in ${activeCourse} yet`}</p>
+            <div className="ui-empty tools__unit-empty">
+              <h2 className="ui-empty__title">{units.length ? 'Pick a unit' : `No units in ${activeCourse} yet`}</h2>
               <p className="ui-empty__copy">
-                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : 'Units group your notes by topic, like chapters in a textbook.'}
+                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : 'Units group your notes by topic, like chapters in a textbook. Add one to start collecting notes.'}
               </p>
               {units.length ? null : <button className="ui-button ui-button--primary" type="button" onClick={() => setAddingUnit(true)}>Add a unit</button>}
             </div>
           ) : (
             <>
               <div className="tools__toolbar">
-                <div className="ui-segmented" role="tablist" aria-label="Study view">
+                <h2 className="tools__unit-title">{activeUnit}</h2>
+                <div className="ui-segmented tools__views" role="tablist" aria-label="Study view">
                   {VIEWS.map((view) => (
                     <button
                       key={view.id}
@@ -832,9 +966,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               {panelFn === 'scan' ? (
                 <div className="tools__notes" role="tabpanel" aria-label="Notes">
                   <div className="tools__add-notes">
-                    <form className="tools__upload" onSubmit={sendUpload} aria-busy={uploadBusy}>
+                    <form className="tools__upload" onSubmit={sendUpload} aria-busy={uploading === 'file'}>
+                      <h3 className="tools__label" id="tools-upload-title">Upload a file</h3>
                       <div
-                        className={`tools__dropzone${dragActive ? ' is-dragging' : ''}`}
+                        className={`tools__dropzone${dragActive ? ' is-dragging' : ''}${file ? ' has-file' : ''}${uploading === 'file' ? ' is-busy' : ''}${uploadError?.source === 'file' ? ' has-error' : ''}`}
                         onDragEnter={(event) => { event.preventDefault(); setDragActive(true) }}
                         onDragOver={(event) => event.preventDefault()}
                         onDragLeave={(event) => {
@@ -850,112 +985,173 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.md,.csv,.json"
                           onChange={onPickFile}
                         />
-                        <button className="tools__dropzone-button" type="button" onClick={() => fileInput.current?.click()}>
-                          <span className="tools__dropzone-title">{file ? file.name : 'Drop a file or browse'}</span>
-                          <span className="tools__dropzone-meta">
-                            {file ? formatBytes(file.size) : 'PDF, DOCX, TXT, Markdown, CSV, JSON, or a photo of handwritten notes. Up to 10 MB.'}
+                        <button
+                          className="tools__dropzone-button"
+                          type="button"
+                          aria-describedby="tools-upload-meta"
+                          disabled={uploading === 'file'}
+                          onClick={() => fileInput.current?.click()}
+                        >
+                          <span className="tools__dropzone-icon" aria-hidden="true">
+                            {uploading === 'file' ? <span className="ui-spinner" /> : file ? <FileIcon /> : <UploadIcon />}
+                          </span>
+                          <span className="tools__dropzone-title">
+                            {uploading === 'file' && file
+                              ? `Reading ${file.name}…`
+                              : dragActive
+                                ? `Release to add to ${activeUnit}`
+                                : file
+                                  ? file.name
+                                  : 'Drop a file here, or browse'}
+                          </span>
+                          <span className="tools__dropzone-meta" id="tools-upload-meta">
+                            {uploading === 'file'
+                              ? 'Pulling out the text so flashcards and quizzes can use it.'
+                              : file
+                                ? `${formatBytes(file.size)} · Choose to pick a different file`
+                                : 'PDF, DOCX, TXT, Markdown, CSV, JSON, or a photo of handwritten notes. Up to 10 MB.'}
                           </span>
                         </button>
                       </div>
+                      {uploadError?.source === 'file' ? (
+                        <div className="ui-alert" role="alert">
+                          <span>{uploadError.message}</span>
+                          {uploadError.retry && file ? (
+                            <button className="ui-button ui-button--sm" type="submit">Try again</button>
+                          ) : (
+                            <button className="ui-button ui-button--sm" type="button" onClick={() => { clearFile(); fileInput.current?.click() }}>Choose another file</button>
+                          )}
+                        </div>
+                      ) : null}
                       <div className="tools__form-actions">
-                        {uploadBusy ? <span className="tools__status" role="status"><span className="ui-spinner" />Reading your notes…</span> : null}
-                        {file && !uploadBusy ? <button className="ui-button ui-button--ghost" type="button" onClick={() => { setFile(null); if (fileInput.current) fileInput.current.value = '' }}>Clear</button> : null}
-                        <button className="ui-button ui-button--primary" type="submit" disabled={!file || uploadBusy}>Upload</button>
+                        {uploading === 'file' ? <span className="tools__status" role="status">Reading your notes…</span> : null}
+                        {file && uploading !== 'file' ? <button className="ui-button ui-button--ghost" type="button" onClick={clearFile}>Clear</button> : null}
+                        <button className={`ui-button ui-button--primary${uploading === 'file' ? ' is-busy' : ''}`} type="submit" disabled={!file || uploading === 'paste'}>Upload</button>
                       </div>
                     </form>
 
-                    <form className="tools__paste" onSubmit={sendPastedNotes}>
+                    <form className="tools__paste" onSubmit={sendPastedNotes} aria-busy={uploading === 'paste'}>
                       <label className="tools__label" htmlFor="pasted-notes">Paste or type notes</label>
                       <textarea
                         id="pasted-notes"
                         className="ui-textarea"
                         value={pastedNotes}
-                        onChange={(event) => setPastedNotes(event.target.value)}
+                        onChange={(event) => {
+                          setPastedNotes(event.target.value)
+                          if (uploadError?.source === 'paste') setUploadError(null)
+                        }}
                         placeholder="Paste from Google Docs, a class handout, or your own notes"
-                        rows={5}
+                        rows={6}
+                        readOnly={uploading === 'paste'}
                       />
+                      {uploadError?.source === 'paste' ? (
+                        <div className="ui-alert" role="alert">
+                          <span>{uploadError.message}</span>
+                          {uploadError.retry ? <button className="ui-button ui-button--sm" type="submit">Try again</button> : null}
+                        </div>
+                      ) : null}
                       <div className="tools__form-actions">
-                        <button className="ui-button" type="submit" disabled={!pastedNotes.trim() || uploadBusy}>Add typed notes</button>
+                        {uploading === 'paste' ? <span className="tools__status" role="status">Saving your notes…</span> : null}
+                        <button className={`ui-button${uploading === 'paste' ? ' is-busy' : ''}`} type="submit" disabled={!pastedNotes.trim() || uploading === 'file'}>Add typed notes</button>
                       </div>
                     </form>
                   </div>
 
-                  <div className="tools__sources">
-                    <div className="ui-section-head">
-                      <h2 className="ui-section-title">Sources</h2>
+                  <section className="tools__sources" aria-labelledby="tools-sources-title">
+                    <div className="tools__sources-head">
+                      <h3 className="tools__label" id="tools-sources-title">Sources in {activeUnit}</h3>
                       <span className="ui-count">{plural(unitNotes.length, 'file')}</span>
                     </div>
-                    <div className="ui-panel tools__source-panel">
-                      {unitNotes.length ? (
-                        <ul className="ui-list">
-                          {unitNotes.map((note) => (
-                            <li key={note.id} className="ui-row tools__source">
-                              <div className="ui-row__main">
-                                <span className="ui-row__title">{note.fileName}</span>
-                                <span className="ui-row__meta">{note.textPreview || 'Text extracted and ready.'}</span>
-                              </div>
-                              <button
-                                className="ui-button ui-button--ghost ui-button--sm"
-                                type="button"
-                                onClick={() => void removeNote(note)}
-                                disabled={removingNoteId === note.id}
-                                aria-label={`Remove ${note.fileName}`}
-                              >
-                                {removingNoteId === note.id ? 'Removing…' : 'Remove'}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="ui-empty">
-                          <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
-                          <p className="ui-empty__title">No notes in {activeUnit} yet</p>
-                          <p className="ui-empty__copy">Flashcards and quiz questions are built from the files you add here.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                    {unitNotes.length ? (
+                      <ul className="ui-list tools__source-list">
+                        {unitNotes.map((note) => (
+                          <li key={note.id} className={`ui-row tools__source${removingNoteId === note.id ? ' is-removing' : ''}`}>
+                            <span className="tools__source-kind" aria-hidden="true">{fileKind(note.fileName)}</span>
+                            <div className="ui-row__main">
+                              <span className="ui-row__title">{note.fileName}</span>
+                              <span className="ui-row__meta">
+                                {formatDay(note.createdAt)}{formatDay(note.createdAt) ? ' · ' : ''}{note.textPreview || 'Text extracted and ready.'}
+                              </span>
+                            </div>
+                            <button
+                              className="ui-button ui-button--ghost ui-button--sm"
+                              type="button"
+                              onClick={() => void removeNote(note)}
+                              disabled={removingNoteId === note.id}
+                              aria-label={`Remove ${note.fileName}`}
+                            >
+                              {removingNoteId === note.id ? 'Removing…' : 'Remove'}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="tools__sources-empty">
+                        <p className="tools__sources-empty-title">Nothing here yet</p>
+                        <p className="tools__hint">Add a file or paste notes above. Flashcards and quiz questions for {activeUnit} are built from them.</p>
+                      </div>
+                    )}
+                  </section>
                 </div>
               ) : null}
 
               {panelFn === 'cards' ? (
-                <div className="tools__cards" role="tabpanel" aria-label="Flashcards">
+                <div className="tools__cards" role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
                   {unitNotes.length === 0 ? (
                     <div className="ui-empty">
-                      <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" />
-                      <p className="ui-empty__title">No notes in {activeUnit} yet</p>
-                      <p className="ui-empty__copy">Flashcards are generated from this unit’s notes.</p>
+                      <h3 className="ui-empty__title">No notes in {activeUnit} yet</h3>
+                      <p className="ui-empty__copy">Flashcards are written from this unit’s notes. Add a file or paste some text first.</p>
                       <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>
                     </div>
                   ) : card ? (
                     <>
                       <button
                         className={`tools__card${cardFlipped ? ' is-flipped' : ''}`}
-                        style={current ? { ['--course' as string]: courseTone(current) } : undefined}
                         type="button"
-                        aria-live="polite"
                         onClick={() => setCardFlipped((open) => !open)}
                       >
-                        <span className="tools__card-label">{cardFlipped ? 'Answer' : 'Question'}</span>
-                        <span className="tools__card-text">{cardFlipped ? card.back : card.front}</span>
-                        <span className="tools__card-hint">{cardFlipped ? 'Click to see the question' : 'Click to reveal the answer'}</span>
+                        <span className="tools__card-face" key={`${cardPosition}-${cardFlipped ? 'back' : 'front'}`} aria-live="polite">
+                          <span className="tools__card-label">{cardFlipped ? 'Answer' : 'Question'}</span>
+                          <span className="tools__card-text">{cardFlipped ? card.back : card.front}</span>
+                        </span>
+                        <span className="tools__card-hint" aria-hidden="true">
+                          <FlipIcon />
+                          {cardFlipped ? 'Show the question' : 'Reveal the answer'}
+                        </span>
                       </button>
-                      <div className="tools__card-nav">
-                        <button className="ui-button" type="button" onClick={() => goCard('prev')} disabled={cards.length < 2}>Previous</button>
-                        <span className="ui-count">{(cardIndex % cards.length) + 1} of {cards.length}</span>
-                        <button className="ui-button" type="button" onClick={() => goCard('next')} disabled={cards.length < 2}>Next</button>
+                      <div className="tools__card-progress" aria-hidden="true">
+                        <span style={{ transform: `scaleX(${cardPosition / cards.length})` }} />
                       </div>
+                      <div className="tools__card-nav">
+                        <button className="ui-button" type="button" onClick={() => goCard('prev')} disabled={cards.length < 2}>
+                          <ArrowIcon direction="left" />Previous
+                        </button>
+                        <span className="tools__card-count" aria-live="polite">{cardPosition} of {cards.length}</span>
+                        <button className="ui-button" type="button" onClick={() => goCard('next')} disabled={cards.length < 2}>
+                          Next<ArrowIcon direction="right" />
+                        </button>
+                      </div>
+                      <p className="tools__keys">
+                        <kbd>Space</kbd> flips · <kbd>←</kbd> <kbd>→</kbd> move between cards
+                      </p>
                     </>
                   ) : cardsError && !cardsBusy ? (
-                    <div className="ui-empty" role="alert">
-                      <p className="ui-empty__title">Flashcards didn’t load</p>
-                      <p className="ui-empty__copy">{cardsError}</p>
-                      <button className="ui-button" type="button" onClick={() => setCardsRequest((count) => count + 1)}>Retry</button>
+                    <div className="tools__cards-error">
+                      <div className="ui-alert" role="alert">
+                        <span>{cardsError}</span>
+                        <button className="ui-button ui-button--sm" type="button" onClick={() => setCardsRequest((count) => count + 1)}>Try again</button>
+                      </div>
                     </div>
                   ) : (
-                    <div className="ui-empty" role="status">
-                      <span className="ui-spinner" />
-                      <p className="ui-empty__copy">Generating flashcards from {plural(unitNotes.length, 'note')}…</p>
+                    <div className="tools__card-loading" aria-busy="true">
+                      <div className="tools__card tools__card--skeleton" aria-hidden="true">
+                        <span className="ui-skeleton" />
+                        <span className="ui-skeleton" />
+                        <span className="ui-skeleton" />
+                      </div>
+                      <p className="tools__status" role="status">
+                        <span className="ui-spinner" />Writing flashcards from {plural(unitNotes.length, 'note')}…
+                      </p>
                     </div>
                   )}
                 </div>
@@ -978,37 +1174,54 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       <select className="ui-select" aria-label="Level" value={quizDifficulty} onChange={(event) => setQuizDifficulty(Number(event.target.value))}>
                         {QUIZ_LEVELS.map((level) => <option key={level.id} value={level.id}>{level.label}</option>)}
                       </select>
-                      <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>New question</button>
+                      <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
+                        {quizQuestion && !quizResult && !quizError ? 'Skip' : 'New question'}
+                      </button>
                     </div>
                   </div>
 
-                  <div className={`tools__question${quizBusy && !quizResult ? ' is-loading' : ''}`} aria-busy={quizBusy}>
-                    {quizQuestion ? (
+                  <div className={`tools__question${loadingQuestion ? ' is-loading' : ''}`} aria-busy={quizBusy}>
+                    {loadingQuestion || (!quizQuestion && !quizError) ? (
+                      <div className="tools__question-skeleton">
+                        <span className="ui-skeleton" />
+                        <span className="ui-skeleton" />
+                        <span className="ui-skeleton" />
+                        <p className="sr-only" role="status">Loading a question…</p>
+                      </div>
+                    ) : quizQuestion ? (
                       <>
+                        <span className="ui-eyebrow">Question · Level {quizQuestion.difficulty || quizDifficulty}</span>
                         <p className="tools__prompt">{quizQuestion.question}</p>
                         {quizQuestion.choices?.length ? (
                           <div className="tools__choices" role="group" aria-label="Answer choices">
-                            {quizQuestion.choices.map((choice) => (
-                              <button
-                                key={choice}
-                                type="button"
-                                className={`tools__choice${quizAnswer === choice ? ' is-picked' : ''}${quizAnswer === choice && quizResult ? (quizResult.correct ? ' is-correct' : ' is-incorrect') : ''}`}
-                                aria-pressed={quizAnswer === choice}
-                                disabled={quizBusy || Boolean(quizResult)}
-                                onClick={() => {
-                                  setQuizAnswer(choice)
-                                  void gradeAnswer(choice)
-                                }}
-                              >
-                                {choice}
-                              </button>
-                            ))}
+                            {quizQuestion.choices.map((choice, index) => {
+                              const picked = quizAnswer === choice
+                              const verdict = picked && quizResult ? (quizResult.correct ? 'correct' : 'incorrect') : ''
+                              return (
+                                <button
+                                  key={choice}
+                                  type="button"
+                                  className={`tools__choice${picked ? ' is-picked' : ''}${verdict ? ` is-${verdict}` : ''}`}
+                                  aria-pressed={picked}
+                                  disabled={quizBusy || Boolean(quizResult)}
+                                  onClick={() => {
+                                    setQuizAnswer(choice)
+                                    void gradeAnswer(choice)
+                                  }}
+                                >
+                                  <span className="tools__choice-key" aria-hidden="true">
+                                    {verdict === 'correct' ? <CheckIcon /> : verdict === 'incorrect' ? <CrossIcon /> : String.fromCharCode(65 + index)}
+                                  </span>
+                                  <span className="tools__choice-text">{choice}</span>
+                                  {picked && quizChecking ? <span className="tools__choice-state"><span className="ui-spinner" />Checking…</span> : null}
+                                  {verdict ? <span className="tools__choice-state">{verdict === 'correct' ? 'Correct' : 'Incorrect'}</span> : null}
+                                </button>
+                              )
+                            })}
                           </div>
                         ) : null}
                       </>
-                    ) : quizError ? null : (
-                      <p className="tools__status" role="status"><span className="ui-spinner" />Loading a question…</p>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Multiple-choice questions answer with the choice buttons; the demo never shows the text field. */}
@@ -1024,21 +1237,38 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         autoComplete="off"
                         disabled={quizBusy || !quizQuestion}
                       />
-                      <button className="ui-button ui-button--primary" type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim()}>
+                      <button className={`ui-button ui-button--primary${quizChecking ? ' is-busy' : ''}`} type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim()}>
                         Check
                       </button>
                     </form>
                   )}
 
-                  {quizError ? <p className="tools__error" role="alert">{quizError}</p> : null}
+                  {quizError ? (
+                    <div className="ui-alert" role="alert">
+                      <span>{quizError}</span>
+                      <button className="ui-button ui-button--sm" type="button" onClick={retryQuiz} disabled={quizBusy}>Try again</button>
+                    </div>
+                  ) : null}
                   {quizResult ? (
                     <div className={`tools__result ${quizResult.correct ? 'is-correct' : 'is-incorrect'}`} role="status">
-                      <p className="tools__result-title">{quizResult.correct ? 'Correct' : 'Not quite'}</p>
-                      <p className="tools__result-body">{quizResult.explanation}</p>
-                      {quizResult.hint ? <p className="tools__result-body">Hint: {quizResult.hint}</p> : null}
-                      <p className="tools__result-meta">
-                        {quizResult.xp_earned ? `+${quizResult.xp_earned} XP · ` : ''}{quizResult.total_xp.toLocaleString()} XP total · answer streak {quizResult.streak}
+                      <p className="tools__result-title">
+                        <span className="tools__result-icon" aria-hidden="true">{quizResult.correct ? <CheckIcon /> : <CrossIcon />}</span>
+                        {quizResult.correct ? 'Correct' : 'Not quite'}
+                        {quizResult.xp_earned ? <span className="ui-badge ui-badge--accent">+{quizResult.xp_earned} XP</span> : null}
                       </p>
+                      <p className="tools__result-body">{quizResult.explanation}</p>
+                      {quizResult.hint ? <p className="tools__result-body"><strong>Hint:</strong> {quizResult.hint}</p> : null}
+                      <div className="tools__result-foot">
+                        <p className="tools__result-meta">
+                          {quizResult.total_xp.toLocaleString()} XP total · answer streak {quizResult.streak}
+                        </p>
+                        <div className="tools__quiz-controls tools__result-actions">
+                          {quizResult.correct ? null : <a className="tools__tutor-link" href="#tutor">Ask the tutor about this</a>}
+                          <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
+                            Next question<ArrowIcon direction="right" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -1048,7 +1278,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         </section>
       </div>
 
-      {notice ? <p className="notice" role="status">{notice}</p> : null}
+      {toast}
 
       {orderOpen ? (
         <div className="ui-dialog-backdrop" role="presentation" onClick={closeCustomize}>
@@ -1063,8 +1293,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               <h2 className="ui-dialog__title" id="customize-title">Customize courses</h2>
             </div>
             <div className="tools__dialog-body">
-              <section className="tools__dialog-order" aria-label="Course order">
-                <p className="tools__hint">Drag to reorder, or use the arrows. Double-click a name to rename it.</p>
+              <section className="tools__dialog-order" aria-labelledby="customize-order-title">
+                <div>
+                  <h3 className="tools__label" id="customize-order-title">Order</h3>
+                  <p className="tools__hint">Drag to reorder, or use the arrows. Double-click a name to rename it.</p>
+                </div>
                 <ol className="tools__order-list">
                   {courses.map((course, index) => (
                     <li
@@ -1159,7 +1392,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
               <section
                 className="tools__dialog-cover"
-                aria-label="Course cover"
+                aria-labelledby="customize-cover-title"
                 onDragOver={(event) => {
                   event.preventDefault()
                   event.dataTransfer.dropEffect = 'copy'
@@ -1169,6 +1402,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                   void applyCourseImage(event.dataTransfer.files?.[0] ?? null)
                 }}
               >
+                <h3 className="tools__label" id="customize-cover-title">Cover</h3>
                 <input
                   ref={courseImageInput}
                   className="ui-file-input"
@@ -1180,14 +1414,14 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                   <>
                     <div className="tools__cover-preview">
                       <CourseMark course={looking} size="lg" />
-                      <div>
+                      <div className="tools__cover-copy">
                         <p className="tools__cover-name">{looking.name}</p>
                         <p className="tools__hint">{looking.image ? 'Cover image shown in your course list.' : 'No cover. The course color is used instead.'}</p>
                       </div>
                     </div>
                     <p className="tools__hint">Drop an image here or choose one from your files.</p>
                     <div className="tools__form-actions tools__form-actions--start">
-                      <button className="ui-button" type="button" disabled={lookBusy} onClick={() => courseImageInput.current?.click()}>
+                      <button className={`ui-button${lookBusy ? ' is-busy' : ''}`} type="button" disabled={lookBusy} onClick={() => courseImageInput.current?.click()}>
                         {lookBusy ? 'Adding…' : looking.image ? 'Change cover' : 'Add cover'}
                       </button>
                       {looking.image ? (
