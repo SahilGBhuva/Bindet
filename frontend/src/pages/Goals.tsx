@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type FormEvent, type HTMLAttributes, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import {
   addTaskChecklistItem, addTaskComment, addTaskLink, createTask, deleteTask, deleteTaskAttachment, deleteTaskChecklistItem,
   getCachedFriends, getCachedStudyGroups, getCachedTasks, getFriends, getStudyGroups, getTask, getTasks, parseServerTime,
@@ -6,17 +6,18 @@ import {
   type SocialNotification, type StudyGroup, type Task, type TaskDetail, type TaskInput, type TaskPriority, type TaskStatus,
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
-import { loadNotebook, withCourseTones } from '../lib/session'
+import { loadNotebook } from '../lib/session'
 import { toneForName } from '../lib/tones'
 import './Goals.css'
 
 /*
- * Tasks: personal to-dos, tasks study groups assign to the student, and a calendar.
- * Everything is server data. The server checks ownership and group permissions
- * (can_edit / can_delete on each task) and the UI follows those flags. Cached lists
- * render first and refresh in the background; edits apply optimistically and roll
- * back with a message on failure. Deletes wait a few seconds so they can be undone.
- * This page is not part of the landing demo, so it talks to the API directly.
+ * Tasks, drawn after the owner's sketch: a small "Tasks" title, three tiny tools
+ * (settings, list/board, show completed), today's date, the My Tasks / Group Tasks /
+ * Calendar tabs, two compact boxes (To-Do and Assigned) on the left and the selected
+ * task's details card on the right. Everything is server data: the server checks
+ * ownership and group permissions (can_edit / can_delete) and the UI follows them.
+ * Cached lists render first and refresh in the background; edits apply optimistically
+ * and roll back with a message on failure. Deletes wait a few seconds for Undo.
  */
 
 type Tab = 'mine' | 'group' | 'calendar'
@@ -26,9 +27,9 @@ type Toast = { text: string; undo?: () => void; error?: boolean }
 type Counts = Partial<Pick<Task, 'checklist_total' | 'checklist_done' | 'comment_count' | 'attachment_count'>>
 
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
-  { id: 'mine', label: 'My Tasks', icon: 'check' },
+  { id: 'mine', label: 'My Tasks', icon: 'triangle' },
   { id: 'group', label: 'Group Tasks', icon: 'people' },
-  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'calendar', label: 'Calendar', icon: 'rect' },
 ]
 const STATUSES: { id: TaskStatus; label: string }[] = [
   { id: 'todo', label: 'To do' },
@@ -40,7 +41,7 @@ const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 const PRIORITY_LABEL: Record<TaskPriority, string> = { low: 'Low priority', medium: 'Medium priority', high: 'High priority', urgent: 'Urgent' }
 const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
 const UNDO_MS = 5000
-const DRAWER_QUERY = '(max-width: 1180px)'
+const PHONE_QUERY = '(max-width: 860px)'
 
 const monthDay = new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' })
 const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
@@ -76,24 +77,23 @@ function timeLabel(value: string | null) {
   return clock.format(date).toLowerCase()
 }
 
-/* Short label for rows: Today, Tomorrow, Friday, Sep 22. */
-function dueLabel(task: Task, today: string) {
-  if (!task.due_date) return ''
-  const time = task.due_time ? ` · ${timeLabel(task.due_time)}` : ''
-  if (task.due_date === today) return `Today${time}`
-  if (task.due_date === addDays(today, 1)) return `Tomorrow${time}`
-  if (task.due_date < today) return `${task.status === 'done' ? '' : 'Overdue · '}${shortDate.format(parseDay(task.due_date))}`
-  if (task.due_date <= addDays(today, 6)) return `${weekdayLong.format(parseDay(task.due_date))}${time}`
-  return shortDate.format(parseDay(task.due_date))
-}
-
-/* Longer label for the details panel: "Monday · 4:30 pm". */
-function whenLabel(task: Task, today: string) {
+/* The day part of "Monday ⏱ 4:30 pm". */
+function dayLabel(task: Task, today: string) {
   if (!task.due_date) return 'No date'
   const day = parseDay(task.due_date)
-  const nearby = task.due_date >= today && task.due_date <= addDays(today, 6)
-  const date = task.due_date === today ? 'Today' : task.due_date === addDays(today, 1) ? 'Tomorrow' : nearby ? weekdayLong.format(day) : weekdayDate.format(day)
-  return task.due_time ? `${date} · ${timeLabel(task.due_time)}` : date
+  if (task.due_date === today) return 'Today'
+  if (task.due_date === addDays(today, 1)) return 'Tomorrow'
+  if (task.due_date > today && task.due_date <= addDays(today, 6)) return weekdayLong.format(day)
+  return weekdayDate.format(day)
+}
+
+/* Screen-reader summary for a card that only shows its title. */
+function cardSummary(task: Task, today: string) {
+  const parts = [task.kind === 'event' ? 'Event' : 'Task']
+  if (task.due_date) parts.push(`${isOverdue(task, today) ? 'overdue, ' : ''}due ${task.due_date === today ? 'today' : shortDate.format(parseDay(task.due_date))}${task.due_time ? ` at ${timeLabel(task.due_time)}` : ''}`)
+  if (task.priority === 'high' || task.priority === 'urgent') parts.push(PRIORITY_LABEL[task.priority].toLowerCase())
+  if (task.status === 'done') parts.push('completed')
+  return parts.join(', ')
 }
 
 function isOverdue(task: Task, today: string) {
@@ -138,25 +138,41 @@ function activityText(item: { kind: string; detail: string }) {
 
 function latestTaskNotice(list: SocialNotification[] | undefined) {
   return (list ?? [])
-    .filter((item) => item.kind.startsWith('task_') || item.kind === 'group_notice')
+    .filter((item) => item.kind.startsWith('task_') || item.kind.startsWith('group_'))
     .toSorted((a, b) => parseServerTime(b.created_at) - parseServerTime(a.created_at))[0] ?? null
 }
 
-type IconName = 'check' | 'people' | 'calendar' | 'plus' | 'compose' | 'list' | 'board' | 'settings' | 'close' | 'clock' | 'pin' | 'bell' | 'trash' | 'chevron-left' | 'chevron-right' | 'link'
+function subscribePhone(callback: () => void) {
+  const query = window.matchMedia(PHONE_QUERY)
+  query.addEventListener('change', callback)
+  return () => query.removeEventListener('change', callback)
+}
+
+function usePhone() {
+  return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false)
+}
+
+/* ---------- icons ---------- */
+
+type IconName = 'triangle' | 'people' | 'rect' | 'square-plus' | 'edit' | 'pencil' | 'list' | 'board' | 'settings' | 'close-box' | 'close'
+  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link'
 const ICONS: Record<IconName, ReactNode> = {
-  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  triangle: <path d="M12 5 20 19H4z" />,
   people: <><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M16 5.3a3 3 0 0 1 0 5.4M18 14.4c1.6.7 2.7 2.3 3 4.6" /></>,
-  calendar: <><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>,
-  plus: <path d="M12 5v14M5 12h14" />,
-  compose: <><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /><path d="m17.5 3.5 3 3L12 15l-4 1 1-4z" /></>,
-  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  rect: <rect x="3.5" y="6.5" width="17" height="11" rx="1.5" />,
+  'square-plus': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M12 8.5v7M8.5 12h7" /></>,
+  edit: <><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /><path d="m17.5 3.5 3 3L12 15l-4 1 1-4z" /></>,
+  pencil: <path d="m15.5 4.5 4 4L9 19l-5 1 1-5z" />,
+  list: <path d="M5 7h14M5 12h14M5 17h14" />,
   board: <><rect x="3.5" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="11" rx="1.5" /><rect x="16.5" y="4" width="4" height="7" rx="1.5" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
+  'close-box': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m9 9 6 6M15 9l-6 6" /></>,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
   pin: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></>,
   bell: <><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20.5a2.2 2.2 0 0 0 4 0" /></>,
-  trash: <path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13" />,
+  'dot-circle': <><circle cx="12" cy="12" r="7.5" /><circle cx="12" cy="12" r="2" /></>,
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   'chevron-left': <path d="m14.5 6-6 6 6 6" />,
   'chevron-right': <path d="m9.5 6 6 6-6 6" />,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
@@ -175,6 +191,7 @@ function Avatar({ name }: { name: string }) {
 export function Goals({ session }: { session: AuthSession | null }) {
   const token = session?.access_token ?? ''
   const me = session?.user.id ?? ''
+  const phone = usePhone()
   const [tasks, setTasks] = useState<Task[]>(() => token ? getCachedTasks(token) ?? [] : [])
   const [groups, setGroups] = useState<StudyGroup[]>(() => token ? getCachedStudyGroups(token) ?? [] : [])
   const [loaded, setLoaded] = useState(() => !!(token && getCachedTasks(token)))
@@ -183,6 +200,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [view, setViewState] = useState<View>(() => readPref('bindit:tasks:view', ['list', 'board'] as const, 'list'))
   const [showDone, setShowDoneState] = useState(() => readPref('bindit:tasks:show-done', ['yes', 'no'] as const, 'no') === 'yes')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [panelClosed, setPanelClosed] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [details, setDetails] = useState<Record<string, TaskDetail>>({})
   const [toast, setToast] = useState<Toast | null>(null)
@@ -195,7 +213,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const pendingDeletes = useRef(new Map<string, { timer: number; task: Task }>())
   const panelRef = useRef<HTMLElement>(null)
   const settingsRef = useRef<HTMLDivElement>(null)
-  const courses = useMemo(() => withCourseTones(loadNotebook().courses), [])
+  const courses = useMemo(() => loadNotebook().courses.map((item) => item.name), [])
 
   const setTab = (next: Tab) => { setTabState(next); writePref('bindit:tasks:tab', next) }
   const setView = (next: View) => { setViewState(next); writePref('bindit:tasks:view', next) }
@@ -248,7 +266,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
     return () => document.removeEventListener('pointerdown', onPointer)
   }, [settingsOpen])
 
-  const closePanel = useCallback(() => { setSelectedId(null); setDraft(null) }, [])
+  const closePanel = useCallback(() => { setSelectedId(null); setDraft(null); setPanelClosed(true) }, [])
 
   useEffect(() => {
     if (!selectedId && !draft) return
@@ -257,12 +275,10 @@ export function Goals({ session }: { session: AuthSession | null }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, draft, closePanel])
 
-  /* In drawer mode, move focus into the drawer when it opens. */
-  const panelKey = draft ? 'draft' : selectedId
+  /* On phones the panel is a drawer: move focus into it when a task opens. */
   useEffect(() => {
-    if (!panelKey || draft) return
-    if (window.matchMedia(DRAWER_QUERY).matches) panelRef.current?.focus()
-  }, [panelKey, draft])
+    if (phone && selectedId && !draft) panelRef.current?.focus()
+  }, [phone, selectedId, draft])
 
   const loadDetail = useCallback((taskId: string) => {
     if (!token || taskId.startsWith('temp-') || pendingDetails.current.has(taskId)) return
@@ -276,12 +292,9 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const select = useCallback((taskId: string) => {
     setDraft(null)
     setSelectedId(taskId)
-    loadDetail(taskId)
-  }, [loadDetail])
+  }, [])
 
   const compose = useCallback((next: Draft) => { setSelectedId(null); setDraft(next) }, [])
-
-  const membersByGroup = useMemo(() => new Map(groups.map((group) => [group.id, group.members])), [groups])
 
   const replaceTask = useCallback((taskId: string, next: Task | null) => {
     setTasks((current) => next ? current.map((task) => task.id === taskId ? next : task) : current.filter((task) => task.id !== taskId))
@@ -297,12 +310,15 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const patchTask = useCallback(async (taskId: string, changes: TaskInput) => {
     const previous = tasks.find((task) => task.id === taskId)
     if (!previous || !token || !previous.can_edit) return
-    const members = previous.group_id ? membersByGroup.get(previous.group_id) ?? [] : []
+    const groupId = changes.group_id !== undefined ? changes.group_id : previous.group_id
+    const group = groups.find((item) => item.id === groupId)
     const optimistic: Task = {
       ...previous,
       ...changes,
+      group_id: groupId,
+      group_name: group?.name ?? null,
       assignees: changes.assignee_ids
-        ? changes.assignee_ids.map((id) => ({ student_id: id, display_name: members.find((member) => member.student_id === id)?.display_name ?? previous.owner.display_name }))
+        ? changes.assignee_ids.map((id) => ({ student_id: id, display_name: group?.members.find((member) => member.student_id === id)?.display_name ?? previous.owner.display_name }))
         : previous.assignees,
       completed_at: changes.status ? (changes.status === 'done' ? new Date().toISOString() : null) : previous.completed_at,
     } as Task
@@ -317,11 +333,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       replaceTask(taskId, previous)
       setToast({ text: errorText(error), error: true })
     }
-  }, [tasks, token, membersByGroup, replaceTask, details, loadDetail])
-
-  const toggleDone = useCallback((task: Task) => {
-    void patchTask(task.id, { status: task.status === 'done' ? 'todo' : 'done' })
-  }, [patchTask])
+  }, [tasks, token, groups, replaceTask, details, loadDetail])
 
   const removeTask = useCallback((task: Task) => {
     if (!token || !task.can_delete) return
@@ -365,11 +377,14 @@ export function Goals({ session }: { session: AuthSession | null }) {
     }
     setTasks((current) => [placeholder, ...current])
     setDraft(null)
+    setSelectedId(tempId)
     try {
       const saved = await createTask(input, token)
       setTasks((current) => current.map((task) => task.id === tempId ? saved : task))
+      setSelectedId((current) => current === tempId ? saved.id : current)
     } catch (error) {
       setTasks((current) => current.filter((task) => task.id !== tempId))
+      setSelectedId((current) => current === tempId ? null : current)
       setToast({ text: `“${input.title}” wasn’t saved. ${errorText(error)}`, error: true })
     }
   }, [token, groups, me])
@@ -394,66 +409,65 @@ export function Goals({ session }: { session: AuthSession | null }) {
     try { localStorage.setItem('bindit:tasks:dismissed-notice', id) } catch { /* convenience only */ }
   }
 
-  const courseTone = useCallback((name: string) => courses.find((item) => item.name === name)?.tone, [courses])
-  const mine = useMemo(() => tasks.filter((task) => !task.group_id || task.assignees.some((person) => person.student_id === me) || task.owner.student_id === me), [tasks, me])
+  const isAssigned = useCallback((task: Task) => !!task.group_id && task.assignees.some((person) => person.student_id === me), [me])
+  // My Tasks = personal to-dos plus group work assigned to me; group work I only handed out lives under Group Tasks.
+  const mine = useMemo(() => tasks.filter((task) => !task.group_id || isAssigned(task)), [tasks, isAssigned])
   const groupTasks = useMemo(() => tasks.filter((task) => task.group_id), [tasks])
-  const selected = tasks.find((task) => task.id === selectedId) ?? null
-  const visibleNotice = notice && String(notice.id) !== dismissedNotice ? notice : null
-  const todayDate = parseDay(today)
-  const openCount = mine.filter((task) => task.status !== 'done').length
   const scoped = tab === 'group' ? groupTasks : mine
   const visible = showDone || tab === 'calendar' ? scoped : scoped.filter((task) => task.status !== 'done')
-  const hiddenDone = scoped.length - visible.length
+  const myTodo = sortTasks(visible.filter((task) => !isAssigned(task)))
+  const myAssigned = sortTasks(visible.filter(isAssigned))
+
+  /* On wide screens the details card always shows something, like the sketch: the
+     first open task until the student picks or closes one. */
+  const autoId = !phone && !panelClosed && !draft && tab !== 'calendar'
+    ? (tab === 'mine' ? myTodo[0] ?? myAssigned[0] : sortTasks(visible)[0])?.id ?? null
+    : null
+  const activeId = selectedId ?? autoId
+  const selected = tasks.find((task) => task.id === activeId) ?? null
+  const visibleNotice = notice && String(notice.id) !== dismissedNotice ? notice : null
+  const todayDate = parseDay(today)
   const defaultGroup = tab === 'group' ? groups[0]?.id ?? null : null
 
   const panel = draft
-    ? <TaskComposer draft={draft} groups={groups} courses={courses.map((item) => item.name)} me={me} onCancel={closePanel} onCreate={(input) => void create(input)} />
+    ? <TaskComposer draft={draft} groups={groups} me={me} onCancel={closePanel} onCreate={(input) => void create(input)} />
     : selected
       ? <TaskPanel
           key={selected.id}
           task={selected}
           detail={details[selected.id]}
           groups={groups}
+          courses={courses}
           today={today}
           token={token}
           onClose={closePanel}
+          onExpand={() => loadDetail(selected.id)}
           onPatch={(changes) => void patchTask(selected.id, changes)}
-          onToggle={() => toggleDone(selected)}
           onDelete={() => removeTask(selected)}
           onDetail={(change) => updateDetail(selected.id, change)}
           onCounts={(change) => bumpCounts(selected.id, change)}
           onError={(text) => setToast({ text, error: true })}
         />
       : null
+  const drawerOpen = phone && !!panel
 
-  const rowProps: RowProps = { today, selectedId, onSelect: select, onPrefetch: loadDetail, onToggle: toggleDone, courseTone }
+  const card: CardProps = { today, selectedId: activeId, onSelect: select, onPrefetch: loadDetail }
 
   return (
-    <div className={`ui-page tasks-page${panel ? ' has-panel' : ''}`}>
-      <header className="tasks-head">
-        <div className="tasks-head__title">
-          <span className="ui-eyebrow">Tasks</span>
-          <h1 className="ui-page-title tasks-date">
-            <span className="tasks-date__tile" aria-hidden="true">{todayDate.getDate()}</span>
-            <span className="sr-only">Tasks for </span>{monthDay.format(todayDate)}
-          </h1>
-          <p className="tasks-head__summary">{openCount ? `${openCount} open ${openCount === 1 ? 'task' : 'tasks'}` : loaded ? 'Nothing open right now.' : ' '}</p>
-        </div>
-        <div className="tasks-head__aside">
-          {visibleNotice ? (
-            <div className="tasks-notice" role="status">
-              <Icon name="bell" />
-              <p>{visibleNotice.message}<time dateTime={visibleNotice.created_at}>{stamp.format(new Date(parseServerTime(visibleNotice.created_at)))}</time></p>
-              <button type="button" className="tasks-icon-button" onClick={dismissNotice} aria-label="Dismiss notification"><Icon name="close" /></button>
-            </div>
-          ) : null}
+    <div className="ui-page tasks-page">
+      <div className="tasks-sheet">
+        <h1 className="tasks-title">Tasks</h1>
+
+        {visibleNotice ? (
+          <div className="tasks-notice" role="status" title={stamp.format(new Date(parseServerTime(visibleNotice.created_at)))}>
+            <span className="tasks-notice__mark"><Icon name="bell" /></span>
+            <p>{visibleNotice.message}</p>
+            <button type="button" className="tasks-icon-button" onClick={dismissNotice} aria-label="Dismiss notification"><Icon name="close" /></button>
+          </div>
+        ) : null}
+
+        <div className="tasks-main">
           <div className="tasks-tools">
-            {tab !== 'calendar' ? (
-              <div className="ui-segmented" role="group" aria-label="Layout">
-                <button type="button" className="ui-segmented__item tasks-tool" aria-pressed={view === 'list'} onClick={() => setView('list')} aria-label="List view" title="List view"><Icon name="list" /></button>
-                <button type="button" className="ui-segmented__item tasks-tool" aria-pressed={view === 'board'} onClick={() => setView('board')} aria-label="Board view" title="Board view"><Icon name="board" /></button>
-              </div>
-            ) : null}
             <div className="tasks-settings" ref={settingsRef}>
               <button type="button" className="tasks-icon-button" aria-label="Task settings" title="Task settings" aria-expanded={settingsOpen} aria-controls="tasks-settings-menu" onClick={() => setSettingsOpen((open) => !open)}><Icon name="settings" /></button>
               {settingsOpen ? (
@@ -462,49 +476,65 @@ export function Goals({ session }: { session: AuthSession | null }) {
                     <input type="checkbox" className="ui-checkbox" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} autoFocus />
                     Show completed tasks
                   </label>
+                  <label className="tasks-settings__option">
+                    <input type="checkbox" className="ui-checkbox" checked={view === 'board'} onChange={(event) => setView(event.target.checked ? 'board' : 'list')} />
+                    Board layout
+                  </label>
                   <button type="button" className="ui-menu__item" onClick={() => { setSettingsOpen(false); setReload((count) => count + 1) }}>Refresh tasks</button>
                 </div>
               ) : null}
             </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="tasks-tabbar">
-        <div className="ui-tabs tasks-tabs" role="tablist" aria-label="Task views">
-          {TABS.map((item) => (
-            <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="ui-tab" aria-selected={tab === item.id} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
-              <Icon name={item.icon} />{item.label}
+            <button type="button" className="tasks-icon-button" aria-pressed={view === 'board'} onClick={() => setView(view === 'board' ? 'list' : 'board')}
+              aria-label={view === 'board' ? 'Show as list' : 'Show as board'} title={view === 'board' ? 'Show as list' : 'Show as board'}>
+              <Icon name={view === 'board' ? 'board' : 'list'} />
             </button>
-          ))}
-        </div>
-        <button type="button" className="ui-button ui-button--sm tasks-new" onClick={() => compose({ group_id: defaultGroup })} aria-label="New task" title="New task">
-          <Icon name="plus" />
-        </button>
-      </div>
-
-      {loadError ? (
-        <div className="ui-alert tasks-alert" role="alert"><span>{tasks.length ? 'Showing saved tasks. ' : ''}{loadError}</span><button type="button" className="ui-button ui-button--sm" onClick={() => setReload((count) => count + 1)}>Try again</button></div>
-      ) : null}
-
-      <div className="tasks-body">
-        <section className="tasks-main" id="tasks-tabpanel" role="tabpanel" aria-labelledby={`tasks-tab-${tab}`}>
-          <div className="tasks-fit">
-            {!loaded && !tasks.length ? <TasksSkeleton /> : (
-              tab === 'calendar' ? <CalendarView tasks={visible} today={today} selectedId={selectedId} onSelect={select} onPrefetch={loadDetail} onCompose={(date) => compose({ due_date: date })} />
-                : view === 'board' ? <BoardView tasks={visible} row={rowProps} onMove={(id, status) => void patchTask(id, { status })} onCompose={(status) => compose({ status, group_id: defaultGroup })} />
-                  : tab === 'mine' ? <MyColumns tasks={visible} me={me} row={rowProps} onQuickAdd={(title) => void create({ title })} onCompose={() => compose({ group_id: null })} />
-                    : <GroupList tasks={visible} groups={groups} row={rowProps} onCompose={(groupId) => compose({ group_id: groupId })} />
-            )}
-            {hiddenDone ? (
-              <p className="tasks-hidden-done">{hiddenDone} completed {hiddenDone === 1 ? 'task' : 'tasks'} hidden · <button type="button" className="ui-link" onClick={() => setShowDone(true)}>Show</button></p>
-            ) : null}
+            <button type="button" role="switch" className="tasks-switch" aria-checked={showDone} onClick={() => setShowDone(!showDone)} aria-label="Show completed tasks" title="Show completed tasks">
+              <span aria-hidden="true" />
+            </button>
           </div>
-        </section>
-        {panel ? (
+
+          <p className="tasks-date">
+            <span className="tasks-date__tile" aria-hidden="true">{todayDate.getDate()}</span>
+            <span className="sr-only">Today is </span>{monthDay.format(todayDate)}
+          </p>
+
+          <div className="tasks-tabbar">
+            <div className="tasks-tabs" role="tablist" aria-label="Task views">
+              {TABS.map((item) => (
+                <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="tasks-tab" aria-selected={tab === item.id} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
+                  <Icon name={item.icon} />{item.label}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="tasks-icon-button" onClick={() => compose({ group_id: defaultGroup })} aria-label="New task" title="New task">
+              <Icon name="square-plus" />
+            </button>
+          </div>
+
+          {loadError ? (
+            <div className="ui-alert tasks-alert" role="alert"><span>{tasks.length ? 'Showing saved tasks. ' : ''}{loadError}</span><button type="button" className="ui-button ui-button--sm" onClick={() => setReload((count) => count + 1)}>Try again</button></div>
+          ) : null}
+
+          <section className="tasks-content" id="tasks-tabpanel" role="tabpanel" aria-labelledby={`tasks-tab-${tab}`}>
+            {!loaded && !tasks.length ? <TasksSkeleton /> : (
+              tab === 'calendar' ? <CalendarView tasks={visible} today={today} selectedId={activeId} onSelect={select} onCompose={(date) => compose({ due_date: date })} />
+                : view === 'board' ? <BoardView tasks={visible} card={card} onMove={(id, status) => void patchTask(id, { status })} />
+                  : tab === 'mine' ? (
+                    <div className="tasks-boxes">
+                      <TaskBox kind="todo" id="tasks-todo" tasks={myTodo} card={card} onCompose={() => compose({ group_id: null })} />
+                      <TaskBox kind="assigned" id="tasks-assigned" tasks={myAssigned} card={card} />
+                    </div>
+                  ) : <GroupBoxes tasks={visible} groups={groups} isAssigned={isAssigned} card={card} onCompose={(groupId) => compose({ group_id: groupId })} />
+            )}
+          </section>
+        </div>
+
+        {panel || !phone ? (
           <>
-            <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} />
-            <aside ref={panelRef} className="tasks-panel" aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>{panel}</aside>
+            {drawerOpen ? <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} /> : null}
+            <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
+              {panel ?? <p className="tasks-panel__empty">{tasks.length ? 'Pick a task to see its details.' : 'No tasks yet. Use ⊞ to add one.'}</p>}
+            </aside>
           </>
         ) : null}
       </div>
@@ -522,9 +552,9 @@ export function Goals({ session }: { session: AuthSession | null }) {
 
 function TasksSkeleton() {
   return (
-    <div className="tasks-columns" aria-busy="true" aria-label="Loading tasks">
+    <div className="tasks-boxes" aria-busy="true" aria-label="Loading tasks">
       {[0, 1].map((column) => (
-        <div key={column} className="tasks-column">
+        <div key={column} className="tasks-box">
           <span className="ui-skeleton tasks-skeleton__head" />
           <span className="ui-skeleton tasks-skeleton__card" />
           <span className="ui-skeleton tasks-skeleton__card" />
@@ -534,119 +564,70 @@ function TasksSkeleton() {
   )
 }
 
-/* ---------- rows ---------- */
+/* ---------- boxes and cards ---------- */
 
-type RowProps = {
-  today: string; selectedId: string | null
-  onSelect: (id: string) => void; onPrefetch: (id: string) => void; onToggle: (task: Task) => void
-  courseTone: (name: string) => string | undefined
-}
+type CardProps = { today: string; selectedId: string | null; onSelect: (id: string) => void; onPrefetch: (id: string) => void }
 
-function TaskCard({ task, row, showSource = false, dragProps }: { task: Task; row: RowProps; showSource?: boolean; dragProps?: HTMLAttributes<HTMLLIElement> & { draggable?: boolean; dragging?: boolean } }) {
-  const { today, selectedId, onSelect, onPrefetch, onToggle, courseTone } = row
+/* A rounded bar with just the title; the open task gets the sketch's diagonal hatch. */
+function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { dragging: boolean; onStart: (event: DragEvent) => void; onEnd: () => void } }) {
+  const { today, selectedId, onSelect, onPrefetch } = card
   const pending = task.id.startsWith('temp-')
-  const done = task.status === 'done'
   const isSelected = task.id === selectedId
-  const due = dueLabel(task, today)
-  const tone = task.course ? courseTone(task.course) : undefined
-  const important = task.priority === 'high' || task.priority === 'urgent'
-  const { dragging, ...liProps } = dragProps ?? {}
   return (
-    <li {...liProps} className={`task-card${isSelected ? ' is-selected' : ''}${done ? ' is-done' : ''}${pending ? ' is-pending' : ''}${dragging ? ' is-dragging' : ''}`}>
-      <button type="button" className="task-check" disabled={!task.can_edit} aria-pressed={done} aria-label={`${done ? 'Reopen' : 'Complete'} ${task.title}`} onClick={() => onToggle(task)}>
-        {done ? <Icon name="check" /> : null}
-      </button>
+    <li className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
+      draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
         <span className="task-card__title">{task.title}</span>
-        {due || task.course || task.kind === 'event' || important || (showSource && task.group_name) || task.checklist_total ? (
-          <span className="task-card__meta">
-            {task.kind === 'event' ? <span className="ui-badge ui-badge--accent">Event</span> : null}
-            {important ? <span className={`ui-badge ${task.priority === 'urgent' ? 'ui-badge--danger' : 'ui-badge--warning'}`}>{task.priority === 'urgent' ? 'Urgent' : 'High'}</span> : null}
-            {due ? <span className={isOverdue(task, today) ? 'task-due is-overdue' : 'task-due'}>{due}</span> : null}
-            {task.course ? <span className="task-course" style={tone ? { '--course': tone } as CSSProperties : undefined}>{task.course}</span> : null}
-            {showSource && task.group_name ? <span>{task.group_name}</span> : null}
-            {task.checklist_total ? <span aria-label={`${task.checklist_done} of ${task.checklist_total} steps done`}>{task.checklist_done}/{task.checklist_total}</span> : null}
-          </span>
-        ) : null}
+        <span className="sr-only">, {cardSummary(task, today)}</span>
       </button>
-      {task.group_id && task.assignees.length ? <span className="task-card__people">{task.assignees.slice(0, 3).map((person) => <Avatar key={person.student_id} name={person.display_name} />)}</span> : null}
     </li>
   )
 }
 
-function QuickAdd({ onAdd, label }: { onAdd: (title: string) => void; label: string }) {
-  const [value, setValue] = useState('')
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    if (!value.trim()) return
-    onAdd(value.trim())
-    setValue('')
-  }
+function TaskBox({ kind, id, tasks, card, onCompose, composeLabel = 'New task' }: {
+  kind: 'todo' | 'assigned'; id: string; tasks: Task[]; card: CardProps; onCompose?: () => void; composeLabel?: string
+}) {
+  const open = tasks.filter((task) => task.status !== 'done').length
   return (
-    <form className="tasks-quick-add" onSubmit={submit}>
-      <Icon name="plus" />
-      <input value={value} onChange={(event) => setValue(event.target.value)} placeholder={label} aria-label={label} maxLength={140}
-        onKeyDown={(event) => { if (event.key === 'Escape' && value) { event.preventDefault(); setValue('') } }} />
-    </form>
+    <section className={`tasks-box is-${kind}`} aria-labelledby={id}>
+      <header className="tasks-box__head">
+        <h2 id={id}>
+          <Icon name={kind === 'todo' ? 'triangle' : 'rect'} />
+          {kind === 'todo' ? 'To-Do' : 'Assigned'}
+          {kind === 'todo' ? <span className="tasks-box__count" aria-label={`${open} open`}>{open}</span> : null}
+        </h2>
+        {onCompose ? <button type="button" className="tasks-icon-button" onClick={onCompose} aria-label={composeLabel} title={composeLabel}><Icon name="edit" /></button> : null}
+      </header>
+      {tasks.length ? <ul className="task-cards">{tasks.map((task) => <TaskCard key={task.id} task={task} card={card} />)}</ul>
+        : <p className="tasks-box__empty">{kind === 'assigned' ? 'None! Good work.' : 'Nothing to do.'}</p>}
+    </section>
   )
 }
 
-function MyColumns({ tasks, me, row, onQuickAdd, onCompose }: { tasks: Task[]; me: string; row: RowProps; onQuickAdd: (title: string) => void; onCompose: () => void }) {
-  const isAssigned = (task: Task) => !!task.group_id && task.assignees.some((person) => person.student_id === me)
-  const todo = sortTasks(tasks.filter((task) => !isAssigned(task)))
-  const assigned = sortTasks(tasks.filter(isAssigned))
-  const openTodo = todo.filter((task) => task.status !== 'done').length
-  const openAssigned = assigned.filter((task) => task.status !== 'done').length
-  return (
-    <div className="tasks-columns">
-      <section className="tasks-column" aria-labelledby="tasks-todo-heading">
-        <header className="tasks-column__head">
-          <h2 id="tasks-todo-heading"><Icon name="check" />To-Do</h2>
-          <span className="ui-count" aria-label={`${openTodo} open`}>{openTodo}</span>
-          <button type="button" className="tasks-icon-button" onClick={onCompose} aria-label="New task with details" title="New task with details"><Icon name="compose" /></button>
-        </header>
-        {todo.length ? <ul className="task-cards">{todo.map((task) => <TaskCard key={task.id} task={task} row={row} showSource />)}</ul>
-          : <p className="tasks-column__empty">Add an assignment, a reading, or anything else you need to get done.</p>}
-        <QuickAdd onAdd={onQuickAdd} label="Add a task" />
-      </section>
-      <section className="tasks-column" aria-labelledby="tasks-assigned-heading">
-        <header className="tasks-column__head">
-          <h2 id="tasks-assigned-heading"><Icon name="people" />Assigned</h2>
-          <span className="ui-count" aria-label={`${openAssigned} open`}>{openAssigned}</span>
-        </header>
-        {assigned.length ? <ul className="task-cards">{assigned.map((task) => <TaskCard key={task.id} task={task} row={row} showSource />)}</ul>
-          : <p className="tasks-column__empty is-cheer">None! Good work.</p>}
-      </section>
-    </div>
-  )
-}
-
-function GroupList({ tasks, groups, row, onCompose }: { tasks: Task[]; groups: StudyGroup[]; row: RowProps; onCompose: (groupId: string) => void }) {
+function GroupBoxes({ tasks, groups, isAssigned, card, onCompose }: {
+  tasks: Task[]; groups: StudyGroup[]; isAssigned: (task: Task) => boolean; card: CardProps; onCompose: (groupId: string) => void
+}) {
   if (!groups.length) {
     return (
-      <div className="ui-empty">
-        <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width={104} height={125} />
-        <h2 className="ui-empty__title">No study groups yet</h2>
-        <p className="ui-empty__copy">Create or join a group to share tasks, assign work, and track progress together.</p>
-        <a className="ui-button" href="#profile">Find a group</a>
+      <div className="tasks-none">
+        <p>No study groups yet. Create or join one to share tasks and assign work.</p>
+        <a className="ui-link" href="#profile">Find a group</a>
       </div>
     )
   }
   return (
-    <div className="tasks-groups">
+    <div className="tasks-group-list">
       {groups.map((group) => {
-        const items = sortTasks(tasks.filter((task) => task.group_id === group.id))
-        const open = items.filter((task) => task.status !== 'done').length
+        const items = tasks.filter((task) => task.group_id === group.id)
         return (
-          <section key={group.id} className="tasks-column" aria-labelledby={`tasks-group-${group.id}`}>
-            <header className="tasks-column__head">
-              <h2 id={`tasks-group-${group.id}`}><span className={`tasks-group-dot ui-tone--${toneForName(group.name)}`} aria-hidden="true" />{group.name}</h2>
-              <span className="ui-count" aria-label={`${open} open`}>{open}</span>
-              <button type="button" className="tasks-icon-button" onClick={() => onCompose(group.id)} aria-label={`New task for ${group.name}`} title="New group task"><Icon name="compose" /></button>
-            </header>
-            {items.length ? <ul className="task-cards">{items.map((task) => <TaskCard key={task.id} task={task} row={row} />)}</ul>
-              : <p className="tasks-column__empty">No open tasks in this group.</p>}
+          <section key={group.id} className="tasks-group" aria-labelledby={`tasks-group-${group.id}`}>
+            <h2 id={`tasks-group-${group.id}`} className="tasks-group__name"><Icon name="people" />{group.name}</h2>
+            <div className="tasks-boxes is-group">
+              <TaskBox kind="todo" id={`tasks-group-${group.id}-todo`} tasks={sortTasks(items.filter((task) => !isAssigned(task)))} card={card}
+                onCompose={() => onCompose(group.id)} composeLabel={`New task for ${group.name}`} />
+              <TaskBox kind="assigned" id={`tasks-group-${group.id}-assigned`} tasks={sortTasks(items.filter(isAssigned))} card={card} />
+            </div>
           </section>
         )
       })}
@@ -654,8 +635,9 @@ function GroupList({ tasks, groups, row, onCompose }: { tasks: Task[]; groups: S
   )
 }
 
-/* Drag and drop moves cards between statuses; the Status field in the details panel is the keyboard alternative. */
-function BoardView({ tasks, row, onMove, onCompose }: { tasks: Task[]; row: RowProps; onMove: (id: string, status: TaskStatus) => void; onCompose: (status: TaskStatus) => void }) {
+/* The ≡ toggle's other layout. Drag moves a card between statuses; the Status field
+   under "+ Details" is the keyboard alternative. */
+function BoardView({ tasks, card, onMove }: { tasks: Task[]; card: CardProps; onMove: (id: string, status: TaskStatus) => void }) {
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<TaskStatus | null>(null)
   const drop = (event: DragEvent, status: TaskStatus) => {
@@ -671,27 +653,24 @@ function BoardView({ tasks, row, onMove, onCompose }: { tasks: Task[]; row: RowP
       {STATUSES.map((status) => {
         const items = sortTasks(tasks.filter((task) => task.status === status.id))
         return (
-          <section key={status.id} className={`tasks-column tasks-board__column${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
+          <section key={status.id} className={`tasks-box tasks-board__column${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
             onDragOver={(event) => { if (dragging) { event.preventDefault(); setOver(status.id) } }}
             onDragLeave={() => setOver((current) => current === status.id ? null : current)}
             onDrop={(event) => drop(event, status.id)}>
-            <header className="tasks-column__head">
-              <h2 id={`tasks-board-${status.id}`}><span className={`tasks-status-dot is-${status.id}`} aria-hidden="true" />{status.label}</h2>
-              <span className="ui-count">{items.length}</span>
-              <button type="button" className="tasks-icon-button" aria-label={`Add task to ${status.label}`} onClick={() => onCompose(status.id)}><Icon name="plus" /></button>
+            <header className="tasks-box__head">
+              <h2 id={`tasks-board-${status.id}`}>{status.label}<span className="tasks-box__count">{items.length}</span></h2>
             </header>
             {items.length ? (
               <ul className="task-cards">
                 {items.map((task) => (
-                  <TaskCard key={task.id} task={task} row={row} showSource dragProps={{
-                    draggable: task.can_edit,
+                  <TaskCard key={task.id} task={task} card={card} drag={{
                     dragging: dragging === task.id,
-                    onDragStart: (event) => { event.dataTransfer.setData('text/plain', task.id); event.dataTransfer.effectAllowed = 'move'; setDragging(task.id) },
-                    onDragEnd: () => { setDragging(null); setOver(null) },
+                    onStart: (event) => { event.dataTransfer.setData('text/plain', task.id); event.dataTransfer.effectAllowed = 'move'; setDragging(task.id) },
+                    onEnd: () => { setDragging(null); setOver(null) },
                   }} />
                 ))}
               </ul>
-            ) : <p className="tasks-column__empty">{dragging ? 'Drop here' : 'Nothing here'}</p>}
+            ) : <p className="tasks-box__empty">{dragging ? 'Drop here' : 'Nothing here'}</p>}
           </section>
         )
       })}
@@ -701,9 +680,8 @@ function BoardView({ tasks, row, onMove, onCompose }: { tasks: Task[]; row: RowP
 
 /* ---------- calendar ---------- */
 
-function CalendarView({ tasks, today, selectedId, onSelect, onPrefetch, onCompose }: {
-  tasks: Task[]; today: string; selectedId: string | null
-  onSelect: (id: string) => void; onPrefetch: (id: string) => void; onCompose: (date: string) => void
+function CalendarView({ tasks, today, selectedId, onSelect, onCompose }: {
+  tasks: Task[]; today: string; selectedId: string | null; onSelect: (id: string) => void; onCompose: (date: string) => void
 }) {
   const [cursor, setCursor] = useState(() => { const date = parseDay(today); return new Date(date.getFullYear(), date.getMonth(), 1) })
   const start = new Date(cursor)
@@ -711,12 +689,11 @@ function CalendarView({ tasks, today, selectedId, onSelect, onPrefetch, onCompos
   const days = Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day })
   const byDay = new Map<string, Task[]>()
   for (const task of sortTasks(tasks)) if (task.due_date) byDay.set(task.due_date, [...(byDay.get(task.due_date) ?? []), task])
-  const undated = tasks.filter((task) => !task.due_date && task.status !== 'done').length
   const shift = (months: number) => setCursor((current) => new Date(current.getFullYear(), current.getMonth() + months, 1))
   const monthDays = days.filter((day) => day.getMonth() === cursor.getMonth() && byDay.has(isoDay(day)))
   const chip = (task: Task) => (
-    <button key={task.id} type="button" className={`tasks-calendar__chip${task.kind === 'event' ? ' is-event' : ''}${task.status === 'done' ? ' is-done' : ''}${task.id === selectedId ? ' is-selected' : ''}`}
-      onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
+    <button key={task.id} type="button" className={`tasks-calendar__chip${task.status === 'done' ? ' is-done' : ''}${task.id === selectedId ? ' is-selected' : ''}`}
+      onClick={() => onSelect(task.id)} title={task.title}>
       {task.due_time ? <time>{timeLabel(task.due_time)}</time> : null}<span>{task.title}</span>
     </button>
   )
@@ -724,16 +701,12 @@ function CalendarView({ tasks, today, selectedId, onSelect, onPrefetch, onCompos
     <div className="tasks-calendar">
       <header className="tasks-calendar__head">
         <h2>{monthTitle.format(cursor)}</h2>
-        <div className="tasks-calendar__nav">
-          <button type="button" className="ui-button ui-button--sm" onClick={() => shift(-1)} aria-label="Previous month"><Icon name="chevron-left" /></button>
-          <button type="button" className="ui-button ui-button--sm" onClick={() => { const date = parseDay(today); setCursor(new Date(date.getFullYear(), date.getMonth(), 1)) }}>Today</button>
-          <button type="button" className="ui-button ui-button--sm" onClick={() => shift(1)} aria-label="Next month"><Icon name="chevron-right" /></button>
-        </div>
-        {undated ? <span className="tasks-calendar__undated">{undated} open {undated === 1 ? 'task has' : 'tasks have'} no date</span> : null}
+        <button type="button" className="tasks-icon-button" onClick={() => shift(-1)} aria-label="Previous month"><Icon name="chevron-left" /></button>
+        <button type="button" className="tasks-icon-button" onClick={() => shift(1)} aria-label="Next month"><Icon name="chevron-right" /></button>
       </header>
       <div className="tasks-calendar__grid" role="grid" aria-label={monthTitle.format(cursor)}>
         <div role="row" className="tasks-calendar__row is-weekdays">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day} className="tasks-calendar__weekday" role="columnheader">{day}</span>)}
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={index} className="tasks-calendar__weekday" role="columnheader">{day}</span>)}
         </div>
         {Array.from({ length: 6 }, (_, week) => (
           <div key={week} role="row" className="tasks-calendar__row">
@@ -743,8 +716,8 @@ function CalendarView({ tasks, today, selectedId, onSelect, onPrefetch, onCompos
               return (
                 <div key={key} role="gridcell" className={`tasks-calendar__day${day.getMonth() !== cursor.getMonth() ? ' is-outside' : ''}${key === today ? ' is-today' : ''}`}>
                   <button type="button" className="tasks-calendar__date" onClick={() => onCompose(key)} aria-label={`Add a task on ${longDate.format(day)}`}>{day.getDate()}</button>
-                  {items.slice(0, 3).map(chip)}
-                  {items.length > 3 ? <span className="tasks-calendar__more">+{items.length - 3} more</span> : null}
+                  {items.slice(0, 2).map(chip)}
+                  {items.length > 2 ? <span className="tasks-calendar__more">+{items.length - 2}</span> : null}
                 </div>
               )
             })}
@@ -754,19 +727,14 @@ function CalendarView({ tasks, today, selectedId, onSelect, onPrefetch, onCompos
       <ol className="tasks-agenda" aria-label={`${monthTitle.format(cursor)} agenda`}>
         {monthDays.length ? monthDays.map((day) => {
           const key = isoDay(day)
-          return (
-            <li key={key} className={key === today ? 'is-today' : ''}>
-              <h3>{longDate.format(day)}</h3>
-              <div>{(byDay.get(key) ?? []).map(chip)}</div>
-            </li>
-          )
+          return <li key={key} className={key === today ? 'is-today' : ''}><h3>{longDate.format(day)}</h3><div>{(byDay.get(key) ?? []).map(chip)}</div></li>
         }) : <li className="tasks-agenda__empty">Nothing scheduled this month.</li>}
       </ol>
     </div>
   )
 }
 
-/* ---------- composer ---------- */
+/* ---------- compact composer ---------- */
 
 function KindToggle({ value, onChange }: { value: Task['kind']; onChange: (kind: Task['kind']) => void }) {
   return (
@@ -777,8 +745,8 @@ function KindToggle({ value, onChange }: { value: Task['kind']; onChange: (kind:
   )
 }
 
-function TaskComposer({ draft, groups, courses, me, onCancel, onCreate }: {
-  draft: Draft; groups: StudyGroup[]; courses: string[]; me: string
+function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
+  draft: Draft; groups: StudyGroup[]; me: string
   onCancel: () => void; onCreate: (input: TaskInput & { title: string }) => void
 }) {
   const [title, setTitle] = useState('')
@@ -787,53 +755,47 @@ function TaskComposer({ draft, groups, courses, me, onCancel, onCreate }: {
   const [dueTime, setDueTime] = useState('')
   const [location, setLocation] = useState('')
   const [priority, setPriority] = useState<TaskPriority>('medium')
-  const [course, setCourse] = useState('')
   const [groupId, setGroupId] = useState(draft.group_id ?? '')
   const [assignees, setAssignees] = useState<string[]>([me])
-  const [description, setDescription] = useState('')
   const group = groups.find((item) => item.id === groupId)
   const submit = (event: FormEvent) => {
     event.preventDefault()
     if (!title.trim()) return
     onCreate({
-      title: title.trim(), kind, description, course: course.trim(), priority, location: location.trim(), status: draft.status ?? 'todo',
+      title: title.trim(), kind, priority, location: location.trim(), status: draft.status ?? 'todo',
       due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null,
       group_id: groupId || null, assignee_ids: groupId && assignees.length ? assignees : [me],
     })
   }
   return (
-    <form className="task-panel" onSubmit={submit}>
-      <header className="task-panel__bar">
-        <span className="ui-eyebrow">New {kind}</span>
-        <button type="button" className="tasks-icon-button" onClick={onCancel} aria-label="Cancel new task"><Icon name="close" /></button>
-      </header>
-      <input className="task-panel__title-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={kind === 'event' ? 'Event name' : 'Task name'} aria-label="Title" maxLength={140} autoFocus required />
-      <KindToggle value={kind} onChange={setKind} />
-      <div className="task-form">
-        <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
-        <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={dueTime} disabled={!dueDate} onChange={(event) => setDueTime(event.target.value)} /></label>
-        <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. Room 204, the library" maxLength={200} /></label>
-        <label className="ui-field"><span>Priority</span>
-          <select className="ui-select" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
-            {PRIORITIES.map((item) => <option key={item} value={item}>{PRIORITY_LABEL[item]}</option>)}
-          </select>
-        </label>
-        <label className="ui-field"><span>Course</span>
-          <input className="ui-input" value={course} onChange={(event) => setCourse(event.target.value)} list="tasks-course-options" placeholder="Optional" maxLength={120} />
-          <datalist id="tasks-course-options">{courses.map((name) => <option key={name} value={name} />)}</datalist>
-        </label>
-        <label className="ui-field is-wide"><span>Source</span>
-          <select className="ui-select" value={groupId} onChange={(event) => { setGroupId(event.target.value); setAssignees([me]) }}>
-            <option value="">Personal</option>
-            {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
-        </label>
-        {group ? <div className="ui-field is-wide"><span id="new-assignees">Assign to</span><AssigneePicker labelledBy="new-assignees" members={group.members} value={assignees} onChange={setAssignees} /></div> : null}
-        <label className="ui-field is-wide"><span>Details</span><textarea className="ui-textarea" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Start typing…" rows={4} maxLength={4000} /></label>
+    <form className="task-sheet" onSubmit={submit}>
+      <div className="task-sheet__icons">
+        <button type="button" className="tasks-icon-button is-tiny" onClick={onCancel} aria-label="Cancel new task" title="Cancel"><Icon name="close-box" /></button>
       </div>
-      <div className="task-panel__actions">
-        <button type="button" className="ui-button" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="ui-button ui-button--primary" disabled={!title.trim()}>Create {kind}</button>
+      <div className="task-detail-card task-compose">
+        <input className="task-title-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={kind === 'event' ? 'New event' : 'New task'} aria-label="Title" maxLength={140} autoFocus required />
+        <KindToggle value={kind} onChange={setKind} />
+        <div className="task-form">
+          <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+          <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={dueTime} disabled={!dueDate} onChange={(event) => setDueTime(event.target.value)} /></label>
+          <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Optional" maxLength={200} /></label>
+          <label className="ui-field"><span>Priority</span>
+            <select className="ui-select" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
+              {PRIORITIES.map((item) => <option key={item} value={item}>{PRIORITY_LABEL[item]}</option>)}
+            </select>
+          </label>
+          <label className="ui-field"><span>List</span>
+            <select className="ui-select" value={groupId} onChange={(event) => { setGroupId(event.target.value); setAssignees([me]) }}>
+              <option value="">Personal</option>
+              {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </label>
+          {group ? <div className="ui-field is-wide"><span id="new-assignees">Assign to</span><AssigneePicker labelledBy="new-assignees" members={group.members} value={assignees} onChange={setAssignees} /></div> : null}
+        </div>
+        <div className="task-compose__actions">
+          <button type="button" className="ui-button ui-button--sm" onClick={onCancel}>Cancel</button>
+          <button type="submit" className="ui-button ui-button--sm ui-button--primary" disabled={!title.trim()}>Add {kind}</button>
+        </div>
       </div>
     </form>
   )
@@ -855,11 +817,11 @@ function AssigneePicker({ members, value, onChange, labelledBy }: { members: Stu
   )
 }
 
-/* ---------- details panel ---------- */
+/* ---------- details card ---------- */
 
-function TaskPanel({ task, detail, groups, today, token, onClose, onPatch, onToggle, onDelete, onDetail, onCounts, onError }: {
-  task: Task; detail?: TaskDetail; groups: StudyGroup[]; today: string; token: string
-  onClose: () => void; onPatch: (changes: TaskInput) => void; onToggle: () => void; onDelete: () => void
+function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExpand, onPatch, onDelete, onDetail, onCounts, onError }: {
+  task: Task; detail?: TaskDetail; groups: StudyGroup[]; courses: string[]; today: string; token: string
+  onClose: () => void; onExpand: () => void; onPatch: (changes: TaskInput) => void; onDelete: () => void
   onDetail: (change: (detail: TaskDetail) => TaskDetail) => void
   onCounts: (change: Counts) => void
   onError: (message: string) => void
@@ -868,16 +830,22 @@ function TaskPanel({ task, detail, groups, today, token, onClose, onPatch, onTog
   const [description, setDescription] = useState(task.description)
   const [location, setLocation] = useState(task.location)
   const [course, setCourse] = useState(task.course)
-  const [editing, setEditing] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const [newItem, setNewItem] = useState('')
   const [comment, setComment] = useState('')
   const [link, setLink] = useState('')
   const [sending, setSending] = useState(false)
+  const titleRef = useRef<HTMLInputElement>(null)
   const group = groups.find((item) => item.id === task.group_id)
   const editable = task.can_edit
   const done = task.status === 'done'
   const pending = task.id.startsWith('temp-')
   const overdue = isOverdue(task, today)
+
+  const toggleExpanded = () => {
+    if (!expanded) onExpand()
+    setExpanded(!expanded)
+  }
 
   const addItem = async (event: FormEvent) => {
     event.preventDefault()
@@ -945,148 +913,166 @@ function TaskPanel({ task, detail, groups, today, token, onClose, onPatch, onTog
   const saveLocation = () => { if (location.trim() !== task.location) onPatch({ location: location.trim() }) }
 
   return (
-    <div className="task-panel">
-      <header className="task-panel__bar">
-        <button type="button" className="tasks-icon-button" onClick={onClose} aria-label="Close details"><Icon name="close" /></button>
-        <span className="ui-eyebrow task-panel__source">{task.group_name ?? 'Personal'}</span>
-        {task.can_delete ? <button type="button" className="tasks-icon-button is-danger" onClick={onDelete} aria-label={`Delete ${task.title}`} title="Delete"><Icon name="trash" /></button> : null}
-      </header>
+    <div className="task-sheet">
+      <div className="task-sheet__icons">
+        <button type="button" className="tasks-icon-button is-tiny" onClick={onClose} aria-label="Close details" title="Close"><Icon name="close-box" /></button>
+        <button type="button" className="tasks-icon-button is-tiny" disabled={!editable} onClick={() => { titleRef.current?.focus(); titleRef.current?.select() }}
+          aria-label={`Rename ${task.title}`} title={editable ? 'Rename' : 'You can’t edit this task'}><Icon name="pencil" /></button>
+      </div>
 
-      <div className="task-summary">
-        <div className="task-summary__top">
+      <article className="task-detail-card" aria-label={task.title}>
+        <div className="task-detail-card__top">
           {editable ? (
-            <input className="task-panel__title-input" value={title} aria-label="Title" maxLength={140}
+            <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140}
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur()
                 if (event.key === 'Escape') { event.preventDefault(); setTitle(task.title); event.currentTarget.blur() }
               }} />
-          ) : <h2 className="task-panel__title">{task.title}</h2>}
-          <button type="button" className={`ui-button ui-button--sm task-complete${done ? '' : ' ui-button--primary'}`} disabled={!editable || pending} aria-pressed={done} onClick={onToggle}>
+          ) : <h2 className="task-title">{task.title}</h2>}
+          <button type="button" className={`task-pill task-complete${done ? ' is-done' : ''}`} disabled={!editable || pending} aria-pressed={done}
+            onClick={() => onPatch({ status: done ? 'todo' : 'done' })}>
             {done ? <><Icon name="check" />Completed</> : 'Complete'}
           </button>
         </div>
-        <p className={`task-summary__when${overdue ? ' is-overdue' : ''}`}><Icon name="clock" />{whenLabel(task, today)}{overdue ? ' · Overdue' : ''}</p>
-        <div className="task-summary__chips">
-          <span className={`ui-badge${task.kind === 'event' ? ' ui-badge--accent' : ''}`}>{task.kind === 'event' ? 'Event' : 'Task'}</span>
-          <span className={`ui-badge${task.priority === 'urgent' ? ' ui-badge--danger' : task.priority === 'high' ? ' ui-badge--warning' : ''}`}>{PRIORITY_LABEL[task.priority]}</span>
-          {task.status === 'in_progress' || task.status === 'review' ? <span className="ui-badge">{STATUSES.find((item) => item.id === task.status)?.label}</span> : null}
-          {task.course ? <span className="ui-badge">{task.course}</span> : null}
-        </div>
-        <div className="task-summary__location">
-          <Icon name="pin" />
-          {editable ? (
-            <>
-              <label className="task-summary__label" htmlFor="task-location">Location</label>
-              <input id="task-location" className="task-inline-input" value={location} placeholder="Add a place" maxLength={200}
-                onChange={(event) => setLocation(event.target.value)} onBlur={saveLocation}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') event.currentTarget.blur()
-                  if (event.key === 'Escape') { event.preventDefault(); setLocation(task.location); event.currentTarget.blur() }
-                }} />
-            </>
-          ) : <><span className="task-summary__label">Location</span><span>{task.location || 'None'}</span></>}
-        </div>
-        {editable ? (
-          <button type="button" className="ui-link task-summary__more" aria-expanded={editing} aria-controls="task-edit-fields" onClick={() => setEditing((open) => !open)}>
-            {editing ? '− Fewer details' : '+ Details'}
-          </button>
-        ) : <p className="task-panel__hint">Only the creator, assignees or the group owner can edit this task. You can still comment.</p>}
 
-        {editing && editable ? (
-          <div className="task-form" id="task-edit-fields">
-            <div className="ui-field is-wide"><span>Type</span><KindToggle value={task.kind} onChange={(kind) => onPatch({ kind })} /></div>
-            <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={task.due_date ?? ''} onChange={(event) => onPatch({ due_date: event.target.value || null, ...(event.target.value ? {} : { due_time: null }) })} /></label>
-            <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={task.due_time ?? ''} disabled={!task.due_date} onChange={(event) => onPatch({ due_time: event.target.value || null })} /></label>
-            <label className="ui-field"><span>Priority</span>
-              <select className="ui-select" value={task.priority} onChange={(event) => onPatch({ priority: event.target.value as TaskPriority })}>
-                {PRIORITIES.map((item) => <option key={item} value={item}>{PRIORITY_LABEL[item]}</option>)}
-              </select>
-            </label>
-            <label className="ui-field"><span>Status</span>
-              <select className="ui-select" value={task.status} onChange={(event) => onPatch({ status: event.target.value as TaskStatus })}>
-                {STATUSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-              </select>
-            </label>
-            <label className="ui-field is-wide"><span>Course</span>
-              <input className="ui-input" value={course} maxLength={120} placeholder="Add a course" onChange={(event) => setCourse(event.target.value)} onBlur={() => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }} />
-            </label>
-            {group ? <div className="ui-field is-wide"><span id="task-assignees">Assigned to</span><AssigneePicker labelledBy="task-assignees" members={group.members} value={task.assignees.map((person) => person.student_id)} onChange={(next) => { if (next.length) onPatch({ assignee_ids: next }) }} /></div> : null}
+        <p className={`task-when${overdue ? ' is-overdue' : ''}`}>
+          <span>{dayLabel(task, today)}</span>
+          {task.due_time ? <><Icon name="clock" /><span>{timeLabel(task.due_time)}</span></> : null}
+          {overdue ? <span className="task-when__flag">Overdue</span> : null}
+        </p>
+
+        <span className="task-chip"><Icon name="dot-circle" />{task.kind === 'event' ? 'Event' : 'Task'}</span>
+
+        <div className="task-branch">
+          <span className="task-branch__elbow" aria-hidden="true" />
+          <div className="task-branch__body">
+            <div className="task-location">
+              {editable ? (
+                <>
+                  <label htmlFor={`task-location-${task.id}`}>Location:</label>
+                  <Icon name="pin" />
+                  <input id={`task-location-${task.id}`} className="task-location__input" value={location} placeholder="Add a place" maxLength={200}
+                    onChange={(event) => setLocation(event.target.value)} onBlur={saveLocation}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') event.currentTarget.blur()
+                      if (event.key === 'Escape') { event.preventDefault(); setLocation(task.location); event.currentTarget.blur() }
+                    }} />
+                </>
+              ) : <><span>Location:</span><Icon name="pin" /><span className="task-location__text">{task.location || 'None'}</span></>}
+            </div>
+            <button type="button" className="task-pill task-more" aria-expanded={expanded} aria-controls={`task-more-${task.id}`} onClick={toggleExpanded}>
+              {expanded ? '− Details' : '+ Details'}
+            </button>
+          </div>
+        </div>
+
+        <span className={`task-chip${task.priority === 'urgent' ? ' is-urgent' : ''}`}><Icon name="dot-circle" />{PRIORITY_LABEL[task.priority]}</span>
+
+        {expanded ? (
+          <div className="task-more-fields" id={`task-more-${task.id}`}>
+            {editable ? (
+              <div className="task-form">
+                <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={task.due_date ?? ''} onChange={(event) => onPatch({ due_date: event.target.value || null, ...(event.target.value ? {} : { due_time: null }) })} /></label>
+                <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={task.due_time ?? ''} disabled={!task.due_date} onChange={(event) => onPatch({ due_time: event.target.value || null })} /></label>
+                <div className="ui-field is-wide"><span>Type</span><KindToggle value={task.kind} onChange={(kind) => onPatch({ kind })} /></div>
+                <label className="ui-field"><span>Priority</span>
+                  <select className="ui-select" value={task.priority} onChange={(event) => onPatch({ priority: event.target.value as TaskPriority })}>
+                    {PRIORITIES.map((item) => <option key={item} value={item}>{PRIORITY_LABEL[item]}</option>)}
+                  </select>
+                </label>
+                <label className="ui-field"><span>Status</span>
+                  <select className="ui-select" value={task.status} onChange={(event) => onPatch({ status: event.target.value as TaskStatus })}>
+                    {STATUSES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                  </select>
+                </label>
+                <label className="ui-field"><span>Course</span>
+                  <input className="ui-input" value={course} maxLength={120} placeholder="Optional" list={`task-courses-${task.id}`} onChange={(event) => setCourse(event.target.value)} onBlur={() => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }} />
+                  <datalist id={`task-courses-${task.id}`}>{courses.map((name) => <option key={name} value={name} />)}</datalist>
+                </label>
+                <label className="ui-field"><span>Group</span>
+                  <select className="ui-select" value={task.group_id ?? ''} disabled={!task.can_delete || pending}
+                    onChange={(event) => onPatch({ group_id: event.target.value || null, assignee_ids: [task.owner.student_id] })}>
+                    <option value="">Personal</option>
+                    {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                {group ? <div className="ui-field is-wide"><span id={`task-assignees-${task.id}`}>Assignees</span><AssigneePicker labelledBy={`task-assignees-${task.id}`} members={group.members} value={task.assignees.map((person) => person.student_id)} onChange={(next) => { if (next.length) onPatch({ assignee_ids: next }) }} /></div> : null}
+              </div>
+            ) : <p className="task-hint">Only the creator, assignees or the group owner can edit this task. You can still comment.</p>}
+            {task.group_id ? <p className="task-hint">Created by {task.owner.display_name}{task.assignees.length ? ` · Assigned to ${task.assignees.map((person) => person.display_name).join(', ')}` : ''}</p> : null}
+            {task.can_delete ? <button type="button" className="ui-link task-delete" onClick={onDelete}>Delete {task.kind}</button> : null}
           </div>
         ) : null}
-      </div>
+      </article>
 
-      <label className="task-section-label" htmlFor="task-details">Details</label>
-      <textarea id="task-details" className="ui-textarea task-details" value={description} disabled={!editable} rows={5} maxLength={4000} placeholder={editable ? 'Start typing…' : 'No details'}
+      <label className="task-section-label" htmlFor={`task-details-${task.id}`}>Details</label>
+      <textarea id={`task-details-${task.id}`} className="task-details" value={description} disabled={!editable} rows={5} maxLength={4000} placeholder={editable ? 'Start typing' : 'No details'}
         onChange={(event) => setDescription(event.target.value)} onBlur={() => { if (description !== task.description) onPatch({ description }) }} />
 
-      {task.group_id ? (
-        <div className="task-people">
-          <span>Created by {task.owner.display_name}</span>
-          {task.assignees.length ? <span className="task-people__list">{task.assignees.map((person) => <span key={person.student_id}><Avatar name={person.display_name} />{person.display_name}</span>)}</span> : null}
+      {expanded ? (
+        <div className="task-extras">
+          <section className="task-section">
+            <h3>Checklist{task.checklist_total ? <span className="tasks-box__count">{task.checklist_done}/{task.checklist_total}</span> : null}</h3>
+            {detail?.checklist.length ? (
+              <ul className="task-checklist">
+                {detail.checklist.map((item) => (
+                  <li key={item.id}>
+                    <label><input type="checkbox" className="ui-checkbox" checked={item.done} disabled={!editable} onChange={(event) => void toggleItem(item.id, event.target.checked)} /><span>{item.text}</span></label>
+                    {editable ? <button type="button" className="tasks-icon-button is-tiny" aria-label={`Remove ${item.text}`} onClick={() => void removeItem(item.id, item.done)}><Icon name="close" /></button> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : !detail && !pending && task.checklist_total ? <span className="ui-skeleton task-section__loading" /> : null}
+            {editable && !pending ? <form onSubmit={addItem} className="task-inline-add"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="+ Add a step" aria-label="Add a checklist step" maxLength={200} /></form> : null}
+          </section>
+
+          <section className="task-section">
+            <h3>Links{task.attachment_count ? <span className="tasks-box__count">{task.attachment_count}</span> : null}</h3>
+            {detail?.attachments.length ? (
+              <ul className="task-links">
+                {detail.attachments.map((item) => (
+                  <li key={item.id}>
+                    {item.kind === 'link' ? <a className="ui-link" href={item.url} target="_blank" rel="noopener noreferrer"><Icon name="link" />{item.label || item.url}</a> : <span>{item.label} <small>note</small></span>}
+                    <small>{item.added_by_name}</small>
+                    {item.mine || task.can_delete ? <button type="button" className="tasks-icon-button is-tiny" aria-label={`Remove ${item.label || item.url}`} onClick={() => void removeAttachment(item.id)}><Icon name="close" /></button> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {editable && !pending ? <form onSubmit={addLink} className="task-inline-add"><input value={link} onChange={(event) => setLink(event.target.value)} placeholder="+ Paste a link" aria-label="Attach a link" type="url" inputMode="url" maxLength={500} /></form> : null}
+          </section>
+
+          {task.group_id ? (
+            <section className="task-section">
+              <h3>Comments{task.comment_count ? <span className="tasks-box__count">{task.comment_count}</span> : null}</h3>
+              {detail?.comments.length ? (
+                <ol className="task-comments">
+                  {detail.comments.map((item) => (
+                    <li key={item.id}><Avatar name={item.author_name} /><div><strong>{item.author_name}</strong><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time><p>{item.body}</p></div></li>
+                  ))}
+                </ol>
+              ) : null}
+              {!pending ? (
+                <form onSubmit={sendComment} className="task-comment-form">
+                  <textarea className="ui-textarea" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Write a comment" aria-label="Write a comment" rows={2} maxLength={2000}
+                    onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) event.currentTarget.form?.requestSubmit() }} />
+                  <button type="submit" className={`ui-button ui-button--sm${sending ? ' is-busy' : ''}`} disabled={!comment.trim()}>Comment</button>
+                </form>
+              ) : null}
+            </section>
+          ) : null}
+
+          {task.group_id && detail?.activity.length ? (
+            <section className="task-section">
+              <h3>Activity</h3>
+              <ol className="task-activity">
+                {detail.activity.map((item) => <li key={item.id}><span><strong>{item.actor_name}</strong> {activityText(item)}</span><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time></li>)}
+              </ol>
+            </section>
+          ) : null}
         </div>
-      ) : null}
-
-      <details className="task-section" open={task.checklist_total > 0}>
-        <summary><h3>Checklist</h3><span className="ui-count">{task.checklist_total ? `${task.checklist_done}/${task.checklist_total}` : ''}</span></summary>
-        {task.checklist_total ? <div className="ui-meter"><span style={{ width: `${task.checklist_done / task.checklist_total * 100}%` }} /></div> : null}
-        {detail?.checklist.length ? (
-          <ul className="task-checklist">
-            {detail.checklist.map((item) => (
-              <li key={item.id}>
-                <label><input type="checkbox" className="ui-checkbox" checked={item.done} disabled={!editable} onChange={(event) => void toggleItem(item.id, event.target.checked)} /><span>{item.text}</span></label>
-                {editable ? <button type="button" className="tasks-icon-button" aria-label={`Remove ${item.text}`} onClick={() => void removeItem(item.id, item.done)}><Icon name="close" /></button> : null}
-              </li>
-            ))}
-          </ul>
-        ) : !detail && !pending && task.checklist_total ? <span className="ui-skeleton task-section__loading" /> : null}
-        {editable && !pending ? <form onSubmit={addItem} className="tasks-quick-add"><Icon name="plus" /><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="Add a step" aria-label="Add a checklist step" maxLength={200} /></form> : null}
-      </details>
-
-      <details className="task-section" open={task.attachment_count > 0}>
-        <summary><h3>Links</h3><span className="ui-count">{task.attachment_count || ''}</span></summary>
-        {detail?.attachments.length ? (
-          <ul className="task-links">
-            {detail.attachments.map((item) => (
-              <li key={item.id}>
-                {item.kind === 'link' ? <a className="ui-link" href={item.url} target="_blank" rel="noopener noreferrer"><Icon name="link" />{item.label || item.url}</a> : <span>{item.label} <small>note</small></span>}
-                <small>{item.added_by_name}</small>
-                {item.mine || task.can_delete ? <button type="button" className="tasks-icon-button" aria-label={`Remove ${item.label || item.url}`} onClick={() => void removeAttachment(item.id)}><Icon name="close" /></button> : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {editable && !pending ? <form onSubmit={addLink} className="tasks-quick-add"><Icon name="link" /><input value={link} onChange={(event) => setLink(event.target.value)} placeholder="Paste a link" aria-label="Attach a link" type="url" inputMode="url" maxLength={500} /></form> : null}
-      </details>
-
-      {task.group_id ? (
-        <details className="task-section" open>
-          <summary><h3>Comments</h3><span className="ui-count">{task.comment_count || ''}</span></summary>
-          {detail?.comments.length ? (
-            <ol className="task-comments">
-              {detail.comments.map((item) => (
-                <li key={item.id}><Avatar name={item.author_name} /><div><strong>{item.author_name}</strong><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time><p>{item.body}</p></div></li>
-              ))}
-            </ol>
-          ) : null}
-          {!pending ? (
-            <form onSubmit={sendComment} className="task-comment-form">
-              <textarea className="ui-textarea" value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Write a comment" aria-label="Write a comment" rows={2} maxLength={2000}
-                onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) event.currentTarget.form?.requestSubmit() }} />
-              <button type="submit" className={`ui-button ui-button--sm${sending ? ' is-busy' : ''}`} disabled={!comment.trim()}>Comment</button>
-            </form>
-          ) : null}
-        </details>
-      ) : null}
-
-      {task.group_id && detail?.activity.length ? (
-        <details className="task-section">
-          <summary><h3>Activity</h3><span className="ui-count">{detail.activity.length}</span></summary>
-          <ol className="task-activity">
-            {detail.activity.map((item) => <li key={item.id}><span><strong>{item.actor_name}</strong> {activityText(item)}</span><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time></li>)}
-          </ol>
-        </details>
       ) : null}
     </div>
   )

@@ -5,7 +5,7 @@ import { useAuth } from './lib/AuthContext'
 import { getStudyGroups, recordDailyLogin } from './lib/api'
 import { SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
 import { getStudentId } from './lib/session'
-import { SiteSidebar } from './lib/SiteSidebar'
+import { NavIcon, SiteSidebar } from './lib/SiteSidebar'
 import { Home } from './pages/Home'
 import './App.css'
 
@@ -54,6 +54,29 @@ function whenIdle(callback: () => void, timeout = 1500) {
   return () => window.clearTimeout(handle)
 }
 
+/* The sketch's row of tiny page icons, top-left of the main area. */
+const PAGE_ICONS: { id: Screen; label: string }[] = [
+  { id: 'home', label: 'Home' },
+  { id: 'goals', label: 'Tasks' },
+  { id: 'stats', label: 'Project statistics' },
+  { id: 'tools', label: 'Study' },
+  { id: 'tutor', label: 'Tutor' },
+  { id: 'chat', label: 'Messages' },
+  { id: 'profile', label: 'Friends & groups' },
+]
+
+const RAIL_KEY = 'bindit:sidebar:collapsed'
+
+/* The student's own choice, if they ever made one. */
+function readRailChoice(): boolean | null {
+  try {
+    const value = localStorage.getItem(RAIL_KEY)
+    return value === 'true' ? true : value === 'false' ? false : null
+  } catch {
+    return null
+  }
+}
+
 function AppShell() {
   const [screen, setScreen] = useState(currentScreen)
   // The nav highlight follows the click at once; the page itself swaps in a transition.
@@ -61,6 +84,18 @@ function AppShell() {
   const [notice, setNotice] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
   const { session, setSession } = useAuth()
+  const [railChoice, setRailChoice] = useState(readRailChoice)
+  const [unread, setUnread] = useState(0)
+  // Until the student chooses, Project statistics opens with the rail merged (as drawn); other pages open it.
+  const railCollapsed = railChoice ?? navScreen === 'stats'
+  const setRailCollapsed = useCallback((value: boolean) => {
+    setRailChoice(value)
+    try {
+      localStorage.setItem(RAIL_KEY, String(value))
+    } catch {
+      // Storage can be unavailable; the choice still applies for this visit.
+    }
+  }, [])
   const closeCommand = useCallback(() => setCommandOpen(false), [])
   const openCommand = useCallback(() => setCommandOpen(true), [])
 
@@ -103,9 +138,28 @@ function AppShell() {
   }, [notice])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${railCollapsed ? ' is-rail-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
-      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} />
+      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} />
+      <header className="app-bar">
+        <nav className="app-bar__pages" aria-label="Pages">
+          {PAGE_ICONS.map((item) => {
+            const current = navScreen === item.id
+            return (
+              <a key={item.id} className={`app-bar__page${current ? ' is-active' : ''}`} href={`#${item.id}`} aria-current={current ? 'page' : undefined} aria-label={item.id === 'chat' && unread ? `${item.label}, ${unread} unread` : item.label} title={item.label}>
+                <NavIcon kind={item.id} />
+                {item.id === 'chat' && unread ? <i className="app-bar__dot" aria-hidden="true" /> : null}
+              </a>
+            )
+          })}
+        </nav>
+        <div className="app-bar__panels">
+          <button type="button" className="app-bar__merge" onClick={() => setRailCollapsed(true)} title="Merge the sidebar into the icon strip">Merge</button>
+          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11M5 5.5 2.5 8 5 10.5M11 5.5 13.5 8 11 10.5" /></svg>
+          </button>
+        </div>
+      </header>
       <main className={`sheet is-${screen}`} id="main-content" tabIndex={-1} key={screen}>
         <Suspense fallback={<PageSkeleton />}>
           {screen === 'home' ? <Home session={session} /> : null}
