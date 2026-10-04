@@ -139,19 +139,45 @@ def get_question(student_id: str, question_id: str) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def complete_question(student_id: str, question_id: str) -> bool:
+# Values of generated_questions.completed. MISSED is still open, but the
+# student has already answered it wrong at least once.
+OPEN = 0
+COMPLETED = 1
+MISSED = -1
+
+
+def mark_missed(student_id: str, question_id: str) -> None:
     init_questions()
     with database.engine().begin() as connection:
-        result = connection.execute(
+        connection.execute(
             update(generated_questions)
             .where(
                 generated_questions.c.question_id == question_id,
                 generated_questions.c.student_id == student_id,
-                generated_questions.c.completed == 0,
+                generated_questions.c.completed == OPEN,
             )
-            .values(completed=1)
+            .values(completed=MISSED)
         )
-    return result.rowcount == 1
+
+
+def complete_question(student_id: str, question_id: str) -> int | None:
+    """Close the question. Returns the state it was in (OPEN or MISSED), or None if it was already completed."""
+    init_questions()
+    with database.engine().begin() as connection:
+        # One conditional update per prior state, so concurrent answers can't both complete it.
+        for prior in (OPEN, MISSED):
+            result = connection.execute(
+                update(generated_questions)
+                .where(
+                    generated_questions.c.question_id == question_id,
+                    generated_questions.c.student_id == student_id,
+                    generated_questions.c.completed == prior,
+                )
+                .values(completed=COMPLETED)
+            )
+            if result.rowcount == 1:
+                return prior
+    return None
 
 
 def reset_questions() -> None:

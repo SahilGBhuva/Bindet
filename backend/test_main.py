@@ -151,7 +151,9 @@ class BinditBackendTests(unittest.TestCase):
         self.assertFalse(wrong.correct)
         self.assertTrue(correct.correct)
         self.assertEqual(progress['attempts'], 2)
-        self.assertEqual(progress['total_xp'], 10)
+        # A retry after a wrong answer earns reduced XP.
+        self.assertEqual(correct.xp_earned, main.RETRY_XP)
+        self.assertEqual(progress['total_xp'], main.RETRY_XP)
 
     def test_completed_question_cannot_award_xp_twice(self):
         question_id = self.save_math_question(main.guest_student_id('guest-1'))

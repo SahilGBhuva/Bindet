@@ -549,6 +549,8 @@ NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
 GUEST_QUESTIONS_PER_DAY = 300
 MATH_QUESTIONS_PER_DAY = 300    # signed-in practice questions without a course or unit
+FIRST_TRY_XP = 10
+RETRY_XP = 5
 TASK_CREATE_LIMIT = 300
 TASK_WRITE_LIMIT = 900
 
@@ -1033,7 +1035,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
     question = questions.get_question(student_id, data.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
-    if question["completed"]:
+    if question["completed"] == questions.COMPLETED:
         raise HTTPException(status_code=409, detail="Question already completed")
 
     exact_match = answers_match(data.student_answer, question["correct_answer"])
@@ -1078,9 +1080,15 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
             hint = make_hint(question["question"], mistake_type)
             grading_source = "fallback"
 
-    xp = 10 if correct else 0
-    if correct and not questions.complete_question(student_id, data.question_id):
-        raise HTTPException(status_code=409, detail="Question already completed")
+    xp = 0
+    if correct:
+        prior = questions.complete_question(student_id, data.question_id)
+        if prior is None:
+            raise HTTPException(status_code=409, detail="Question already completed")
+        # Full credit on the first try; retrying after a wrong answer earns less, so guessing doesn't pay.
+        xp = FIRST_TRY_XP if prior == questions.OPEN else RETRY_XP
+    else:
+        questions.mark_missed(student_id, data.question_id)
     record = database.update_progress(student_id, question["topic"], correct, xp)
     return AnswerResponse(
         correct=correct,
