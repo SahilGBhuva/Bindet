@@ -133,6 +133,25 @@ class SocialQueryTests(unittest.TestCase):
         self.assertEqual([member["weekly_xp"] for member in group["members"]], [30])
 
 
+class FriendSearchTests(unittest.TestCase):
+    def setUp(self):
+        database.reset_db()
+        database.onboard_account("searcher-id", "searcher", "Searcher", None)
+        database.onboard_account("ann-id", "ann_lee", "Ann", None)
+        database.onboard_account("bob-id", "bobby", "Bob", None)
+
+    def test_wildcards_are_matched_literally(self):
+        self.assertEqual(database.search_people("searcher-id", "%%"), [])
+        self.assertEqual(database.search_people("searcher-id", "__"), [])
+        self.assertEqual([row["username"] for row in database.search_people("searcher-id", "n_l")], ["ann_lee"])
+        self.assertEqual([row["username"] for row in database.search_people("searcher-id", "bob")], ["bobby"])
+
+    def test_friend_request_returns_only_display_fields(self):
+        bob = database.get_profile("bob-id")
+        result = database.send_friend_request("searcher-id", bob["friend_code"])
+        self.assertEqual(set(result["friend"]), {"student_id", "username", "display_name", "avatar_path"})
+
+
 class AdvisoryLockTests(unittest.TestCase):
     def setUp(self):
         database.reset_db()

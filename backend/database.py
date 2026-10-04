@@ -923,7 +923,9 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
             message=f"{requester_name} sent you a friend request.", is_read=False,
             created_at=datetime.now(timezone.utc),
         ))
-    return {"request_id": request_id, "status": "pending", "friend": dict(recipient)}
+    # Only what a profile card shows; never the recipient's privacy settings or timestamps.
+    friend = {key: recipient[key] for key in ("student_id", "username", "display_name", "avatar_path")}
+    return {"request_id": request_id, "status": "pending", "friend": friend}
 
 
 def respond_to_friend_request(request_id: int, recipient_id: str, accept: bool) -> dict:
@@ -1316,6 +1318,9 @@ def search_people(student_id: str, query: str) -> list[dict]:
     term = query.strip().lower()
     if len(term) < 2:
         return []
+    # Match the typed text literally: % and _ would otherwise act as wildcards.
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
     with engine().connect() as connection:
         excluded = _excluded_social_ids(connection, student_id)
         rows = connection.execute(select(
@@ -1324,7 +1329,10 @@ def search_people(student_id: str, query: str) -> list[dict]:
         ).where(
             profiles.c.discoverable.is_(True), profiles.c.allow_friend_requests.is_(True),
             profiles.c.student_id.not_in(excluded),
-            or_(func.lower(profiles.c.username).like(f"%{term}%"), func.lower(profiles.c.display_name).like(f"%{term}%")),
+            or_(
+                func.lower(profiles.c.username).like(pattern, escape="\\"),
+                func.lower(profiles.c.display_name).like(pattern, escape="\\"),
+            ),
         ).limit(12)).mappings().all()
     return [dict(row) for row in rows]
 
