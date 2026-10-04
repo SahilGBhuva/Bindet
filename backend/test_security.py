@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -90,6 +91,44 @@ class RequestBoundsTests(unittest.TestCase):
         })
         main.FlashcardRequest(student_id="guest-abc", course="Biology", unit="Cells", files=[], count=10)
         main.AccountProfileUpdate(username="alex", display_name="Alex", daily_goal=20)
+
+
+class SocialQueryTests(unittest.TestCase):
+    def setUp(self):
+        database.reset_db()
+        self.alex = database.onboard_account("alex-id", "alex", "Alex", None)
+        self.sam = database.onboard_account("sam-id", "sam", "Sam", None)
+        database.onboard_account("stranger-id", "stranger", "Stranger", None)
+        request = database.send_friend_request("alex-id", self.sam["friend_code"])
+        database.respond_to_friend_request(request["request_id"], "sam-id", True)
+
+    def add_xp(self, student_id, days_ago, xp=10):
+        when = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        with database.engine().begin() as connection:
+            connection.execute(database.xp_events.insert().values(student_id=student_id, xp=xp, created_at=when))
+
+    def test_shared_streak_counts_consecutive_shared_days(self):
+        for days_ago in (0, 1, 2, 4):
+            self.add_xp("alex-id", days_ago)
+            self.add_xp("sam-id", days_ago)
+        self.add_xp("alex-id", 0)  # duplicate day is counted once
+        self.add_xp("sam-id", 500)  # outside the lookback window
+        self.assertEqual(database._friend_streak("alex-id", "sam-id"), 3)
+        self.assertEqual(database.list_friends("alex-id")[0]["friend_streak"], 3)
+
+    def test_streak_ignores_days_only_one_friend_studied(self):
+        self.add_xp("alex-id", 0)
+        self.add_xp("sam-id", 1)
+        self.assertEqual(database._friend_streak("alex-id", "sam-id"), 0)
+
+    def test_weekly_sums_only_cover_relevant_students(self):
+        database.update_progress("alex-id", "Biology", True, 30)
+        database.update_progress("stranger-id", "Biology", True, 50)
+        board = {row["student_id"]: row["weekly_xp"] for row in database.friend_leaderboard("alex-id")}
+        self.assertEqual(board, {"alex-id": 30, "sam-id": 0})
+        group = database.create_study_group("alex-id", "Bio crew")
+        self.assertEqual(group["weekly_xp"], 30)
+        self.assertEqual([member["weekly_xp"] for member in group["members"]], [30])
 
 
 if __name__ == "__main__":

@@ -977,21 +977,45 @@ def list_friends(student_id: str) -> list[dict]:
         weekly = dict(connection.execute(select(xp_events.c.student_id, func.sum(xp_events.c.xp)).where(
             xp_events.c.student_id.in_(friend_ids), xp_events.c.created_at >= week_start,
         ).group_by(xp_events.c.student_id)).all())
+        active_days = _active_days(connection, [student_id, *friend_ids])
     today = date.today()
     return [{**dict(row), "active_today": row["last_active_date"] == today,
              "weekly_xp": weekly.get(row["student_id"], 0),
-             "friend_streak": _friend_streak(student_id, row["student_id"])} for row in rows]
+             "friend_streak": _shared_streak(active_days.get(student_id, set()), active_days.get(row["student_id"], set()))}
+            for row in rows]
+
+
+# Shared streaks only look back this far, so the query stays small for long-time students.
+STREAK_LOOKBACK_DAYS = 400
+
+
+def _active_days(connection, student_ids: list[str]) -> dict[str, set[date]]:
+    """The distinct UTC days each student earned XP on, within the lookback window."""
+    if connection.dialect.name == "postgresql":
+        day = func.date(func.timezone("UTC", xp_events.c.created_at))
+    else:
+        # SQLite stores the UTC wall time as text; date() reads its calendar day.
+        day = func.date(xp_events.c.created_at)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=STREAK_LOOKBACK_DAYS)
+    rows = connection.execute(select(xp_events.c.student_id, day.label("day")).where(
+        xp_events.c.student_id.in_(student_ids), xp_events.c.created_at >= cutoff,
+    ).distinct()).all()
+    active: dict[str, set[date]] = {}
+    for owner_id, value in rows:
+        if value is None:
+            continue
+        active.setdefault(owner_id, set()).add(value if isinstance(value, date) else date.fromisoformat(str(value)[:10]))
+    return active
 
 
 def _friend_streak(first_id: str, second_id: str) -> int:
     with engine().connect() as connection:
-        rows = connection.execute(select(xp_events.c.student_id, xp_events.c.created_at).where(
-            xp_events.c.student_id.in_([first_id, second_id])
-        )).all()
-    active = {first_id: set(), second_id: set()}
-    for owner_id, created_at in rows:
-        active[owner_id].add(created_at.date())
-    shared = active[first_id] & active[second_id]
+        active = _active_days(connection, [first_id, second_id])
+    return _shared_streak(active.get(first_id, set()), active.get(second_id, set()))
+
+
+def _shared_streak(first_days: set[date], second_days: set[date]) -> int:
+    shared = first_days & second_days
     # XP event timestamps are stored in UTC, so their calendar-day comparison
     # must use the same clock. Mixing local `date.today()` with UTC timestamps
     # breaks shared streaks for several hours around midnight UTC.
@@ -1090,9 +1114,12 @@ def _study_group_result(connection, student_id: str, group: dict) -> dict:
         raise ValueError("group_not_found")
     today_utc = datetime.now(timezone.utc).date()
     week_start = datetime.combine(today_utc - timedelta(days=today_utc.weekday()), datetime.min.time(), tzinfo=timezone.utc)
+    group_member_ids = select(study_group_members.c.student_id).where(study_group_members.c.group_id == group["id"])
     weekly = select(
         xp_events.c.student_id, func.sum(xp_events.c.xp).label("weekly_xp"),
-    ).where(xp_events.c.created_at >= week_start).group_by(xp_events.c.student_id).subquery()
+    ).where(
+        xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(group_member_ids),
+    ).group_by(xp_events.c.student_id).subquery()
     members = connection.execute(select(
         profiles.c.student_id, profiles.c.username, profiles.c.display_name, profiles.c.avatar_path,
         study_group_members.c.role, study_group_members.c.joined_at,
@@ -1235,7 +1262,7 @@ def friend_leaderboard(student_id: str) -> list[dict]:
         friend_ids.add(student_id)
         week_start = datetime.combine(date.today() - timedelta(days=date.today().weekday()), datetime.min.time(), tzinfo=timezone.utc)
         weekly_xp = select(xp_events.c.student_id, func.sum(xp_events.c.xp).label("weekly_xp")).where(
-            xp_events.c.created_at >= week_start
+            xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(friend_ids),
         ).group_by(xp_events.c.student_id).subquery()
         rows = connection.execute(
             select(
