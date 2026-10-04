@@ -70,6 +70,17 @@ class FriendsTests(unittest.TestCase):
             response = main.get_progress("alex-id", "Bearer test", tz_offset=0)
         self.assertEqual(response.recent_xp[-1].xp, 20)
 
+    def test_students_can_be_in_at_most_five_groups(self):
+        for index in range(4):
+            database.create_study_group("alex-id", f"Group {index}")
+        joined = database.create_study_group("sam-id", "Sam's group")
+        database.join_study_group("alex-id", joined["invite_code"])
+        with self.assertRaisesRegex(ValueError, "group_limit_reached"):
+            database.create_study_group("alex-id", "One too many")
+        other = database.create_study_group("sam-id", "Another")
+        with self.assertRaisesRegex(ValueError, "group_limit_reached"):
+            database.join_study_group("alex-id", other["invite_code"])
+
     def test_cannot_start_quest_with_non_friend(self):
         with self.assertRaisesRegex(ValueError, "friend_not_found"):
             database.create_friend_quest("alex-id", "sam-id", 100)

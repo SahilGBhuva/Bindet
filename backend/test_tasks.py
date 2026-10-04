@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -176,8 +176,10 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(report["totals"]["percent"], 50)
         sam = next(member for member in report["members"] if member["student_id"] == "sam-id")
         self.assertEqual((sam["assigned"], sam["completed"]), (1, 1))
-        self.assertEqual(report["series"][-1], {"date": date.today().isoformat(), "total": 2, "done": 1})
-        self.assertGreater(date.fromisoformat(report["projected_finish"]), date.today() - timedelta(days=1))
+        # Analytics days are UTC days, which can differ from the local date in the evening.
+        today_utc = datetime.now(timezone.utc).date()
+        self.assertEqual(report["series"][-1], {"date": today_utc.isoformat(), "total": 2, "done": 1})
+        self.assertGreater(date.fromisoformat(report["projected_finish"]), today_utc - timedelta(days=1))
         with self.assertRaisesRegex(ValueError, "group_not_found"):
             tasks.group_analytics("eve-id", self.group["id"])
 
