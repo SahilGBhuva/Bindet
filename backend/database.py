@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
-    UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, update,
+    UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, text, update,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import ArgumentError
@@ -466,11 +466,23 @@ def _next_login_streak(current_streak: int, last_login: date | None, today: date
     return 1
 
 
+def _advisory_lock(connection, key: str) -> None:
+    """Serialize count-then-insert checks on one key until this transaction ends.
+
+    Postgres only (transaction-scoped, so safe behind the Supabase pooler).
+    SQLite already serializes writers, so it is a no-op there.
+    """
+    if connection.dialect.name == "postgresql":
+        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
+
+
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Use shared storage so limits still hold across serverless instances."""
     init_db()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
     with engine().begin() as connection:
+        # Without the lock, parallel requests could all count below the limit and all insert.
+        _advisory_lock(connection, f"rate:{student_id}:{action}")
         connection.execute(delete(social_action_events).where(
             social_action_events.c.created_at < datetime.now(timezone.utc) - timedelta(days=7)
         ))
@@ -1052,6 +1064,7 @@ def create_study_group(student_id: str, name: str, description: str = "", weekly
     with engine().begin() as connection:
         if not connection.execute(select(profiles.c.student_id).where(profiles.c.student_id == student_id)).first():
             raise ValueError("profile_not_found")
+        _advisory_lock(connection, f"groups:student:{student_id}")
         membership_count = connection.execute(select(func.count()).select_from(study_group_members).where(
             study_group_members.c.student_id == student_id,
         )).scalar_one()
@@ -1076,6 +1089,9 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
         group = connection.execute(select(study_groups).where(study_groups.c.invite_code == code)).mappings().first()
         if not group:
             raise ValueError("group_not_found")
+        # Always group first, then student, so concurrent joins and creates can't deadlock.
+        _advisory_lock(connection, f"groups:group:{group['id']}")
+        _advisory_lock(connection, f"groups:student:{student_id}")
         if connection.execute(select(study_group_members.c.id).where(
             study_group_members.c.group_id == group["id"], study_group_members.c.student_id == student_id,
         )).first():

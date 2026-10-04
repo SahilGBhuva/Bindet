@@ -131,5 +131,37 @@ class SocialQueryTests(unittest.TestCase):
         self.assertEqual([member["weekly_xp"] for member in group["members"]], [30])
 
 
+class AdvisoryLockTests(unittest.TestCase):
+    def setUp(self):
+        database.reset_db()
+
+    def test_lock_is_postgres_only(self):
+        postgres = MagicMock()
+        postgres.dialect.name = "postgresql"
+        database._advisory_lock(postgres, "rate:alex:search")
+        statement, params = postgres.execute.call_args.args
+        self.assertIn("pg_advisory_xact_lock(hashtext(:key))", str(statement))
+        self.assertEqual(params, {"key": "rate:alex:search"})
+        sqlite = MagicMock()
+        sqlite.dialect.name = "sqlite"
+        database._advisory_lock(sqlite, "rate:alex:search")
+        sqlite.execute.assert_not_called()
+
+    def test_counted_writes_take_their_locks(self):
+        database.onboard_account("alex-id", "alex", "Alex", None)
+        database.onboard_account("sam-id", "sam", "Sam", None)
+        with patch.object(database, "_advisory_lock", wraps=database._advisory_lock) as lock:
+            database.check_social_rate_limit("alex-id", "group_create", 5)
+            group = database.create_study_group("alex-id", "Bio crew")
+            database.join_study_group("sam-id", group["invite_code"])
+        keys = [call.args[1] for call in lock.call_args_list]
+        self.assertEqual(keys, [
+            "rate:alex-id:group_create",
+            "groups:student:alex-id",
+            f"groups:group:{group['id']}",
+            "groups:student:sam-id",
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()
