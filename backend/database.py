@@ -486,11 +486,23 @@ def check_social_rate_limit(student_id: str, action: str, limit: int, window_min
         ))
 
 
+# Most XP one student can earn per UTC day. Real study rarely gets near it;
+# it stops scripted answer loops from inflating leaderboards and quests.
+DAILY_XP_CAP = 3000
+
+
 def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict:
+    """Record one answer. The result's xp_awarded can be below xp once the daily cap is reached."""
     init_db()
     today = date.today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
+        if xp > 0:
+            day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+            earned_today = connection.execute(select(func.coalesce(func.sum(xp_events.c.xp), 0)).where(
+                xp_events.c.student_id == student_id, xp_events.c.created_at >= day_start,
+            )).scalar_one()
+            xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
         progress = connection.execute(
             select(student_progress).where(student_progress.c.student_id == student_id)
         ).mappings().first()
@@ -555,6 +567,7 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
 
     return {
         "student_id": updated["student_id"],
+        "xp_awarded": xp,
         "total_xp": updated["total_xp"],
         "attempts": updated["attempts"],
         "correct_answers": updated["correct_answers"],

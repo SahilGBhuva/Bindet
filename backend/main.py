@@ -527,6 +527,7 @@ def social_error(error: ValueError) -> HTTPException:
 NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
 GUEST_QUESTIONS_PER_DAY = 300
+MATH_QUESTIONS_PER_DAY = 300    # signed-in practice questions without a course or unit
 TASK_CREATE_LIMIT = 300
 TASK_WRITE_LIMIT = 900
 
@@ -879,7 +880,9 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             raise social_error(error) from error
     else:
         student_id = verified_student_id(data.student_id, authorization)
-        if not authorization:
+        if authorization:
+            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
+        else:
             # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
             limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
 
@@ -1031,7 +1034,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         explanation=explanation,
         hint=hint,
         grading_source=grading_source,
-        xp_earned=xp,
+        xp_earned=record.get("xp_awarded", xp),
         total_xp=record["total_xp"],
         streak=record["streak"],
     )
