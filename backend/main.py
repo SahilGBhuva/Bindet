@@ -516,7 +516,7 @@ def social_error(error: ValueError) -> HTTPException:
         "group_not_found": (404, "That study group could not be found"),
         "already_in_group": (409, "You are already in that study group"),
         "group_full": (409, "That study group already has 20 members"),
-        "group_limit_reached": (409, "You can join up to 8 study groups"),
+        "group_limit_reached": (409, "You can be in up to 5 study groups. Leave one to start or join another."),
         "group_owner_cannot_leave": (409, "Group owners cannot leave their group"),
     }
     status, message = messages.get(str(error), (400, "Could not update that profile"))

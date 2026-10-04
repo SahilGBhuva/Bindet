@@ -973,6 +973,10 @@ def _friend_streak(first_id: str, second_id: str) -> int:
     return streak
 
 
+# Each student can belong to at most this many study groups, counting ones they created.
+MAX_GROUPS_PER_STUDENT = 5
+
+
 def _new_group_invite_code(connection) -> str:
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     for _ in range(12):
@@ -996,7 +1000,7 @@ def create_study_group(student_id: str, name: str, description: str = "", weekly
         membership_count = connection.execute(select(func.count()).select_from(study_group_members).where(
             study_group_members.c.student_id == student_id,
         )).scalar_one()
-        if membership_count >= 8:
+        if membership_count >= MAX_GROUPS_PER_STUDENT:
             raise ValueError("group_limit_reached")
         now = datetime.now(timezone.utc)
         group_id = secrets.token_hex(16)
@@ -1029,7 +1033,7 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
         membership_count = connection.execute(select(func.count()).select_from(study_group_members).where(
             study_group_members.c.student_id == student_id,
         )).scalar_one()
-        if membership_count >= 8:
+        if membership_count >= MAX_GROUPS_PER_STUDENT:
             raise ValueError("group_limit_reached")
         now = datetime.now(timezone.utc)
         connection.execute(study_group_members.insert().values(
