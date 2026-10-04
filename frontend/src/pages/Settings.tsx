@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { getAccountProfile, saveAccountProfile, type Profile } from '../lib/api'
-import { requestPasswordReset, signIn, signOut, signUp, type AuthSession } from '../lib/auth'
+import { requestPasswordReset, signIn, signOutAndReload, signUp, type AuthSession } from '../lib/auth'
 import './Settings.css'
 
 const GOALS = [
@@ -98,9 +98,10 @@ export function Settings({ session, onSession }: SettingsProps) {
   }
 
   function logout() {
-    signOut()
-    onSession(null)
-    setMessage('Signed out.')
+    setBusy(true)
+    setMessage('Signing out…')
+    // Clears this browser's account data, then reloads so nothing stays in memory.
+    signOutAndReload()
   }
 
   const authTitle = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create an account' : 'Reset your password'

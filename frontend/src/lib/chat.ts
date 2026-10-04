@@ -1,4 +1,4 @@
-import type { AuthSession } from './auth'
+import { ACCOUNT_DATA_CLEARED_EVENT, type AuthSession } from './auth'
 
 export type ChatMessage = {
   id: string
@@ -49,6 +49,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? ''
 const CHAT_BUCKET = 'study-group-images'
 let configPromise: Promise<SupabaseConfig> | null = null
 const messageCache = new Map<string, ChatMessage[]>()
+window.addEventListener(ACCOUNT_DATA_CLEARED_EVENT, () => messageCache.clear())
 
 function messageCacheKey(groupId: string, session: AuthSession) {
   return `${session.user.id}:${groupId}`

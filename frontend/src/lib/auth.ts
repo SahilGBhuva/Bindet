@@ -16,6 +16,13 @@ type AuthResponse = Partial<AuthSession> & { expires_in?: number; user?: AuthUse
 
 const SESSION_KEY = 'bindit-auth-session'
 const LEGACY_SESSION_KEY = 'numi-auth-session'
+// The account whose study data is currently kept in this browser's storage.
+const DATA_OWNER_KEY = 'bindit-data-owner'
+// Every key bindit (and its earlier names) has written to localStorage.
+const LOCAL_DATA_PREFIXES = ['bindit-', 'bindet-', 'numi-', 'cac-']
+// Purely cosmetic preferences that are safe to keep across accounts. None exist yet.
+const COSMETIC_KEYS = new Set<string>()
+export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
 
@@ -41,6 +48,7 @@ export function loadAuthSession(): AuthSession | null {
     if (!session.access_token || !session.refresh_token || !session.user?.id) throw new Error('Invalid session')
     localStorage.setItem(SESSION_KEY, raw)
     localStorage.removeItem(LEGACY_SESSION_KEY)
+    if (!localStorage.getItem(DATA_OWNER_KEY)) localStorage.setItem(DATA_OWNER_KEY, session.user.id)
     return session
   } catch {
     localStorage.removeItem(SESSION_KEY)
@@ -49,8 +57,45 @@ export function loadAuthSession(): AuthSession | null {
   }
 }
 
+/**
+ * Removes everything bindit keeps in this browser for an account: the auth
+ * session, notebook, avatar, study session, attempt history, student id and
+ * the per-tab caches. In-memory caches listen for ACCOUNT_DATA_CLEARED_EVENT.
+ */
+export function clearLocalAccountData() {
+  try {
+    const keys: string[] = []
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (key && !COSMETIC_KEYS.has(key) && LOCAL_DATA_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.push(key)
+    }
+    keys.forEach((key) => localStorage.removeItem(key))
+  } catch {
+    // Storage can be unavailable (private mode); nothing to clear then.
+  }
+  try {
+    sessionStorage.clear()
+  } catch {
+    // Same as above.
+  }
+  window.dispatchEvent(new Event(ACCOUNT_DATA_CLEARED_EVENT))
+}
+
+/**
+ * Local study data belongs to whichever account signed in on this browser.
+ * When a different account signs in, the previous account's data is wiped
+ * before the new session is stored. Data with no recorded owner (written
+ * before ownership was tracked) is adopted by the account that signs in.
+ */
+function claimLocalData(userId: string) {
+  const owner = localStorage.getItem(DATA_OWNER_KEY)
+  if (owner && owner !== userId) clearLocalAccountData()
+  localStorage.setItem(DATA_OWNER_KEY, userId)
+}
+
 export function saveAuthSession(session: AuthSession | null) {
   if (session) {
+    claimLocalData(session.user.id)
     localStorage.setItem(SESSION_KEY, JSON.stringify(session))
     localStorage.removeItem(LEGACY_SESSION_KEY)
   } else {
@@ -191,14 +236,32 @@ export async function updateUsername(session: AuthSession, username: string): Pr
   return nextSession
 }
 
-export function signOut() {
+/**
+ * Signs this device out: revokes only this session on the server
+ * (scope=local, so other devices stay signed in) and removes every piece of
+ * account data from this browser. Callers should reload the page afterwards
+ * so no in-memory state from the account survives.
+ */
+export async function signOut() {
   const session = loadAuthSession()
-  saveAuthSession(null)
+  clearLocalAccountData()
   if (!session) return
-  void config()
-    .then((settings) => fetch(`${settings.supabase_url}/auth/v1/logout`, {
+  try {
+    const settings = await config()
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 3000)
+    await fetch(`${settings.supabase_url}/auth/v1/logout?scope=local`, {
       method: 'POST',
       headers: { apikey: settings.supabase_anon_key, Authorization: `Bearer ${session.access_token}` },
-    }))
-    .catch(() => undefined)
+      keepalive: true,
+      signal: controller.signal,
+    }).finally(() => window.clearTimeout(timer))
+  } catch {
+    // The local sign-out already happened; the server session expires on its own.
+  }
+}
+
+/** Signs out and reloads, so nothing from the account stays in memory. */
+export function signOutAndReload() {
+  void signOut().finally(() => window.location.replace(`${window.location.pathname}${window.location.search}`))
 }
