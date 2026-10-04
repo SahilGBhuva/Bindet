@@ -584,6 +584,30 @@ def note_response(row: dict) -> NoteResponse:
     )
 
 
+# The content types a note upload may be stored with, by extension. The first is the default.
+NOTE_CONTENT_TYPES = {
+    ".pdf": ("application/pdf",),
+    ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",),
+    ".txt": ("text/plain",),
+    ".md": ("text/markdown", "text/x-markdown", "text/plain"),
+    ".csv": ("text/csv", "application/csv", "application/vnd.ms-excel", "text/plain"),
+    ".json": ("application/json", "text/json", "text/plain"),
+    ".png": ("image/png",),
+    ".jpg": ("image/jpeg", "image/jpg"),
+    ".jpeg": ("image/jpeg", "image/jpg"),
+    ".webp": ("image/webp",),
+}
+
+
+def note_content_type(suffix: str, claimed: str | None) -> str:
+    """The browser's content type if it fits the extension, else the extension's default."""
+    allowed = NOTE_CONTENT_TYPES.get(suffix)
+    if not allowed:
+        return ""
+    value = (claimed or "").split(";", 1)[0].strip().lower()[:100]
+    return value if value in allowed else allowed[0]
+
+
 @app.post("/api/notes", response_model=NoteResponse, status_code=201)
 async def upload_note(
     course: Annotated[str, Form(min_length=1, max_length=120)],
@@ -595,17 +619,17 @@ async def upload_note(
     limit_action(user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     filename = file.filename or "notes"
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
+    suffix = Path(filename).suffix.lower()
+    content_type = note_content_type(suffix, file.content_type)
     try:
-        suffix = Path(filename).suffix.lower()
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
             limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
-            fallback_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
             text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
-                image_bytes=content, content_type=file.content_type or fallback_types[suffix]
+                image_bytes=content, content_type=content_type
             ))
         else:
             try:
@@ -620,7 +644,7 @@ async def upload_note(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
-    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], file.content_type or "", text, len(content))
+    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
     return note_response(row)
 
 
@@ -928,11 +952,15 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                 )
             except ai_tutor.AITutorError as exc:
                 raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
-            questions.save_to_bank(cache_key, ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic, difficulty)
+        question_text, correct_answer, topic = questions.clip_question(
+            ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
+        )
+        if not cached:
+            questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
         generated = GeneratedQuestion(
-            question=ai_question["question"],
-            correct_answer=ai_question["correct_answer"],
-            topic=ai_question["topic"] or target_topic,
+            question=question_text,
+            correct_answer=correct_answer,
+            topic=topic,
             difficulty=difficulty,
         )
     else:

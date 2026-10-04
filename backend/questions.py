@@ -38,6 +38,14 @@ question_bank = Table(
 
 
 QUESTION_TABLES = ("generated_questions", "question_bank")
+# Column sizes. AI output and unit names can run longer, and Postgres rejects oversize values.
+MAX_QUESTION_CHARS = 500
+MAX_ANSWER_CHARS = 200
+MAX_TOPIC_CHARS = 50
+
+
+def clip_question(question: str, correct_answer: str, topic: str) -> tuple[str, str, str]:
+    return question[:MAX_QUESTION_CHARS], correct_answer[:MAX_ANSWER_CHARS], topic[:MAX_TOPIC_CHARS]
 
 
 def init_questions() -> None:
@@ -56,6 +64,7 @@ def _init_question_tables(active_engine) -> None:
 
 def save_question(student_id: str, question: str, correct_answer: str, topic: str, difficulty: int) -> str:
     init_questions()
+    question, correct_answer, topic = clip_question(question, correct_answer, topic)
     question_id = uuid4().hex
     with database.engine().begin() as connection:
         connection.execute(delete(generated_questions).where(
@@ -104,6 +113,7 @@ def cached_question(cache_key: str, student_id: str) -> dict | None:
 
 def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int) -> None:
     init_questions()
+    question, correct_answer, topic = clip_question(question, correct_answer, topic)
     with database.engine().begin() as connection:
         connection.execute(question_bank.insert().values(
             bank_id=uuid4().hex,

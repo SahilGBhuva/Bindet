@@ -133,6 +133,30 @@ class SocialQueryTests(unittest.TestCase):
         self.assertEqual([member["weekly_xp"] for member in group["members"]], [30])
 
 
+class StoredLengthTests(unittest.TestCase):
+    def setUp(self):
+        questions.reset_questions()
+        database.reset_db()
+
+    def test_ai_question_fields_are_clipped_to_their_columns(self):
+        generated = {"question": "q" * 900, "correct_answer": "a" * 400, "topic": "t" * 120}
+        request = main.QuestionRequest(notes={"course": "Biology", "unit": "Cells"})
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "long-ai"}), \
+                patch.object(main.ai_tutor, "generate_question", return_value=generated):
+            response = main.generate_question(request, "Bearer test")
+        stored = questions.get_question("long-ai", response.question_id)
+        self.assertEqual((len(stored["question"]), len(stored["correct_answer"]), len(stored["topic"])), (500, 200, 50))
+        self.assertEqual(response.question, stored["question"])
+        self.assertEqual(response.topic, stored["topic"])
+
+    def test_note_content_type_must_fit_the_extension(self):
+        self.assertEqual(main.note_content_type(".png", "image/png"), "image/png")
+        self.assertEqual(main.note_content_type(".png", "text/html"), "image/png")
+        self.assertEqual(main.note_content_type(".pdf", None), "application/pdf")
+        self.assertEqual(main.note_content_type(".md", "text/markdown; charset=utf-8"), "text/markdown")
+        self.assertEqual(main.note_content_type(".txt", "x" * 500), "text/plain")
+
+
 class FriendSearchTests(unittest.TestCase):
     def setUp(self):
         database.reset_db()
