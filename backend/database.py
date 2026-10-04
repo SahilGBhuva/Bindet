@@ -1124,6 +1124,13 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
     return get_study_group(student_id, group["id"])
 
 
+def _blocked_by(connection, student_id: str) -> set[str]:
+    """Everyone this student has blocked."""
+    return set(connection.execute(select(social_blocks.c.blocked_id).where(
+        social_blocks.c.blocker_id == student_id,
+    )).scalars())
+
+
 def _study_group_result(connection, student_id: str, group: dict) -> dict:
     membership = connection.execute(select(study_group_members.c.role).where(
         study_group_members.c.group_id == group["id"], study_group_members.c.student_id == student_id,
@@ -1146,7 +1153,9 @@ def _study_group_result(connection, student_id: str, group: dict) -> dict:
       .outerjoin(weekly, profiles.c.student_id == weekly.c.student_id)
       .where(study_group_members.c.group_id == group["id"])
       .order_by(func.coalesce(weekly.c.weekly_xp, 0).desc(), profiles.c.display_name.asc())).mappings().all()
-    member_ids = [member["student_id"] for member in members]
+    # The viewer's activity feed leaves out anyone they have blocked.
+    blocked = _blocked_by(connection, student_id)
+    member_ids = [member["student_id"] for member in members if member["student_id"] not in blocked]
     activity = connection.execute(select(
         xp_events.c.id, xp_events.c.student_id, xp_events.c.xp, xp_events.c.created_at,
         profiles.c.display_name,
@@ -1395,8 +1404,12 @@ def react_to_activity(student_id: str, event_id: int) -> dict:
 def notifications_for(student_id: str) -> list[dict]:
     init_db()
     with engine().connect() as connection:
+        blocked = _blocked_by(connection, student_id)
+        conditions = [social_notifications.c.recipient_id == student_id]
+        if blocked:
+            conditions.append(or_(social_notifications.c.actor_id.is_(None), social_notifications.c.actor_id.not_in(blocked)))
         rows = connection.execute(select(social_notifications).where(
-            social_notifications.c.recipient_id == student_id
+            *conditions
         ).order_by(social_notifications.c.created_at.desc()).limit(30)).mappings().all()
     return [dict(row) for row in rows]
 

@@ -223,6 +223,33 @@ class StoragePathTests(unittest.TestCase):
         self.assertEqual(storage._safe_storage_path("owner-id/abc.png"), "owner-id/abc.png")
 
 
+class BlockVisibilityTests(unittest.TestCase):
+    def setUp(self):
+        database.reset_db()
+        database.onboard_account("alex-id", "alex", "Alex", None)
+        database.onboard_account("sam-id", "sam", "Sam", None)
+        database.onboard_account("kim-id", "kim", "Kim", None)
+        group = database.create_study_group("alex-id", "Bio crew")
+        database.join_study_group("sam-id", group["invite_code"])
+        database.join_study_group("kim-id", group["invite_code"])
+        self.group_id = group["id"]
+        database.update_progress("sam-id", "Biology", True, 10)
+        database.update_progress("kim-id", "Biology", True, 10)
+
+    def test_blocked_member_is_hidden_from_the_blockers_feed_and_notifications(self):
+        before = database.get_study_group("alex-id", self.group_id)
+        self.assertEqual({item["student_id"] for item in before["activity"]}, {"sam-id", "kim-id"})
+        self.assertEqual({item["actor_id"] for item in database.notifications_for("alex-id")}, {"sam-id", "kim-id"})
+
+        database.block_person("alex-id", "sam-id")
+        after = database.get_study_group("alex-id", self.group_id)
+        self.assertEqual({item["student_id"] for item in after["activity"]}, {"kim-id"})
+        self.assertEqual({item["actor_id"] for item in database.notifications_for("alex-id")}, {"kim-id"})
+        # Other members still see the blocked student's activity.
+        kim_view = database.get_study_group("kim-id", self.group_id)
+        self.assertIn("sam-id", {item["student_id"] for item in kim_view["activity"]})
+
+
 class AdvisoryLockTests(unittest.TestCase):
     def setUp(self):
         database.reset_db()
