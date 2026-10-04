@@ -197,7 +197,9 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "generated_questions",
     "progress_claims",
+    "question_bank",
     "social_action_events",
     "social_blocks",
     "social_notifications",
@@ -266,6 +268,22 @@ def delete_task(owner_id: str, task_id: str) -> None:
 def enable_row_level_security(connection, tables) -> None:
     for table in tables:
         connection.exec_driver_sql(f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY")
+
+
+def revoke_client_access(connection, tables) -> None:
+    """Remove Supabase's default anon/authenticated grants from backend-only tables.
+
+    Runs as one DO block so a database without those roles (plain Postgres)
+    skips it instead of aborting the surrounding transaction.
+    """
+    names = ", ".join(f"public.{table}" for table in tables)
+    connection.exec_driver_sql(
+        "DO $$ BEGIN "
+        "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') "
+        "AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN "
+        f"REVOKE ALL ON TABLE {names} FROM anon, authenticated; "
+        "END IF; END $$"
+    )
 
 
 class DatabaseConfigurationError(RuntimeError):

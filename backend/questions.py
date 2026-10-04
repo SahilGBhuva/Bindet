@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, delete, select, update
@@ -36,8 +37,21 @@ question_bank = Table(
 )
 
 
+QUESTION_TABLES = ("generated_questions", "question_bank")
+
+
 def init_questions() -> None:
-    metadata.create_all(database.engine())
+    _init_question_tables(database.engine())
+
+
+@lru_cache(maxsize=4)
+def _init_question_tables(active_engine) -> None:
+    """Create the question tables once per engine and keep them closed to Supabase clients."""
+    metadata.create_all(active_engine)
+    if active_engine.dialect.name == "postgresql":
+        with active_engine.begin() as connection:
+            database.enable_row_level_security(connection, QUESTION_TABLES)
+            database.revoke_client_access(connection, QUESTION_TABLES)
 
 
 def save_question(student_id: str, question: str, correct_answer: str, topic: str, difficulty: int) -> str:
