@@ -5,7 +5,7 @@ import type { AuthSession } from '../lib/auth'
 import {
   deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
-  setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
+  isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
 import './Chat.css'
@@ -180,7 +180,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now()
-      setTypingUsers((current) => current.filter((item) => new Date(item.typing_until).getTime() > now))
+      setTypingUsers((current) => current.filter((item) => isTypingNow(item, now)))
     }, 1000)
     return () => window.clearInterval(timer)
   }, [])
@@ -264,7 +264,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   if (loading) return <section className="chat-page chat-empty"><div className="chat-loader" /><p>Opening your chats…</p></section>
   if (!groups.length) return <section className="chat-page chat-empty"><h1>No chats yet</h1><p>Create or join a study group first. Each group gets its own private chat.</p><a href="#profile">Go to study groups</a></section>
 
-  const activeTyping = typingUsers.filter((item) => item.student_id !== session.user.id)
+  const activeTyping = typingUsers.filter((item) => item.student_id !== session.user.id && isTypingNow(item))
   const lastOwnMessage = [...messages].reverse().find((message) => message.sender_id === session.user.id)
   const seenBy = lastOwnMessage
     ? receipts.filter((receipt) => receipt.student_id !== session.user.id && new Date(receipt.last_read_at) >= new Date(lastOwnMessage.created_at)).length

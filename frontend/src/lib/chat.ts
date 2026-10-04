@@ -1,4 +1,4 @@
-import { ACCOUNT_DATA_CLEARED_EVENT, type AuthSession } from './auth'
+import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, type AuthSession } from './auth'
 
 export type ChatMessage = {
   id: string
@@ -96,6 +96,8 @@ export async function listGroupMessages(groupId: string, session: AuthSession): 
   return messages
 }
 
+export const CHAT_RATE_LIMITED_MESSAGE = 'You’re sending messages too fast. Wait a moment.'
+
 export async function sendGroupMessage(groupId: string, body: string, session: AuthSession, attachment?: ChatAttachment): Promise<ChatMessage> {
   const config = await getConfig()
   const select = attachment
@@ -123,7 +125,9 @@ export async function sendGroupMessage(groupId: string, body: string, session: A
     body: JSON.stringify(payload),
   })
   if (!response.ok) {
-    const error = await response.json().catch(() => null) as { message?: string } | null
+    const error = await response.json().catch(() => null) as { message?: string; details?: string; hint?: string; code?: string } | null
+    const text = [error?.message, error?.details, error?.hint, error?.code].filter(Boolean).join(' ')
+    if (response.status === 429 || /chat_rate_limited/i.test(text)) throw new Error(CHAT_RATE_LIMITED_MESSAGE)
     throw new Error(error?.message ?? 'Could not send that message.')
   }
   const rows = await response.json() as ChatMessage[]
@@ -242,6 +246,15 @@ export async function listGroupReadReceipts(groupId: string, session: AuthSessio
   return response.json() as Promise<ChatReadReceipt[]>
 }
 
+// Typing signals last 5 seconds. Anything further out than this is not a real
+// typing signal (a bad clock or a crafted row), so it is treated as not typing.
+const MAX_TYPING_AHEAD_MS = 15_000
+
+export function isTypingNow(state: ChatTypingState, now = Date.now()) {
+  const until = new Date(state.typing_until).getTime()
+  return Number.isFinite(until) && until > now && until - now <= MAX_TYPING_AHEAD_MS
+}
+
 export async function listGroupTyping(groupId: string, session: AuthSession): Promise<ChatTypingState[]> {
   const config = await getConfig()
   const url = new URL(`${config.supabase_url}/rest/v1/study_group_chat_typing`)
@@ -250,7 +263,9 @@ export async function listGroupTyping(groupId: string, session: AuthSession): Pr
   url.searchParams.set('typing_until', `gt.${new Date().toISOString()}`)
   const response = await fetch(url, { headers: authHeaders(config, session) })
   if (!response.ok) return []
-  return response.json() as Promise<ChatTypingState[]>
+  const rows = await response.json() as ChatTypingState[]
+  const now = Date.now()
+  return rows.filter((row) => isTypingNow(row, now))
 }
 
 export async function setGroupTyping(groupId: string, displayName: string, typing: boolean, session: AuthSession) {
@@ -267,58 +282,80 @@ export async function setGroupTyping(groupId: string, displayName: string, typin
   })
 }
 
-export async function subscribeToGroupMessages(
-  groupId: string,
+const RECONNECT_MIN_MS = 1200
+const RECONNECT_MAX_MS = 30_000
+
+type RealtimeChange = { event: 'INSERT'; schema: 'public'; table: string; filter?: string }
+
+/**
+ * Opens a realtime channel and keeps it open. Reconnects back off from 1.2s
+ * up to 30s (reset after a successful connection) and always join with the
+ * account's current access token, which may have been refreshed since.
+ */
+function openRealtimeChannel(
+  config: SupabaseConfig,
   session: AuthSession,
-  onMessage: (message: ChatMessage) => void,
+  topic: string,
+  change: RealtimeChange,
+  onRecord: (record: ChatMessage) => void,
 ) {
-  const config = await getConfig()
   let closed = false
   let socket: WebSocket | null = null
   let heartbeat: number | null = null
-  const topic = `realtime:public:study_group_messages:group_id=eq.${groupId}`
+  let retryTimer: number | null = null
+  let retryDelay = RECONNECT_MIN_MS
+
+  const currentToken = () => {
+    const stored = loadAuthSession()
+    return stored && stored.user.id === session.user.id ? stored.access_token : session.access_token
+  }
 
   const open = () => {
+    retryTimer = null
     if (closed) return
     const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
-    socket = new WebSocket(wsUrl)
+    const current = new WebSocket(wsUrl)
+    socket = current
 
-    socket.addEventListener('open', () => {
-      socket?.send(JSON.stringify({
+    current.addEventListener('open', () => {
+      retryDelay = RECONNECT_MIN_MS
+      current.send(JSON.stringify({
         topic,
         event: 'phx_join',
         payload: {
           config: {
             broadcast: { self: false },
             presence: { key: '' },
-            postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'study_group_messages', filter: `group_id=eq.${groupId}` }],
+            postgres_changes: [change],
           },
-          access_token: session.access_token,
+          access_token: currentToken(),
         },
         ref: '1',
       }))
       heartbeat = window.setInterval(() => {
-        socket?.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) }))
+        current.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) }))
       }, 25_000)
     })
 
-    socket.addEventListener('message', (event) => {
+    current.addEventListener('message', (event) => {
       try {
         const packet = JSON.parse(String(event.data)) as {
           event?: string
           payload?: { data?: { record?: ChatMessage } }
         }
         const record = packet.payload?.data?.record
-        if (packet.event === 'postgres_changes' && record?.group_id === groupId) onMessage(record)
+        if (packet.event === 'postgres_changes' && record) onRecord(record)
       } catch {
         // Ignore malformed realtime frames.
       }
     })
 
-    socket.addEventListener('close', () => {
+    current.addEventListener('close', () => {
       if (heartbeat) window.clearInterval(heartbeat)
       heartbeat = null
-      if (!closed) window.setTimeout(open, 1200)
+      if (closed || socket !== current) return
+      retryTimer = window.setTimeout(open, retryDelay)
+      retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
     })
   }
 
@@ -326,8 +363,26 @@ export async function subscribeToGroupMessages(
   return () => {
     closed = true
     if (heartbeat) window.clearInterval(heartbeat)
+    if (retryTimer) window.clearTimeout(retryTimer)
     socket?.close()
   }
+}
+
+export async function subscribeToGroupMessages(
+  groupId: string,
+  session: AuthSession,
+  onMessage: (message: ChatMessage) => void,
+) {
+  const config = await getConfig()
+  return openRealtimeChannel(
+    config,
+    session,
+    `realtime:public:study_group_messages:group_id=eq.${groupId}`,
+    { event: 'INSERT', schema: 'public', table: 'study_group_messages', filter: `group_id=eq.${groupId}` },
+    (record) => {
+      if (record.group_id === groupId) onMessage(record)
+    },
+  )
 }
 
 export async function subscribeToAllGroupMessages(
@@ -335,49 +390,11 @@ export async function subscribeToAllGroupMessages(
   onMessage: (message: ChatMessage) => void,
 ) {
   const config = await getConfig()
-  let closed = false
-  let socket: WebSocket | null = null
-  let heartbeat: number | null = null
-  const topic = 'realtime:public:study_group_messages'
-  const open = () => {
-    if (closed) return
-    const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
-    socket = new WebSocket(wsUrl)
-    socket.addEventListener('open', () => {
-      socket?.send(JSON.stringify({
-        topic,
-        event: 'phx_join',
-        payload: {
-          config: {
-            broadcast: { self: false },
-            presence: { key: '' },
-            postgres_changes: [{ event: 'INSERT', schema: 'public', table: 'study_group_messages' }],
-          },
-          access_token: session.access_token,
-        },
-        ref: '1',
-      }))
-      heartbeat = window.setInterval(() => socket?.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) })), 25_000)
-    })
-    socket.addEventListener('message', (event) => {
-      try {
-        const packet = JSON.parse(String(event.data)) as { event?: string; payload?: { data?: { record?: ChatMessage } } }
-        const record = packet.payload?.data?.record
-        if (packet.event === 'postgres_changes' && record) onMessage(record)
-      } catch {
-        // Ignore malformed realtime frames.
-      }
-    })
-    socket.addEventListener('close', () => {
-      if (heartbeat) window.clearInterval(heartbeat)
-      heartbeat = null
-      if (!closed) window.setTimeout(open, 1200)
-    })
-  }
-  open()
-  return () => {
-    closed = true
-    if (heartbeat) window.clearInterval(heartbeat)
-    socket?.close()
-  }
+  return openRealtimeChannel(
+    config,
+    session,
+    'realtime:public:study_group_messages',
+    { event: 'INSERT', schema: 'public', table: 'study_group_messages' },
+    onMessage,
+  )
 }
