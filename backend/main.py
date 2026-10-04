@@ -229,6 +229,8 @@ class NoteResponse(BaseModel):
     status: Literal["ready"] = "ready"
     text_preview: str
     created_at: datetime
+    pages_skipped: int = 0
+    notice: str | None = None
 
 
 class TopicStat(BaseModel):
@@ -576,11 +578,16 @@ def auth_config():
     return {"supabase_url": url, "supabase_anon_key": key}
 
 
-def note_response(row: dict) -> NoteResponse:
+def note_response(row: dict, pages_skipped: int = 0) -> NoteResponse:
+    notice = None
+    if pages_skipped:
+        kept = note_ingestion.MAX_OCR_PDF_PAGES
+        notice = f"Only the first {kept} pages of this scanned PDF were read. Upload the remaining {pages_skipped} pages as a separate file."
     return NoteResponse(
         id=row["id"], course=row["course"], unit=row["unit"], file_name=row["file_name"],
         content_type=row["content_type"], size_bytes=row["size_bytes"], status="ready",
         text_preview=row["text"][:500], created_at=row["created_at"],
+        pages_skipped=pages_skipped, notice=notice,
     )
 
 
@@ -621,6 +628,7 @@ async def upload_note(
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
     suffix = Path(filename).suffix.lower()
     content_type = note_content_type(suffix, file.content_type)
+    pages_skipped = 0
     try:
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
             limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
@@ -637,7 +645,8 @@ async def upload_note(
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
                     limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
-                    text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=content))
+                    ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
+                    text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                 else:
                     raise
     except (note_ingestion.NoteIngestionError, ai_tutor.AITutorError) as exc:
@@ -645,7 +654,7 @@ async def upload_note(
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
     row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
-    return note_response(row)
+    return note_response(row, pages_skipped)
 
 
 @app.get("/api/notes", response_model=list[NoteResponse])
