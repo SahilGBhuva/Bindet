@@ -8,7 +8,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- Non-blocking font load: system fonts render first, then Inter swaps in. Instrument Serif and Caveat are only used on the landing and auth screens. -->
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" />
-    <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <!-- media="print" keeps the stylesheet off the critical path; /load-fonts.js switches it to "all" once it loads. It is an external file because the Content-Security-Policy (vercel.json) blocks inline event handlers. -->
+    <link id="bindit-fonts" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" />
+    <script src="/load-fonts.js" async></script>
     <noscript><link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#faf9f6" />
