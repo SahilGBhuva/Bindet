@@ -8,8 +8,10 @@ TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
+import auth
 import database
 import main
+import rate_limit
 from pydantic import ValidationError
 import questions
 
@@ -161,6 +163,59 @@ class AdvisoryLockTests(unittest.TestCase):
             f"groups:group:{group['id']}",
             "groups:student:sam-id",
         ])
+
+
+class AuthVerificationCacheTests(unittest.TestCase):
+    def setUp(self):
+        auth.reset_cache()
+        rate_limit.limiter.reset()
+        self.env = patch.dict(os.environ, {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_ANON_KEY": "anon"})
+        self.env.start()
+        self.address = rate_limit.client_address.set("203.0.113.9")
+
+    def tearDown(self):
+        rate_limit.client_address.reset(self.address)
+        self.env.stop()
+        auth.reset_cache()
+        rate_limit.limiter.reset()
+
+    @staticmethod
+    def response(status, body=None):
+        reply = MagicMock(status_code=status)
+        reply.json.return_value = body or {}
+        return reply
+
+    def test_valid_tokens_are_verified_once_per_minute(self):
+        with patch.object(auth.httpx, "get", return_value=self.response(200, {"id": "alex-id"})) as get:
+            self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
+            self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
+        self.assertEqual(get.call_count, 1)
+
+    def test_bad_tokens_are_cached_and_counted(self):
+        with patch.object(auth.httpx, "get", return_value=self.response(401)) as get:
+            for _ in range(3):
+                with self.assertRaises(auth.HTTPException) as context:
+                    auth.authenticated_user("Bearer junk")
+                self.assertEqual(context.exception.status_code, 401)
+        self.assertEqual(get.call_count, 1)
+
+    def test_repeated_failures_from_one_address_get_429_without_calling_supabase(self):
+        with patch.object(auth, "FAILED_AUTH_PER_MINUTE", 3), \
+                patch.object(auth.httpx, "get", return_value=self.response(401)) as get:
+            statuses = []
+            for attempt in range(5):
+                try:
+                    auth.authenticated_user(f"Bearer junk-{attempt}")
+                except auth.HTTPException as error:
+                    statuses.append(error.status_code)
+        self.assertEqual(statuses, [401, 401, 401, 429, 429])
+        self.assertEqual(get.call_count, 3)
+
+    def test_supabase_outages_are_not_cached(self):
+        with patch.object(auth.httpx, "get", side_effect=[self.response(503), self.response(200, {"id": "alex-id"})]):
+            with self.assertRaises(auth.HTTPException):
+                auth.authenticated_user("Bearer good")
+            self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
 
 
 if __name__ == "__main__":

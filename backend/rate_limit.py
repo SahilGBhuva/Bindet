@@ -60,6 +60,13 @@ class SlidingWindow:
             hits.append(now)
             return 0.0
 
+    def is_limited(self, key: str, limit: int, window: float = WINDOW_SECONDS, now: float | None = None) -> bool:
+        """True if the key has already used its budget. Records nothing."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            hits = self._hits.get(key)
+            return bool(hits) and sum(1 for hit in hits if hit > now - window) >= limit
+
     def _evict(self, now: float, window: float) -> None:
         stale = [key for key, hits in self._hits.items() if not hits or hits[-1] <= now - window]
         for key in stale:
