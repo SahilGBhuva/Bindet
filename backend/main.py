@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 import ai_tutor
 import auth
@@ -115,15 +115,32 @@ class AnswerResponse(BaseModel):
     streak: int
 
 
+def _clip_names(max_items: int, max_chars: int) -> BeforeValidator:
+    """Keep the first few names, each cut to a sane length. These lists are hints, so
+    clipping beats rejecting a real student whose unit has many notes."""
+    def clip(value):
+        if not isinstance(value, list):
+            return value
+        return [item[:max_chars] if isinstance(item, str) else item for item in value[:max_items]]
+    return BeforeValidator(clip)
+
+
+FileNames = Annotated[list[str], _clip_names(30, 255)]
+UnitNames = Annotated[list[str], _clip_names(30, 160)]
+CourseNames = Annotated[list[str], _clip_names(30, 120)]
+
+
 class NoteContext(BaseModel):
-    course: str = ""
-    unit: str = ""
-    files: list[str] = Field(default_factory=list)
-    other_units: list[str] = Field(default_factory=list)
-    other_courses: list[str] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(default="", max_length=120)
+    unit: str = Field(default="", max_length=160)
+    files: FileNames = Field(default_factory=list)
+    other_units: UnitNames = Field(default_factory=list)
+    other_courses: CourseNames = Field(default_factory=list)
 
 
 class QuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     topic: Topic = "mixed"
     difficulty: int = Field(default=1, ge=1, le=3)
     student_id: str = Field(default="anonymous", min_length=1, max_length=GUEST_ID_MAX_LENGTH)
@@ -181,10 +198,11 @@ class TaskResponse(BaseModel):
 
 
 class FlashcardRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     student_id: str = Field(default="anonymous", min_length=1, max_length=100)
     course: str = Field(default="", max_length=120)
     unit: str = Field(default="", max_length=160)
-    files: list[str] = Field(default_factory=list, max_length=30)
+    files: FileNames = Field(default_factory=list)
     count: int = Field(default=10, ge=3, le=30)
 
 
@@ -235,6 +253,7 @@ class ProgressResponse(BaseModel):
 
 
 class AccountProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[a-z0-9_]{3,24}$")
     display_name: str = Field(min_length=1, max_length=40)
     guest_id: str | None = Field(default=None, min_length=1, max_length=100)

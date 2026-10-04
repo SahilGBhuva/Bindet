@@ -9,6 +9,7 @@ os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
 import database
 import main
+from pydantic import ValidationError
 import questions
 
 
@@ -58,6 +59,37 @@ class XpFarmingTests(unittest.TestCase):
             with self.assertRaises(main.HTTPException) as context:
                 main.generate_question(request, "Bearer test")
         self.assertEqual(context.exception.status_code, 429)
+
+
+class RequestBoundsTests(unittest.TestCase):
+    def test_note_context_bounds_course_and_unit(self):
+        with self.assertRaises(ValidationError):
+            main.NoteContext(course="c" * 121, unit="Unit 1")
+        with self.assertRaises(ValidationError):
+            main.NoteContext(course="Biology", unit="u" * 161)
+
+    def test_note_context_clips_hint_lists(self):
+        context = main.NoteContext(course="Biology", unit="Cells", files=["f" * 400] * 80, other_units=["Unit"] * 50)
+        self.assertEqual(len(context.files), 30)
+        self.assertEqual(len(context.files[0]), 255)
+        self.assertEqual(len(context.other_units), 30)
+
+    def test_request_models_reject_unknown_fields(self):
+        for model, payload in (
+            (main.QuestionRequest, {"topic": "mixed", "difficulty": 1, "student_id": "s", "is_admin": True}),
+            (main.NoteContext, {"course": "Biology", "unit": "Cells", "extra": 1}),
+            (main.FlashcardRequest, {"course": "Biology", "unit": "Cells", "extra": 1}),
+            (main.AccountProfileUpdate, {"username": "alex", "display_name": "Alex", "extra": 1}),
+        ):
+            with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
+                model(**payload)
+
+    def test_frontend_payloads_still_validate(self):
+        main.QuestionRequest(topic="mixed", difficulty=2, student_id="guest-abc", notes={
+            "course": "Biology", "unit": "Cells", "files": ["notes.pdf"], "other_units": ["Genetics"], "other_courses": ["History"],
+        })
+        main.FlashcardRequest(student_id="guest-abc", course="Biology", unit="Cells", files=[], count=10)
+        main.AccountProfileUpdate(username="alex", display_name="Alex", daily_goal=20)
 
 
 if __name__ == "__main__":
