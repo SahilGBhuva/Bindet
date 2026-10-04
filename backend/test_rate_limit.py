@@ -111,6 +111,13 @@ class ActionLimitTests(unittest.TestCase):
                 main.update_account_profile(main.AccountProfileUpdate(username="alex", display_name="Alex R"), "Bearer t")
         self.assertEqual(caught.exception.status_code, 429)
 
+    def test_task_creation_is_limited(self):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}), patch.object(main, "TASK_CREATE_LIMIT", 1):
+            main.create_task_route(main.TaskCreate(title="One"), "Bearer t")
+            with self.assertRaises(HTTPException) as caught:
+                main.create_task_route(main.TaskCreate(title="Two"), "Bearer t")
+        self.assertEqual(caught.exception.status_code, 429)
+
 
 if __name__ == "__main__":
     unittest.main()

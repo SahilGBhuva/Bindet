@@ -1,8 +1,24 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import os
+import threading
+import time
 import httpx
 from fastapi import HTTPException
+
+import rate_limit
+
+# Verification results are cached briefly per token, so repeated requests and
+# junk tokens don't each cost a round trip to Supabase.
+VERIFY_CACHE_SECONDS = 60
+VERIFY_CACHE_MAX = 10_000
+# Failed verifications allowed per network address per minute before answering 429.
+FAILED_AUTH_PER_MINUTE = 30
+
+_verify_cache: dict[str, tuple[float, dict | None, str]] = {}
+_verify_lock = threading.Lock()
 
 
 def public_settings() -> tuple[str, str]:
@@ -13,17 +29,82 @@ def public_settings() -> tuple[str, str]:
     return url, anon_key
 
 
+def _cache_key(authorization: str) -> str:
+    return hashlib.blake2s(authorization.encode('utf-8'), digest_size=16).hexdigest()
+
+
+def _cached(key: str, now: float) -> tuple[dict | None, str] | None:
+    with _verify_lock:
+        entry = _verify_cache.get(key)
+        if entry is None:
+            return None
+        expires, user, detail = entry
+        if expires <= now:
+            del _verify_cache[key]
+            return None
+        return copy.deepcopy(user), detail
+
+
+def _remember(key: str, user: dict | None, detail: str, now: float) -> None:
+    with _verify_lock:
+        if len(_verify_cache) >= VERIFY_CACHE_MAX:
+            for stale in [item for item, entry in _verify_cache.items() if entry[0] <= now]:
+                del _verify_cache[stale]
+            if len(_verify_cache) >= VERIFY_CACHE_MAX:
+                # Still full of live entries: drop the oldest half rather than grow without bound.
+                for oldest in sorted(_verify_cache, key=lambda item: _verify_cache[item][0])[: VERIFY_CACHE_MAX // 2]:
+                    del _verify_cache[oldest]
+        _verify_cache[key] = (now + VERIFY_CACHE_SECONDS, copy.deepcopy(user), detail)
+
+
+def reset_cache() -> None:
+    with _verify_lock:
+        _verify_cache.clear()
+
+
+def _too_many_failures() -> HTTPException:
+    return HTTPException(
+        status_code=429,
+        detail='Too many failed sign-in attempts. Wait a minute and try again.',
+        headers={'Retry-After': '60'},
+    )
+
+
+def _reject(detail: str) -> HTTPException:
+    """Count a failed verification against the caller's address; past the budget it becomes a 429."""
+    if rate_limit.limiter.hit(f'badauth:{rate_limit.client_address.get()}', FAILED_AUTH_PER_MINUTE):
+        return _too_many_failures()
+    return HTTPException(status_code=401, detail=detail)
+
+
 def authenticated_user(authorization: str | None) -> dict:
     if not authorization or not authorization.lower().startswith('bearer '):
         raise HTTPException(status_code=401, detail='Sign in required')
+    now = time.monotonic()
+    key = _cache_key(authorization)
+    cached = _cached(key, now)
+    if cached is not None:
+        user, detail = cached
+        if user is None:
+            raise _reject(detail)
+        return user
+    if rate_limit.limiter.is_limited(f'badauth:{rate_limit.client_address.get()}', FAILED_AUTH_PER_MINUTE):
+        # This address keeps sending bad tokens; don't spend a Supabase call on another one.
+        raise _too_many_failures()
     url, anon_key = public_settings()
     try:
         response = httpx.get(f'{url}/auth/v1/user', headers={'apikey': anon_key, 'Authorization': authorization}, timeout=10)
     except httpx.RequestError as error:
         raise HTTPException(status_code=503, detail='Could not verify account') from error
-    if response.status_code != 200:
+    if response.status_code == 429 or response.status_code >= 500:
+        # Supabase trouble says nothing about the token, so it is neither cached nor counted.
         raise HTTPException(status_code=401, detail='Your sign-in has expired')
+    if response.status_code != 200:
+        _remember(key, None, 'Your sign-in has expired', now)
+        raise _reject('Your sign-in has expired')
     user = response.json()
     if not user.get('id'):
-        raise HTTPException(status_code=401, detail='Invalid account')
+        _remember(key, None, 'Invalid account', now)
+        raise _reject('Invalid account')
+    _remember(key, user, '', now)
     return user

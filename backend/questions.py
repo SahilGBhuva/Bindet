@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, delete, select, update
@@ -36,12 +37,34 @@ question_bank = Table(
 )
 
 
+QUESTION_TABLES = ("generated_questions", "question_bank")
+# Column sizes. AI output and unit names can run longer, and Postgres rejects oversize values.
+MAX_QUESTION_CHARS = 500
+MAX_ANSWER_CHARS = 200
+MAX_TOPIC_CHARS = 50
+
+
+def clip_question(question: str, correct_answer: str, topic: str) -> tuple[str, str, str]:
+    return question[:MAX_QUESTION_CHARS], correct_answer[:MAX_ANSWER_CHARS], topic[:MAX_TOPIC_CHARS]
+
+
 def init_questions() -> None:
-    metadata.create_all(database.engine())
+    _init_question_tables(database.engine())
+
+
+@lru_cache(maxsize=4)
+def _init_question_tables(active_engine) -> None:
+    """Create the question tables once per engine and keep them closed to Supabase clients."""
+    metadata.create_all(active_engine)
+    if active_engine.dialect.name == "postgresql":
+        with active_engine.begin() as connection:
+            database.enable_row_level_security(connection, QUESTION_TABLES)
+            database.revoke_client_access(connection, QUESTION_TABLES)
 
 
 def save_question(student_id: str, question: str, correct_answer: str, topic: str, difficulty: int) -> str:
     init_questions()
+    question, correct_answer, topic = clip_question(question, correct_answer, topic)
     question_id = uuid4().hex
     with database.engine().begin() as connection:
         connection.execute(delete(generated_questions).where(
@@ -90,6 +113,7 @@ def cached_question(cache_key: str, student_id: str) -> dict | None:
 
 def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int) -> None:
     init_questions()
+    question, correct_answer, topic = clip_question(question, correct_answer, topic)
     with database.engine().begin() as connection:
         connection.execute(question_bank.insert().values(
             bank_id=uuid4().hex,
@@ -115,19 +139,45 @@ def get_question(student_id: str, question_id: str) -> dict | None:
     return dict(row) if row is not None else None
 
 
-def complete_question(student_id: str, question_id: str) -> bool:
+# Values of generated_questions.completed. MISSED is still open, but the
+# student has already answered it wrong at least once.
+OPEN = 0
+COMPLETED = 1
+MISSED = -1
+
+
+def mark_missed(student_id: str, question_id: str) -> None:
     init_questions()
     with database.engine().begin() as connection:
-        result = connection.execute(
+        connection.execute(
             update(generated_questions)
             .where(
                 generated_questions.c.question_id == question_id,
                 generated_questions.c.student_id == student_id,
-                generated_questions.c.completed == 0,
+                generated_questions.c.completed == OPEN,
             )
-            .values(completed=1)
+            .values(completed=MISSED)
         )
-    return result.rowcount == 1
+
+
+def complete_question(student_id: str, question_id: str) -> int | None:
+    """Close the question. Returns the state it was in (OPEN or MISSED), or None if it was already completed."""
+    init_questions()
+    with database.engine().begin() as connection:
+        # One conditional update per prior state, so concurrent answers can't both complete it.
+        for prior in (OPEN, MISSED):
+            result = connection.execute(
+                update(generated_questions)
+                .where(
+                    generated_questions.c.question_id == question_id,
+                    generated_questions.c.student_id == student_id,
+                    generated_questions.c.completed == prior,
+                )
+                .values(completed=COMPLETED)
+            )
+            if result.rowcount == 1:
+                return prior
+    return None
 
 
 def reset_questions() -> None:

@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
-    UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, update,
+    UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, text, update,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import ArgumentError
@@ -197,7 +197,9 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "generated_questions",
     "progress_claims",
+    "question_bank",
     "social_action_events",
     "social_blocks",
     "social_notifications",
@@ -287,6 +289,22 @@ def delete_task(owner_id: str, task_id: str) -> None:
 def enable_row_level_security(connection, tables) -> None:
     for table in tables:
         connection.exec_driver_sql(f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY")
+
+
+def revoke_client_access(connection, tables) -> None:
+    """Remove Supabase's default anon/authenticated grants from backend-only tables.
+
+    Runs as one DO block so a database without those roles (plain Postgres)
+    skips it instead of aborting the surrounding transaction.
+    """
+    names = ", ".join(f"public.{table}" for table in tables)
+    connection.exec_driver_sql(
+        "DO $$ BEGIN "
+        "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') "
+        "AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN "
+        f"REVOKE ALL ON TABLE {names} FROM anon, authenticated; "
+        "END IF; END $$"
+    )
 
 
 class DatabaseConfigurationError(RuntimeError):
@@ -469,11 +487,23 @@ def _next_login_streak(current_streak: int, last_login: date | None, today: date
     return 1
 
 
+def _advisory_lock(connection, key: str) -> None:
+    """Serialize count-then-insert checks on one key until this transaction ends.
+
+    Postgres only (transaction-scoped, so safe behind the Supabase pooler).
+    SQLite already serializes writers, so it is a no-op there.
+    """
+    if connection.dialect.name == "postgresql":
+        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
+
+
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Use shared storage so limits still hold across serverless instances."""
     init_db()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
     with engine().begin() as connection:
+        # Without the lock, parallel requests could all count below the limit and all insert.
+        _advisory_lock(connection, f"rate:{student_id}:{action}")
         connection.execute(delete(social_action_events).where(
             social_action_events.c.created_at < datetime.now(timezone.utc) - timedelta(days=7)
         ))
@@ -489,11 +519,23 @@ def check_social_rate_limit(student_id: str, action: str, limit: int, window_min
         ))
 
 
+# Most XP one student can earn per UTC day. Real study rarely gets near it;
+# it stops scripted answer loops from inflating leaderboards and quests.
+DAILY_XP_CAP = 3000
+
+
 def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict:
+    """Record one answer. The result's xp_awarded can be below xp once the daily cap is reached."""
     init_db()
     today = date.today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
+        if xp > 0:
+            day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+            earned_today = connection.execute(select(func.coalesce(func.sum(xp_events.c.xp), 0)).where(
+                xp_events.c.student_id == student_id, xp_events.c.created_at >= day_start,
+            )).scalar_one()
+            xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
         progress = connection.execute(
             select(student_progress).where(student_progress.c.student_id == student_id)
         ).mappings().first()
@@ -558,6 +600,7 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
 
     return {
         "student_id": updated["student_id"],
+        "xp_awarded": xp,
         "total_xp": updated["total_xp"],
         "attempts": updated["attempts"],
         "correct_answers": updated["correct_answers"],
@@ -925,7 +968,9 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
             message=f"{requester_name} sent you a friend request.", is_read=False,
             created_at=datetime.now(timezone.utc),
         ))
-    return {"request_id": request_id, "status": "pending", "friend": dict(recipient)}
+    # Only what a profile card shows; never the recipient's privacy settings or timestamps.
+    friend = {key: recipient[key] for key in ("student_id", "username", "display_name", "avatar_path")}
+    return {"request_id": request_id, "status": "pending", "friend": friend}
 
 
 def respond_to_friend_request(request_id: int, recipient_id: str, accept: bool) -> dict:
@@ -991,21 +1036,45 @@ def list_friends(student_id: str) -> list[dict]:
         weekly = dict(connection.execute(select(xp_events.c.student_id, func.sum(xp_events.c.xp)).where(
             xp_events.c.student_id.in_(friend_ids), xp_events.c.created_at >= week_start,
         ).group_by(xp_events.c.student_id)).all())
+        active_days = _active_days(connection, [student_id, *friend_ids])
     today = date.today()
     return [{**dict(row), "active_today": row["last_active_date"] == today,
              "weekly_xp": weekly.get(row["student_id"], 0),
-             "friend_streak": _friend_streak(student_id, row["student_id"])} for row in rows]
+             "friend_streak": _shared_streak(active_days.get(student_id, set()), active_days.get(row["student_id"], set()))}
+            for row in rows]
+
+
+# Shared streaks only look back this far, so the query stays small for long-time students.
+STREAK_LOOKBACK_DAYS = 400
+
+
+def _active_days(connection, student_ids: list[str]) -> dict[str, set[date]]:
+    """The distinct UTC days each student earned XP on, within the lookback window."""
+    if connection.dialect.name == "postgresql":
+        day = func.date(func.timezone("UTC", xp_events.c.created_at))
+    else:
+        # SQLite stores the UTC wall time as text; date() reads its calendar day.
+        day = func.date(xp_events.c.created_at)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=STREAK_LOOKBACK_DAYS)
+    rows = connection.execute(select(xp_events.c.student_id, day.label("day")).where(
+        xp_events.c.student_id.in_(student_ids), xp_events.c.created_at >= cutoff,
+    ).distinct()).all()
+    active: dict[str, set[date]] = {}
+    for owner_id, value in rows:
+        if value is None:
+            continue
+        active.setdefault(owner_id, set()).add(value if isinstance(value, date) else date.fromisoformat(str(value)[:10]))
+    return active
 
 
 def _friend_streak(first_id: str, second_id: str) -> int:
     with engine().connect() as connection:
-        rows = connection.execute(select(xp_events.c.student_id, xp_events.c.created_at).where(
-            xp_events.c.student_id.in_([first_id, second_id])
-        )).all()
-    active = {first_id: set(), second_id: set()}
-    for owner_id, created_at in rows:
-        active[owner_id].add(created_at.date())
-    shared = active[first_id] & active[second_id]
+        active = _active_days(connection, [first_id, second_id])
+    return _shared_streak(active.get(first_id, set()), active.get(second_id, set()))
+
+
+def _shared_streak(first_days: set[date], second_days: set[date]) -> int:
+    shared = first_days & second_days
     # XP event timestamps are stored in UTC, so their calendar-day comparison
     # must use the same clock. Mixing local `date.today()` with UTC timestamps
     # breaks shared streaks for several hours around midnight UTC.
@@ -1042,6 +1111,7 @@ def create_study_group(student_id: str, name: str, description: str = "", weekly
     with engine().begin() as connection:
         if not connection.execute(select(profiles.c.student_id).where(profiles.c.student_id == student_id)).first():
             raise ValueError("profile_not_found")
+        _advisory_lock(connection, f"groups:student:{student_id}")
         membership_count = connection.execute(select(func.count()).select_from(study_group_members).where(
             study_group_members.c.student_id == student_id,
         )).scalar_one()
@@ -1066,6 +1136,9 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
         group = connection.execute(select(study_groups).where(study_groups.c.invite_code == code)).mappings().first()
         if not group:
             raise ValueError("group_not_found")
+        # Always group first, then student, so concurrent joins and creates can't deadlock.
+        _advisory_lock(connection, f"groups:group:{group['id']}")
+        _advisory_lock(connection, f"groups:student:{student_id}")
         if connection.execute(select(study_group_members.c.id).where(
             study_group_members.c.group_id == group["id"], study_group_members.c.student_id == student_id,
         )).first():
@@ -1096,6 +1169,13 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
     return get_study_group(student_id, group["id"])
 
 
+def _blocked_by(connection, student_id: str) -> set[str]:
+    """Everyone this student has blocked."""
+    return set(connection.execute(select(social_blocks.c.blocked_id).where(
+        social_blocks.c.blocker_id == student_id,
+    )).scalars())
+
+
 def _study_group_result(connection, student_id: str, group: dict) -> dict:
     membership = connection.execute(select(study_group_members.c.role).where(
         study_group_members.c.group_id == group["id"], study_group_members.c.student_id == student_id,
@@ -1104,9 +1184,12 @@ def _study_group_result(connection, student_id: str, group: dict) -> dict:
         raise ValueError("group_not_found")
     today_utc = datetime.now(timezone.utc).date()
     week_start = datetime.combine(today_utc - timedelta(days=today_utc.weekday()), datetime.min.time(), tzinfo=timezone.utc)
+    group_member_ids = select(study_group_members.c.student_id).where(study_group_members.c.group_id == group["id"])
     weekly = select(
         xp_events.c.student_id, func.sum(xp_events.c.xp).label("weekly_xp"),
-    ).where(xp_events.c.created_at >= week_start).group_by(xp_events.c.student_id).subquery()
+    ).where(
+        xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(group_member_ids),
+    ).group_by(xp_events.c.student_id).subquery()
     members = connection.execute(select(
         profiles.c.student_id, profiles.c.username, profiles.c.display_name, profiles.c.avatar_path,
         study_group_members.c.role, study_group_members.c.joined_at,
@@ -1115,7 +1198,9 @@ def _study_group_result(connection, student_id: str, group: dict) -> dict:
       .outerjoin(weekly, profiles.c.student_id == weekly.c.student_id)
       .where(study_group_members.c.group_id == group["id"])
       .order_by(func.coalesce(weekly.c.weekly_xp, 0).desc(), profiles.c.display_name.asc())).mappings().all()
-    member_ids = [member["student_id"] for member in members]
+    # The viewer's activity feed leaves out anyone they have blocked.
+    blocked = _blocked_by(connection, student_id)
+    member_ids = [member["student_id"] for member in members if member["student_id"] not in blocked]
     activity = connection.execute(select(
         xp_events.c.id, xp_events.c.student_id, xp_events.c.xp, xp_events.c.created_at,
         profiles.c.display_name,
@@ -1249,7 +1334,7 @@ def friend_leaderboard(student_id: str) -> list[dict]:
         friend_ids.add(student_id)
         week_start = datetime.combine(date.today() - timedelta(days=date.today().weekday()), datetime.min.time(), tzinfo=timezone.utc)
         weekly_xp = select(xp_events.c.student_id, func.sum(xp_events.c.xp).label("weekly_xp")).where(
-            xp_events.c.created_at >= week_start
+            xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(friend_ids),
         ).group_by(xp_events.c.student_id).subquery()
         rows = connection.execute(
             select(
@@ -1287,6 +1372,9 @@ def search_people(student_id: str, query: str) -> list[dict]:
     term = query.strip().lower()
     if len(term) < 2:
         return []
+    # Match the typed text literally: % and _ would otherwise act as wildcards.
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
     with engine().connect() as connection:
         excluded = _excluded_social_ids(connection, student_id)
         rows = connection.execute(select(
@@ -1295,7 +1383,10 @@ def search_people(student_id: str, query: str) -> list[dict]:
         ).where(
             profiles.c.discoverable.is_(True), profiles.c.allow_friend_requests.is_(True),
             profiles.c.student_id.not_in(excluded),
-            or_(func.lower(profiles.c.username).like(f"%{term}%"), func.lower(profiles.c.display_name).like(f"%{term}%")),
+            or_(
+                func.lower(profiles.c.username).like(pattern, escape="\\"),
+                func.lower(profiles.c.display_name).like(pattern, escape="\\"),
+            ),
         ).limit(12)).mappings().all()
     return [dict(row) for row in rows]
 
@@ -1358,8 +1449,12 @@ def react_to_activity(student_id: str, event_id: int) -> dict:
 def notifications_for(student_id: str) -> list[dict]:
     init_db()
     with engine().connect() as connection:
+        blocked = _blocked_by(connection, student_id)
+        conditions = [social_notifications.c.recipient_id == student_id]
+        if blocked:
+            conditions.append(or_(social_notifications.c.actor_id.is_(None), social_notifications.c.actor_id.not_in(blocked)))
         rows = connection.execute(select(social_notifications).where(
-            social_notifications.c.recipient_id == student_id
+            *conditions
         ).order_by(social_notifications.c.created_at.desc()).limit(30)).mappings().all()
     return [dict(row) for row in rows]
 

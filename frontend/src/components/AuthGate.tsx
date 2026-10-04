@@ -1,11 +1,20 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
-  consumeAuthRedirectSession,
+  AUTH_SESSION_KEY,
+  discardSession,
   loadAuthSession,
+  msUntilRefresh,
   refreshAuthSession,
+  refreshSessionIfDue,
+  requestPasswordReset,
   resendSignupConfirmation,
+  saveAuthSession,
   signIn,
+  signOutAndReload,
   signUp,
+  takeAuthRedirect,
+  updatePassword,
+  verifyRedirectTokens,
   verifySignupCode,
   type AuthSession,
 } from '../lib/auth'
@@ -13,8 +22,14 @@ import { AuthContext } from '../lib/AuthContext'
 import { BrandMark } from '../lib/SiteSidebar'
 import './GuestAuth.css'
 
-type Mode = 'login' | 'signup'
+type Mode = 'login' | 'signup' | 'reset'
 type GateView = 'landing' | 'auth' | 'confirm'
+// An email link that needs the person's attention before the app opens.
+type LinkGate =
+  | { kind: 'continue'; session: AuthSession }
+  | { kind: 'recovery'; session: AuthSession }
+  | { kind: 'other-account'; linkedEmail: string }
+const MAX_REFRESH_RETRY_MS = 60_000
 const RESEND_SECS = 60
 
 // The landing page (and its demo and 3D scene) is only downloaded by signed-out visitors.
@@ -58,16 +73,19 @@ function AuthBrand() {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const [initialSession] = useState<AuthSession | null>(() => consumeAuthRedirectSession() ?? loadAuthSession())
-  const [session, setSession] = useState<AuthSession | null>(initialSession)
-  const [loading, setLoading] = useState(Boolean(initialSession))
-  const [view, setView] = useState<GateView>('landing')
+  const [redirect] = useState(takeAuthRedirect)
+  const [session, setSession] = useState<AuthSession | null>(loadAuthSession)
+  const [loading, setLoading] = useState(() => Boolean(session) || redirect.kind === 'tokens')
+  const [linkGate, setLinkGate] = useState<LinkGate | null>(null)
+  const [view, setView] = useState<GateView>(redirect.kind === 'error' ? 'auth' : 'landing')
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordAgain, setPasswordAgain] = useState('')
   const [code, setCode] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(redirect.kind === 'error' ? redirect.message : '')
+  const sessionRef = useRef(session)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [pendingEmail, setPendingEmail] = useState('')
@@ -89,12 +107,109 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [password])
 
   useEffect(() => {
-    if (!initialSession) return
-    void refreshAuthSession(initialSession).then((next) => {
+    sessionRef.current = session
+  }, [session])
+
+  // On load: refresh a stored session if it is due, then check any sign-in link
+  // from the URL fragment with the auth server before it can be used.
+  useEffect(() => {
+    let cancelled = false
+    async function start() {
+      const stored = sessionRef.current
+      const current = stored ? await refreshAuthSession(stored) : null
+      let gate: LinkGate | null = null
+      let next = current
+      let linkError = ''
+      if (redirect.kind === 'tokens') {
+        try {
+          const linked = await verifyRedirectTokens(redirect)
+          if (current && current.user.id !== linked.user.id) {
+            // Never silently swap accounts: keep the signed-in one.
+            discardSession(linked)
+            gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account' }
+          } else if (redirect.type === 'recovery') {
+            gate = { kind: 'recovery', session: linked }
+          } else if (current) {
+            saveAuthSession(linked)
+            next = linked
+          } else {
+            gate = { kind: 'continue', session: linked }
+          }
+        } catch {
+          linkError = 'That link is invalid or has expired. Request a new one and try again.'
+        }
+      }
+      if (cancelled) return
       setSession(next)
+      setLinkGate(gate)
+      if (linkError && !next) {
+        setError(linkError)
+        setView('auth')
+      }
       setLoading(false)
-    })
-  }, [initialSession])
+    }
+    void start()
+    return () => {
+      cancelled = true
+    }
+  }, [redirect])
+
+  // Keep the session fresh: refresh about a minute before the access token
+  // expires, retry with backoff when offline, and check again on return to the tab.
+  useEffect(() => {
+    if (!session || loading) return
+    let cancelled = false
+    let timer = 0
+    let failures = 0
+    const schedule = (delay: number) => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => void run(), Math.min(delay, 2_147_000_000))
+    }
+    const run = async () => {
+      const result = await refreshSessionIfDue(session)
+      if (cancelled) return
+      if (result.failed) {
+        failures += 1
+        schedule(Math.min(MAX_REFRESH_RETRY_MS, 2_000 * 2 ** failures))
+        return
+      }
+      failures = 0
+      if (!result.session || result.session.access_token !== session.access_token) {
+        setSession(result.session)
+        return
+      }
+      schedule(msUntilRefresh(session))
+    }
+    const wake = () => {
+      if (document.visibilityState === 'visible') schedule(0)
+    }
+    schedule(msUntilRefresh(session))
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
+    }
+  }, [session, loading])
+
+  // Follow sign-in, refresh and sign-out from other tabs.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== localStorage || (event.key !== null && event.key !== AUTH_SESSION_KEY)) return
+      const current = sessionRef.current
+      const stored = loadAuthSession()
+      if (current && (!stored || stored.user.id !== current.user.id)) {
+        // Signed out or switched accounts elsewhere: drop everything in memory.
+        window.location.reload()
+        return
+      }
+      if (stored && stored.access_token !== current?.access_token) setSession(stored)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   useEffect(() => {
     if (resendIn <= 0) return
@@ -116,6 +231,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setError('')
     setMessage('')
     setPassword('')
+    setPasswordAgain('')
     setShowPassword(false)
   }
 
@@ -154,6 +270,162 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
+  if (linkGate?.kind === 'other-account') {
+    return (
+      <main className="auth">
+        <section className="auth-card" aria-labelledby="auth-title">
+          <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+          <AuthBrand />
+          <p className="auth-eyebrow">Different account</p>
+          <h1 className="auth-title" id="auth-title">You’re already signed in</h1>
+          <p className="auth-lead">
+            That link was for {linkGate.linkedEmail}, but this browser is signed in as {session?.user.email ?? 'another account'}. We kept you signed in.
+            To use {linkGate.linkedEmail}, sign out first and request a new link.
+          </p>
+          <button className="auth-submit" type="button" onClick={() => setLinkGate(null)}>
+            Continue as {session?.user.email ?? 'current account'}
+          </button>
+          <div className="auth-links">
+            <button className="auth-text-btn" type="button" onClick={() => signOutAndReload()}>
+              Sign out
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (linkGate?.kind === 'continue') {
+    const linked = linkGate.session
+    return (
+      <main className="auth">
+        <section className="auth-card" aria-labelledby="auth-title">
+          <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+          <AuthBrand />
+          <p className="auth-eyebrow">Email confirmed</p>
+          <h1 className="auth-title" id="auth-title">Continue as {linked.user.email ?? 'this account'}?</h1>
+          <p className="auth-lead">You opened a sign-in link for this account. Continue only if it’s yours.</p>
+          <button
+            className="auth-submit"
+            type="button"
+            onClick={() => {
+              saveAuthSession(linked)
+              setLinkGate(null)
+              setSession(linked)
+            }}
+          >
+            Continue
+          </button>
+          <div className="auth-links">
+            <button
+              className="auth-text-btn"
+              type="button"
+              onClick={() => {
+                discardSession(linked)
+                setLinkGate(null)
+              }}
+            >
+              Not me
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
+  if (linkGate?.kind === 'recovery') {
+    const recovering = linkGate.session
+    async function submitNewPassword(event: FormEvent) {
+      event.preventDefault()
+      setError('')
+      if (password.length < 8) {
+        setError('Use at least 8 characters for your password.')
+        return
+      }
+      if (password !== passwordAgain) {
+        setError('Those passwords don’t match.')
+        return
+      }
+      setBusy(true)
+      try {
+        const next = await updatePassword(recovering, password)
+        saveAuthSession(next)
+        setPassword('')
+        setPasswordAgain('')
+        setLinkGate(null)
+        setSession(next)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not update your password.')
+      } finally {
+        setBusy(false)
+      }
+    }
+    return (
+      <main className="auth">
+        <section className="auth-card" aria-labelledby="auth-title">
+          <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+          <AuthBrand />
+          <p className="auth-eyebrow">Reset password</p>
+          <h1 className="auth-title" id="auth-title">Set a new password</h1>
+          <p className="auth-lead">For {recovering.user.email ?? 'your account'}. Use at least 8 characters.</p>
+          <form className="auth-form" onSubmit={submitNewPassword}>
+            <label className="auth-field">
+              <span>New password</span>
+              <div className="auth-pass">
+                <input
+                  className="auth-input"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  disabled={busy}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button type="button" disabled={busy} onClick={() => setShowPassword((value) => !value)}>
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+            </label>
+            <label className="auth-field">
+              <span>Confirm new password</span>
+              <input
+                className="auth-input"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                minLength={8}
+                required
+                disabled={busy}
+                value={passwordAgain}
+                onChange={(event) => setPasswordAgain(event.target.value)}
+              />
+            </label>
+            {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+            <button className="auth-submit" type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Save password and enter'}
+            </button>
+          </form>
+          <div className="auth-links">
+            <button
+              className="auth-text-btn"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                if (!session) discardSession(recovering)
+                setLinkGate(null)
+                setPassword('')
+                setPasswordAgain('')
+                setError('')
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      </main>
+    )
+  }
+
   if (!session) {
     async function submit(event: FormEvent) {
       event.preventDefault()
@@ -162,7 +434,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setMessage('')
       const trimmed = email.trim()
       try {
-        if (mode === 'login') {
+        if (mode === 'reset') {
+          await requestPasswordReset(trimmed)
+          setMessage(`If ${trimmed} has a bindit account, we sent it a link to set a new password.`)
+        } else if (mode === 'login') {
           try {
             setSession(await signIn(trimmed, password))
           } catch (err) {
@@ -255,8 +530,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 ← Back
               </button>
             </div>
-            <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : 'Start studying'}</p>
-            <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : 'Create your account'}</h1>
+            <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : mode === 'reset' ? 'Forgot password' : 'Start studying'}</p>
+            <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : mode === 'reset' ? 'Reset your password' : 'Create your account'}</h1>
+            {mode === 'reset' ? <p className="auth-lead">Enter your email and we’ll send you a link to set a new password.</p> : null}
             {mode === 'signup' && signupReason ? (
               <p className="auth-reason" role="status">
                 <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
@@ -267,7 +543,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 <span>Email</span>
                 <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy} value={email} onChange={(event) => setEmail(event.target.value)} />
               </label>
-              <label className="auth-field">
+              {mode !== 'reset' ? <label className="auth-field">
                 <span>Password</span>
                 <div className="auth-pass">
                   <input
@@ -284,7 +560,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     {showPassword ? 'Hide' : 'Show'}
                   </button>
                 </div>
-              </label>
+              </label> : null}
               {mode === 'signup' && password ? (
                 <div className={`auth-strength is-${Math.max(1, passwordScore)}`}>
                   <div>{[0, 1, 2, 3].map((index) => <span key={index} className={index < passwordScore ? 'is-on' : ''} />)}</div>
@@ -294,15 +570,29 @@ export function AuthGate({ children }: { children: ReactNode }) {
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
               <button className="auth-submit" type="submit" disabled={busy}>
-                {busy ? (mode === 'login' ? 'Logging in…' : 'Creating account…') : mode === 'login' ? 'Log in' : 'Create account'}
+                {busy ? (mode === 'login' ? 'Logging in…' : mode === 'reset' ? 'Sending…' : 'Creating account…') : mode === 'login' ? 'Log in' : mode === 'reset' ? 'Send reset link' : 'Create account'}
               </button>
             </form>
-            <p className="auth-switch">
-              {mode === 'login' ? 'New to bindit?' : 'Already have an account?'}{' '}
-              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'Create an account' : 'Log in'}</button>
-            </p>
+            {mode === 'login' ? (
+              <div className="auth-links">
+                <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode('reset')}>
+                  Forgot password?
+                </button>
+              </div>
+            ) : null}
+            {mode === 'reset' ? (
+              <p className="auth-switch">
+                Remembered it?{' '}
+                <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode('login')}>Back to log in</button>
+              </p>
+            ) : (
+              <p className="auth-switch">
+                {mode === 'login' ? 'New to bindit?' : 'Already have an account?'}{' '}
+                <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'Create an account' : 'Log in'}</button>
+              </p>
+            )}
           </section>
-          <AuthAside mode={mode} />
+          <AuthAside mode={mode === 'reset' ? 'login' : mode} />
         </main>
       )
     }

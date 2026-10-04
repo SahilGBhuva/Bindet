@@ -12,7 +12,8 @@ from typing import Annotated, Literal
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 import base64
 import binascii
@@ -121,15 +122,32 @@ class AnswerResponse(BaseModel):
     streak: int
 
 
+def _clip_names(max_items: int, max_chars: int) -> BeforeValidator:
+    """Keep the first few names, each cut to a sane length. These lists are hints, so
+    clipping beats rejecting a real student whose unit has many notes."""
+    def clip(value):
+        if not isinstance(value, list):
+            return value
+        return [item[:max_chars] if isinstance(item, str) else item for item in value[:max_items]]
+    return BeforeValidator(clip)
+
+
+FileNames = Annotated[list[str], _clip_names(30, 255)]
+UnitNames = Annotated[list[str], _clip_names(30, 160)]
+CourseNames = Annotated[list[str], _clip_names(30, 120)]
+
+
 class NoteContext(BaseModel):
-    course: str = ""
-    unit: str = ""
-    files: list[str] = Field(default_factory=list)
-    other_units: list[str] = Field(default_factory=list)
-    other_courses: list[str] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(default="", max_length=120)
+    unit: str = Field(default="", max_length=160)
+    files: FileNames = Field(default_factory=list)
+    other_units: UnitNames = Field(default_factory=list)
+    other_courses: CourseNames = Field(default_factory=list)
 
 
 class QuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     topic: Topic = "mixed"
     difficulty: int = Field(default=1, ge=1, le=3)
     student_id: str = Field(default="anonymous", min_length=1, max_length=GUEST_ID_MAX_LENGTH)
@@ -251,10 +269,11 @@ class MilestoneCreate(BaseModel):
 
 
 class FlashcardRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     student_id: str = Field(default="anonymous", min_length=1, max_length=100)
     course: str = Field(default="", max_length=120)
     unit: str = Field(default="", max_length=160)
-    files: list[str] = Field(default_factory=list, max_length=30)
+    files: FileNames = Field(default_factory=list)
     count: int = Field(default=10, ge=3, le=30)
 
 
@@ -281,6 +300,8 @@ class NoteResponse(BaseModel):
     status: Literal["ready"] = "ready"
     text_preview: str
     created_at: datetime
+    pages_skipped: int = 0
+    notice: str | None = None
 
 
 class TopicStat(BaseModel):
@@ -311,6 +332,7 @@ class ProgressResponse(BaseModel):
 
 
 class AccountProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[a-z0-9_]{3,24}$")
     display_name: str = Field(min_length=1, max_length=40)
     guest_id: str | None = Field(default=None, min_length=1, max_length=100)
@@ -626,6 +648,11 @@ def social_error(error: ValueError) -> HTTPException:
     return HTTPException(status_code=status, detail=message, headers=headers)
 
 
+MATH_QUESTIONS_PER_DAY = 300    # signed-in practice questions without a course or unit
+FIRST_TRY_XP = 10
+RETRY_XP = 5
+
+
 def limit_action(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Durable per-action limit (shared across server instances); raises a friendly 429."""
     try:
@@ -651,12 +678,41 @@ def auth_config():
     return {"supabase_url": url, "supabase_anon_key": key}
 
 
-def note_response(row: dict) -> NoteResponse:
+def note_response(row: dict, pages_skipped: int = 0) -> NoteResponse:
+    notice = None
+    if pages_skipped:
+        kept = note_ingestion.MAX_OCR_PDF_PAGES
+        notice = f"Only the first {kept} pages of this scanned PDF were read. Upload the remaining {pages_skipped} pages as a separate file."
     return NoteResponse(
         id=row["id"], course=row["course"], unit=row["unit"], file_name=row["file_name"],
         content_type=row["content_type"], size_bytes=row["size_bytes"], status="ready",
         text_preview=row["text"][:500], created_at=row["created_at"],
+        pages_skipped=pages_skipped, notice=notice,
     )
+
+
+# The content types a note upload may be stored with, by extension. The first is the default.
+NOTE_CONTENT_TYPES = {
+    ".pdf": ("application/pdf",),
+    ".docx": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",),
+    ".txt": ("text/plain",),
+    ".md": ("text/markdown", "text/x-markdown", "text/plain"),
+    ".csv": ("text/csv", "application/csv", "application/vnd.ms-excel", "text/plain"),
+    ".json": ("application/json", "text/json", "text/plain"),
+    ".png": ("image/png",),
+    ".jpg": ("image/jpeg", "image/jpg"),
+    ".jpeg": ("image/jpeg", "image/jpg"),
+    ".webp": ("image/webp",),
+}
+
+
+def note_content_type(suffix: str, claimed: str | None) -> str:
+    """The browser's content type if it fits the extension, else the extension's default."""
+    allowed = NOTE_CONTENT_TYPES.get(suffix)
+    if not allowed:
+        return ""
+    value = (claimed or "").split(";", 1)[0].strip().lower()[:100]
+    return value if value in allowed else allowed[0]
 
 
 @app.post("/api/notes", response_model=NoteResponse, status_code=201)
@@ -670,17 +726,18 @@ async def upload_note(
     limit_action(user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     filename = file.filename or "notes"
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
+    suffix = Path(filename).suffix.lower()
+    content_type = note_content_type(suffix, file.content_type)
+    pages_skipped = 0
     try:
-        suffix = Path(filename).suffix.lower()
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
             limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
-            fallback_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
             text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
-                image_bytes=content, content_type=file.content_type or fallback_types[suffix]
+                image_bytes=content, content_type=content_type
             ))
         else:
             try:
@@ -688,15 +745,16 @@ async def upload_note(
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
                     limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
-                    text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=content))
+                    ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
+                    text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                 else:
                     raise
     except (note_ingestion.NoteIngestionError, ai_tutor.AITutorError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
-    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], file.content_type or "", text, len(content))
-    return note_response(row)
+    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
+    return note_response(row, pages_skipped)
 
 
 @app.get("/api/notes", response_model=list[NoteResponse])
@@ -1212,7 +1270,9 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             raise social_error(error) from error
     else:
         student_id = verified_student_id(data.student_id, authorization)
-        if not authorization:
+        if authorization:
+            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
+        else:
             # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
             limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
 
@@ -1239,11 +1299,15 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                 )
             except ai_tutor.AITutorError as exc:
                 raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
-            questions.save_to_bank(cache_key, ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic, difficulty)
+        question_text, correct_answer, topic = questions.clip_question(
+            ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
+        )
+        if not cached:
+            questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
         generated = GeneratedQuestion(
-            question=ai_question["question"],
-            correct_answer=ai_question["correct_answer"],
-            topic=ai_question["topic"] or target_topic,
+            question=question_text,
+            correct_answer=correct_answer,
+            topic=topic,
             difficulty=difficulty,
         )
     else:
@@ -1307,7 +1371,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
     question = questions.get_question(student_id, data.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
-    if question["completed"]:
+    if question["completed"] == questions.COMPLETED:
         raise HTTPException(status_code=409, detail="Question already completed")
 
     exact_match = answers_match(data.student_answer, question["correct_answer"])
@@ -1352,9 +1416,15 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
             hint = make_hint(question["question"], mistake_type)
             grading_source = "fallback"
 
-    xp = 10 if correct else 0
-    if correct and not questions.complete_question(student_id, data.question_id):
-        raise HTTPException(status_code=409, detail="Question already completed")
+    xp = 0
+    if correct:
+        prior = questions.complete_question(student_id, data.question_id)
+        if prior is None:
+            raise HTTPException(status_code=409, detail="Question already completed")
+        # Full credit on the first try; retrying after a wrong answer earns less, so guessing doesn't pay.
+        xp = FIRST_TRY_XP if prior == questions.OPEN else RETRY_XP
+    else:
+        questions.mark_missed(student_id, data.question_id)
     record = database.update_progress(student_id, question["topic"], correct, xp)
     return AnswerResponse(
         correct=correct,
@@ -1364,7 +1434,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         explanation=explanation,
         hint=hint,
         grading_source=grading_source,
-        xp_earned=xp,
+        xp_earned=record.get("xp_awarded", xp),
         total_xp=record["total_xp"],
         streak=record["streak"],
     )

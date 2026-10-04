@@ -1,4 +1,4 @@
-import { loadAuthSession, refreshAuthSession } from './auth'
+import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, refreshAuthSession } from './auth'
 import { getStudentId } from './session'
 
 export type Topic = 'addition' | 'subtraction' | 'multiplication' | 'division' | 'mixed'
@@ -310,6 +310,14 @@ export function saveAccountProfile(
 const socialCache = new Map<string, { savedAt: number; data: FriendsHub }>()
 const groupCache = new Map<string, { savedAt: number; data: StudyGroup[] }>()
 
+// Forget every cached account response when this browser's account data is cleared.
+window.addEventListener(ACCOUNT_DATA_CLEARED_EVENT, () => {
+  progressCache.clear()
+  profileCache.clear()
+  socialCache.clear()
+  groupCache.clear()
+})
+
 export function getCachedFriends(accessToken: string) {
   const identity = tokenSubject(accessToken)
   return socialCache.get(identity)?.data ?? readSessionCache<FriendsHub>(`bindit:social:${identity}`)?.data ?? null
@@ -569,6 +577,13 @@ export type GroupAnalytics = {
 
 const taskCache = new Map<string, { savedAt: number; data: Task[] }>()
 const analyticsCache = new Map<string, GroupAnalytics>()
+
+window.addEventListener(ACCOUNT_DATA_CLEARED_EVENT, () => {
+  tutorListCache.clear()
+  tutorMessageCache.clear()
+  taskCache.clear()
+  analyticsCache.clear()
+})
 
 export function getCachedTasks(accessToken: string) {
   const identity = tokenSubject(accessToken)

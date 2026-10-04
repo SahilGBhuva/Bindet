@@ -6,6 +6,7 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException, UploadFile
+from pypdf import PdfReader, PdfWriter
 
 os.environ.setdefault("POCKET_TUTOR_DB_PATH", tempfile.mktemp(suffix=".db"))
 
@@ -13,6 +14,15 @@ import database
 import main
 import note_ingestion
 import note_store
+
+
+def blank_pdf(pages: int) -> bytes:
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=612, height=792)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 class NoteIngestionTests(unittest.TestCase):
@@ -65,13 +75,27 @@ class NoteIngestionTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["timeout"], 8.0)
 
     def test_scanned_pdf_falls_back_to_ai_ocr(self):
-        upload = UploadFile(filename="scan.pdf", file=BytesIO(b"scanned-pdf"), headers={"content-type": "application/pdf"})
+        scanned = blank_pdf(2)
+        upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
         with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student"}), patch.object(
             main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
         ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
             result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
         self.assertEqual(result.status, "ready")
-        ocr.assert_called_once_with(pdf_bytes=b"scanned-pdf")
+        ocr.assert_called_once_with(pdf_bytes=scanned)
+        self.assertEqual(result.pages_skipped, 0)
+
+    def test_scanned_pdf_ocr_only_sends_the_first_pages(self):
+        scanned = blank_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 4)
+        upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student"}), patch.object(
+            main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
+        ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
+            result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
+        sent = PdfReader(BytesIO(ocr.call_args.kwargs["pdf_bytes"]))
+        self.assertEqual(len(sent.pages), note_ingestion.MAX_OCR_PDF_PAGES)
+        self.assertEqual(result.pages_skipped, 4)
+        self.assertIn("first 15 pages", result.notice)
 
     def test_question_generation_uses_owned_note_excerpt(self):
         note_store.save_note("student-a", "Biology", "Cells", "cells.txt", "text/plain", "Mitochondria generate ATP.", 25)

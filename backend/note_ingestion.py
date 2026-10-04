@@ -5,7 +5,7 @@ from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
 from docx import Document
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 MAX_NOTE_BYTES = 10 * 1024 * 1024
 MAX_STORED_CHARS = 120_000
@@ -13,6 +13,7 @@ TEXT_EXTENSIONS = {'.txt', '.md', '.csv', '.json'}
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {'.pdf', '.docx'}
 MAX_PDF_PAGES = 200
+MAX_OCR_PDF_PAGES = 15  # scanned PDFs are OCR'd by a paid model, so only the first pages are sent
 MAX_DOCX_FILES = 500
 MAX_DOCX_EXPANDED_BYTES = 30 * 1024 * 1024
 
@@ -37,6 +38,27 @@ def validate_docx_archive(content: bytes) -> None:
                 raise NoteIngestionError('That DOCX is too compressed to process safely')
     except BadZipFile as exc:
         raise NoteIngestionError('Could not read that DOCX file') from exc
+
+
+def first_pdf_pages(content: bytes, max_pages: int = MAX_OCR_PDF_PAGES) -> tuple[bytes, int]:
+    """A copy of the PDF holding only its first pages, and how many pages were left out."""
+    try:
+        reader = PdfReader(BytesIO(content))
+        if reader.is_encrypted:
+            raise NoteIngestionError('Password-protected PDFs are not supported')
+        total = len(reader.pages)
+        if total <= max_pages:
+            return content, 0
+        writer = PdfWriter()
+        for page in reader.pages[:max_pages]:
+            writer.add_page(page)
+        output = BytesIO()
+        writer.write(output)
+    except NoteIngestionError:
+        raise
+    except Exception as exc:
+        raise NoteIngestionError('Could not read that file. Try exporting it again.') from exc
+    return output.getvalue(), total - max_pages
 
 
 def extract_text(filename: str, content: bytes) -> str:

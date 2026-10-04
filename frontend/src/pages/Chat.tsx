@@ -4,7 +4,7 @@ import type { AuthSession } from '../lib/auth'
 import {
   deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
-  setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
+  isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
@@ -357,7 +357,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now()
-      setTypingUsers((current) => current.some((item) => time(item.typing_until) <= now) ? current.filter((item) => time(item.typing_until) > now) : current)
+      setTypingUsers((current) => current.some((item) => !isTypingNow(item, now)) ? current.filter((item) => isTypingNow(item, now)) : current)
     }, 1000)
     return () => window.clearInterval(timer)
   }, [])
@@ -548,7 +548,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const sortedGroups = [...groupList].sort((a, b) => lastActivity(b) - lastActivity(a))
   const totalUnread = groupList.reduce((sum, group) => sum + (group.id === activeId ? 0 : summaries[group.id]?.unread ?? 0), 0)
   const memberName = (id: string, fallback?: string) => id === userId ? 'You' : fallback || activeGroup?.members.find((member) => member.student_id === id)?.display_name || 'Group member'
-  const activeTyping = typingUsers.filter((item) => item.group_id === activeId && item.student_id !== userId)
+  const activeTyping = typingUsers.filter((item) => item.group_id === activeId && item.student_id !== userId && isTypingNow(item))
   const lastOwn = [...serverMessages].reverse().find((message) => message.sender_id === userId)
   const seenBy = lastOwn ? receipts.filter((receipt) => receipt.group_id === activeId && receipt.student_id !== userId && time(receipt.last_read_at) >= time(lastOwn.created_at)).length : 0
   const threadError = threadErrors[activeId]

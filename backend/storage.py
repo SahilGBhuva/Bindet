@@ -65,7 +65,7 @@ async def upload_private_image(owner_id: str, upload: UploadFile) -> dict:
 
     url, _, service_key, bucket = _settings()
     image_id = str(uuid4())
-    storage_path = f"{owner_id}/{image_id}{extension}"
+    storage_path = _safe_storage_path(f"{owner_id}/{image_id}{extension}")
     safe_name = Path(upload.filename or f"image{extension}").name[:255]
     headers = {
         "apikey": service_key,
@@ -93,7 +93,15 @@ async def upload_private_image(owner_id: str, upload: UploadFile) -> dict:
     }
 
 
+def _safe_storage_path(storage_path: str) -> str:
+    """Object paths are built as owner/uuid.ext; refuse anything that could climb out of the bucket."""
+    if not storage_path or storage_path.startswith("/") or "\\" in storage_path or ".." in storage_path:
+        raise HTTPException(status_code=400, detail="Invalid image path")
+    return storage_path
+
+
 def signed_image_url(storage_path: str) -> str:
+    storage_path = _safe_storage_path(storage_path)
     url, _, service_key, bucket = _settings()
     response = httpx.post(
         f"{url}/storage/v1/object/sign/{bucket}/{storage_path}",
