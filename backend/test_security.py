@@ -12,6 +12,7 @@ import auth
 import database
 import main
 import rate_limit
+import storage
 from pydantic import ValidationError
 import questions
 
@@ -210,6 +211,16 @@ class FriendSearchTests(unittest.TestCase):
         bob = database.get_profile("bob-id")
         result = database.send_friend_request("searcher-id", bob["friend_code"])
         self.assertEqual(set(result["friend"]), {"student_id", "username", "display_name", "avatar_path"})
+
+
+class StoragePathTests(unittest.TestCase):
+    def test_traversal_paths_are_refused(self):
+        for path in ("../other/x.png", "/etc/passwd", "owner/../../x.png", "owner\\x.png", ""):
+            with self.subTest(path=path), self.assertRaises(storage.HTTPException):
+                storage.signed_image_url(path)
+
+    def test_normal_path_is_allowed(self):
+        self.assertEqual(storage._safe_storage_path("owner-id/abc.png"), "owner-id/abc.png")
 
 
 class AdvisoryLockTests(unittest.TestCase):
