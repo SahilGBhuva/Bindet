@@ -110,8 +110,10 @@ alter table uploaded_images enable row level security;
 alter table study_notes enable row level security;
 
 drop policy if exists "Students own study notes" on study_notes;
+-- Read-only for the owner; notes are written only by the backend (see 20261003_security_hardening.sql).
 create policy "Students own study notes" on study_notes
-  for all using (auth.uid() = student_id) with check (auth.uid() = student_id);
+  for select to authenticated using (auth.uid()::text = student_id::text);
 alter table progress_claims enable row level security;
 
 -- Intentionally no policies for anon/authenticated. Backend access uses DATABASE_URL.
+-- Chat tables, question_bank, triggers and the catch-all RLS pass live in supabase/migrations.
