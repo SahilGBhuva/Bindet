@@ -3,7 +3,7 @@
 // Content-Security-Policy (vercel.json) blocks inline scripts.
 (function () {
   var pref = null
-  try { pref = localStorage.getItem('bindit:theme') } catch (e) {}
+  try { pref = localStorage.getItem('bindit:theme') } catch { /* storage blocked: follow the system */ }
   var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   var meta = document.querySelector('meta[name="theme-color"]')
