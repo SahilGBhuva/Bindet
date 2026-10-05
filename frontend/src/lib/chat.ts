@@ -1,4 +1,4 @@
-import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, type AuthSession } from './auth'
+import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, subscribeToAuthSession, type AuthSession } from './auth'
 
 export type ChatMessage = {
   id: string
@@ -317,10 +317,23 @@ const RECONNECT_MAX_MS = 30_000
 
 type RealtimeChange = { event: 'INSERT'; schema: 'public'; table: string; filter?: string }
 
+type RealtimePacket = {
+  topic?: string
+  event?: string
+  ref?: string | null
+  payload?: {
+    status?: string
+    message?: string
+    data?: { record?: ChatMessage }
+  }
+}
+
 /**
  * Opens a realtime channel and keeps it open. Reconnects back off from 1.2s
- * up to 30s (reset after a successful connection) and always join with the
- * account's current access token, which may have been refreshed since.
+ * up to 30s (reset after a successful join) and always join with the
+ * account's current access token. When the token is refreshed, the new one is
+ * sent on the open channel; a rejected join, a closed or errored channel, or a
+ * token-expiry notice closes the socket and reconnects with the fresh token.
  */
 function openRealtimeChannel(
   config: SupabaseConfig,
@@ -334,10 +347,30 @@ function openRealtimeChannel(
   let heartbeat: number | null = null
   let retryTimer: number | null = null
   let retryDelay = RECONNECT_MIN_MS
+  let joined = false
+  let sentToken = ''
+  let ref = 1
+
+  const nextRef = () => String((ref += 1))
 
   const currentToken = () => {
     const stored = loadAuthSession()
     return stored && stored.user.id === session.user.id ? stored.access_token : session.access_token
+  }
+
+  const reconnect = (current: WebSocket) => {
+    if (socket !== current) return
+    // The close handler schedules the next attempt with the current backoff.
+    current.close()
+  }
+
+  const pushToken = () => {
+    const current = socket
+    if (!current || !joined || current.readyState !== WebSocket.OPEN) return
+    const token = currentToken()
+    if (!token || token === sentToken) return
+    sentToken = token
+    current.send(JSON.stringify({ topic, event: 'access_token', payload: { access_token: token }, ref: nextRef() }))
   }
 
   const open = () => {
@@ -346,9 +379,11 @@ function openRealtimeChannel(
     const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
     const current = new WebSocket(wsUrl)
     socket = current
+    joined = false
+    const joinRef = nextRef()
 
     current.addEventListener('open', () => {
-      retryDelay = RECONNECT_MIN_MS
+      sentToken = currentToken()
       current.send(JSON.stringify({
         topic,
         event: 'phx_join',
@@ -358,40 +393,64 @@ function openRealtimeChannel(
             presence: { key: '' },
             postgres_changes: [change],
           },
-          access_token: currentToken(),
+          access_token: sentToken,
         },
-        ref: '1',
+        ref: joinRef,
       }))
       heartbeat = window.setInterval(() => {
-        current.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) }))
+        current.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: nextRef() }))
       }, 25_000)
     })
 
     current.addEventListener('message', (event) => {
+      let packet: RealtimePacket
       try {
-        const packet = JSON.parse(String(event.data)) as {
-          event?: string
-          payload?: { data?: { record?: ChatMessage } }
-        }
-        const record = packet.payload?.data?.record
-        if (packet.event === 'postgres_changes' && record) onRecord(record)
+        packet = JSON.parse(String(event.data)) as RealtimePacket
       } catch {
-        // Ignore malformed realtime frames.
+        return // Ignore malformed realtime frames.
       }
+      if (packet.topic !== topic) return
+      const status = packet.payload?.status
+      if (packet.event === 'phx_reply') {
+        if (status !== 'ok') {
+          reconnect(current)
+          return
+        }
+        if (packet.ref === joinRef) {
+          joined = true
+          retryDelay = RECONNECT_MIN_MS
+          // The token may have been refreshed while the join was in flight.
+          pushToken()
+        }
+        return
+      }
+      if (packet.event === 'phx_close' || packet.event === 'phx_error') {
+        reconnect(current)
+        return
+      }
+      if (packet.event === 'system' && (status === 'error' || (status !== 'ok' && /token|expired|jwt/i.test(packet.payload?.message ?? '')))) {
+        reconnect(current)
+        return
+      }
+      const record = packet.payload?.data?.record
+      if (packet.event === 'postgres_changes' && record) onRecord(record)
     })
 
     current.addEventListener('close', () => {
       if (heartbeat) window.clearInterval(heartbeat)
       heartbeat = null
+      joined = false
       if (closed || socket !== current) return
       retryTimer = window.setTimeout(open, retryDelay)
       retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
     })
   }
 
+  const unsubscribeAuth = subscribeToAuthSession(pushToken)
   open()
   return () => {
     closed = true
+    unsubscribeAuth()
     if (heartbeat) window.clearInterval(heartbeat)
     if (retryTimer) window.clearTimeout(retryTimer)
     socket?.close()

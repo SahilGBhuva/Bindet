@@ -95,6 +95,8 @@ function claimLocalData(userId: string) {
   localStorage.setItem(DATA_OWNER_KEY, userId)
 }
 
+const sessionListeners = new Set<() => void>()
+
 export function saveAuthSession(session: AuthSession | null) {
   if (session) {
     claimLocalData(session.user.id)
@@ -103,6 +105,23 @@ export function saveAuthSession(session: AuthSession | null) {
   } else {
     localStorage.removeItem(SESSION_KEY)
     localStorage.removeItem(LEGACY_SESSION_KEY)
+  }
+  sessionListeners.forEach((listener) => listener())
+}
+
+/**
+ * Calls back whenever the stored session changes: a refresh or sign-in in this
+ * tab, or in another tab (storage event). Read the new one with loadAuthSession.
+ */
+export function subscribeToAuthSession(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea === localStorage && (event.key === null || event.key === SESSION_KEY)) listener()
+  }
+  sessionListeners.add(listener)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    sessionListeners.delete(listener)
+    window.removeEventListener('storage', onStorage)
   }
 }
 
