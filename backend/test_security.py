@@ -430,5 +430,37 @@ class RequestBodyLimitTests(unittest.TestCase):
         self.assertEqual(response.status_code, 413)
 
 
+    def test_json_routes_have_a_small_cap_and_uploads_keep_twelve_megabytes(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(main.app)
+        over_json = b"x" * (main.MAX_JSON_BYTES + 1)
+        response = client.post("/api/tasks", content=over_json, headers={"Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("64 KB", response.json()["detail"])
+        # The same size is fine for the note upload and the tutor (they fail later, on sign-in).
+        for path in ("/api/notes", "/api/tutor/messages"):
+            self.assertNotEqual(client.post(path, content=over_json, headers={"Content-Type": "application/json"}).status_code, 413)
+            response = client.post(path, content=b"x" * (main.MAX_REQUEST_BYTES + 1), headers={"Content-Type": "application/json"})
+            self.assertEqual(response.status_code, 413)
+
+    def test_validation_errors_never_echo_the_input(self):
+        from fastapi.testclient import TestClient
+        secret = "S3CRET-" + "y" * 5000
+        response = TestClient(main.app).post("/api/analyze-answer", json={"question_id": "short", "student_answer": secret})
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("S3CRET", response.text)
+        for error in response.json()["detail"]:
+            self.assertEqual(set(error), {"loc", "msg", "type"})
+
+    def test_tutor_images_have_a_combined_cap(self):
+        import base64
+        raw = b"\x89PNG\r\n\x1a\n" + b"0" * (3 * 1024 * 1024)
+        url = "data:image/png;base64," + base64.b64encode(raw).decode()
+        self.assertEqual(len(main.tutor_image_parts([main.TutorImage(data_url=url)] * 2)), 2)
+        with self.assertRaises(main.HTTPException) as caught:
+            main.tutor_image_parts([main.TutorImage(data_url=url)] * 3)
+        self.assertEqual(caught.exception.status_code, 413)
+
+
 if __name__ == "__main__":
     unittest.main()

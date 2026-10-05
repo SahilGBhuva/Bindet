@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -97,9 +99,23 @@ async def measure_request_time(request, call_next):
     response.headers["X-Bindit-Response-Ms"] = f'{elapsed_ms:.1f}'
     return response
 
-# Whole-request cap. Vercel now accepts much larger bodies, but nothing here needs
-# more than a 10 MB note upload or three tutor images (4 MB each before base64).
+# Body caps per route. Ordinary JSON routes carry a few KB at most, so they get a
+# small cap: Starlette reads and parses the whole JSON body on the event loop, and a
+# huge body would stall every other request on the instance. Only the note upload
+# (10 MB file plus form fields) and tutor messages (images up to 8.5 MB in total,
+# about 11.4 MB as base64, plus text) need more.
 MAX_REQUEST_BYTES = 12 * 1024 * 1024
+MAX_JSON_BYTES = 64 * 1024
+LARGE_BODY_ROUTES = {
+    "/api/notes": MAX_REQUEST_BYTES,
+    "/api/tutor/messages": MAX_REQUEST_BYTES,
+}
+
+
+def _size_label(limit: int) -> str:
+    if limit >= 1024 * 1024:
+        return f"{limit // (1024 * 1024)} MB"
+    return f"{max(1, limit // 1024)} KB"
 
 
 class RequestBodyLimit:
@@ -108,11 +124,17 @@ class RequestBodyLimit:
     Content-Length is checked up front. Bodies without one (chunked) are counted as
     they stream in; once over the cap the app sees the body end early, and whatever
     it answers is replaced with the 413, so a missing header cannot slip past.
+
+    max_bytes applies to every path not listed in route_limits.
     """
 
-    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES):
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES, route_limits: dict[str, int] | None = None):
         self.app = app
         self.max_bytes = max_bytes
+        self.route_limits = dict(route_limits or {})
+
+    def limit_for(self, path: str) -> int:
+        return self.route_limits.get(path, self.max_bytes)
 
     def _response(self, status: int, detail: str) -> JSONResponse:
         return JSONResponse(status_code=status, content={"detail": detail})
@@ -121,7 +143,8 @@ class RequestBodyLimit:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        too_large = f"That request is too large. Keep it under {self.max_bytes // (1024 * 1024)} MB."
+        max_bytes = self.limit_for(scope.get("path", ""))
+        too_large = f"That request is too large. Keep it under {_size_label(max_bytes)}."
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None:
             try:
@@ -129,7 +152,7 @@ class RequestBodyLimit:
             except ValueError:
                 await self._response(400, "Invalid Content-Length header")(scope, receive, send)
                 return
-            if length > self.max_bytes:
+            if length > max_bytes:
                 await self._response(413, too_large)(scope, receive, send)
                 return
         received = 0
@@ -143,7 +166,7 @@ class RequestBodyLimit:
             message = await receive()
             if message["type"] == "http.request":
                 received += len(message.get("body", b""))
-                if received > self.max_bytes:
+                if received > max_bytes:
                     overflowed = True
                     return {"type": "http.request", "body": b"", "more_body": False}
             return message
@@ -163,7 +186,21 @@ class RequestBodyLimit:
 
 
 # Added last so it is the outermost middleware and runs before rate limiting or auth.
-app.add_middleware(RequestBodyLimit)
+app.add_middleware(RequestBodyLimit, max_bytes=MAX_JSON_BYTES, route_limits=LARGE_BODY_ROUTES)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(request, exc: RequestValidationError):
+    """422 with where and why, but never the submitted input (or ctx, which can quote it).
+
+    The default handler echoes each invalid value back, which turns a large bad
+    payload into an equally large response.
+    """
+    errors = [
+        {"loc": list(error.get("loc", ())), "msg": str(error.get("msg", ""))[:200], "type": str(error.get("type", ""))}
+        for error in exc.errors()[:20]
+    ]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
 Topic = Literal["addition", "subtraction", "multiplication", "division", "mixed"]
 
@@ -260,6 +297,9 @@ GUEST_QUESTIONS_PER_DAY = 300
 TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 TUTOR_IMAGE_MAX_BYTES = 4 * 1024 * 1024
 TUTOR_IMAGE_TOO_LARGE = "Images must be 4 MB or smaller"
+# All images in one message together; as base64 this still fits the 12 MB body cap.
+TUTOR_IMAGES_TOTAL_MAX_BYTES = int(8.5 * 1024 * 1024)
+TUTOR_IMAGES_TOO_LARGE = "Attached images must add up to 8.5 MB or less"
 
 
 class TutorImage(BaseModel):
@@ -1160,6 +1200,7 @@ def sniff_image_type(raw: bytes) -> str | None:
 def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
     """Validate data URLs (type, size, real base64, magic bytes) before anything is sent to a model."""
     parts = []
+    total = 0
     for image in images:
         header, _, encoded = image.data_url.partition(",")
         content_type = header.removeprefix("data:").removesuffix(";base64")
@@ -1176,6 +1217,9 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
             raise HTTPException(status_code=400, detail="That image is empty")
         if len(raw) > TUTOR_IMAGE_MAX_BYTES:
             raise HTTPException(status_code=413, detail=TUTOR_IMAGE_TOO_LARGE)
+        total += len(raw)
+        if total > TUTOR_IMAGES_TOTAL_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=TUTOR_IMAGES_TOO_LARGE)
         actual_type = sniff_image_type(raw)
         if actual_type is None:
             raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
