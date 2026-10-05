@@ -320,11 +320,39 @@ class AuthVerificationCacheTests(unittest.TestCase):
         reply.json.return_value = body or {}
         return reply
 
+    @staticmethod
+    def jwt(exp):
+        import base64
+        import json
+
+        def part(value):
+            return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+        return f"Bearer {part({'alg': 'HS256'})}.{part({'sub': 'alex-id', 'exp': exp})}.signature"
+
     def test_valid_tokens_are_verified_once_per_minute(self):
+        token = self.jwt(auth.time.time() + 3600)
         with patch.object(auth.httpx, "get", return_value=self.response(200, {"id": "alex-id"})) as get:
-            self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
-            self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
+            self.assertEqual(auth.authenticated_user(token)["id"], "alex-id")
+            self.assertEqual(auth.authenticated_user(token)["id"], "alex-id")
         self.assertEqual(get.call_count, 1)
+
+    def test_verification_is_never_cached_past_the_token_expiry(self):
+        soon = self.jwt(auth.time.time() + 5)
+        with patch.object(auth.httpx, "get", return_value=self.response(200, {"id": "alex-id"})):
+            auth.authenticated_user(soon)
+        entry = auth._verify_cache[auth._cache_key(soon)]
+        self.assertLessEqual(entry[0] - auth.time.monotonic(), 5.01)
+        self.assertGreater(entry[0] - auth.time.monotonic(), 3)
+        # Already expired, or no readable exp: verified every time, never cached.
+        for token in (self.jwt(auth.time.time() - 1), "Bearer not-a-jwt", self.jwt("tomorrow")):
+            with patch.object(auth.httpx, "get", return_value=self.response(200, {"id": "alex-id"})) as get:
+                auth.authenticated_user(token)
+                auth.authenticated_user(token)
+            self.assertEqual(get.call_count, 2)
+            self.assertFalse(auth.is_verified(token))
+        # The cache bound is the minimum of a minute and exp.
+        far = self.jwt(auth.time.time() + 86_400)
+        self.assertEqual(auth._cache_seconds(far), auth.VERIFY_CACHE_SECONDS)
 
     def test_bad_tokens_are_cached_and_counted(self):
         with patch.object(auth.httpx, "get", return_value=self.response(401)) as get:

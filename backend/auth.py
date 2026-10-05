@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import copy
 import hashlib
+import json
 import os
 import threading
 import time
@@ -11,7 +14,8 @@ from fastapi import HTTPException
 import rate_limit
 
 # Verification results are cached briefly per token, so repeated requests and
-# junk tokens don't each cost a round trip to Supabase.
+# junk tokens don't each cost a round trip to Supabase. A successful result is kept
+# for at most VERIFY_CACHE_SECONDS and never past the token's own `exp`.
 VERIFY_CACHE_SECONDS = 60
 VERIFY_CACHE_MAX = 10_000
 # Failed verifications allowed per network address per minute before answering 429.
@@ -45,7 +49,37 @@ def _cached(key: str, now: float) -> tuple[dict | None, str] | None:
         return copy.deepcopy(user), detail
 
 
-def _remember(key: str, user: dict | None, detail: str, now: float) -> None:
+def token_expiry(authorization: str) -> float | None:
+    """The token's `exp` (Unix seconds) read from its payload, or None if unreadable.
+
+    The signature is not checked here; Supabase already verified the token. This
+    only bounds how long the verification may be reused.
+    """
+    token = authorization.split(' ', 1)[1].strip() if ' ' in authorization else ''
+    parts = token.split('.')
+    if len(parts) != 3 or len(parts[1]) > 8192:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+        expiry = payload.get('exp') if isinstance(payload, dict) else None
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+    if isinstance(expiry, bool) or not isinstance(expiry, (int, float)):
+        return None
+    return float(expiry)
+
+
+def _cache_seconds(authorization: str) -> float:
+    """Reuse a successful verification for at most a minute, and never past the token's exp."""
+    expiry = token_expiry(authorization)
+    if expiry is None:
+        return 0.0
+    return max(0.0, min(VERIFY_CACHE_SECONDS, expiry - time.time()))
+
+
+def _remember(key: str, user: dict | None, detail: str, now: float, seconds: float = VERIFY_CACHE_SECONDS) -> None:
+    if seconds <= 0:
+        return
     with _verify_lock:
         if len(_verify_cache) >= VERIFY_CACHE_MAX:
             for stale in [item for item, entry in _verify_cache.items() if entry[0] <= now]:
@@ -54,7 +88,7 @@ def _remember(key: str, user: dict | None, detail: str, now: float) -> None:
                 # Still full of live entries: drop the oldest half rather than grow without bound.
                 for oldest in sorted(_verify_cache, key=lambda item: _verify_cache[item][0])[: VERIFY_CACHE_MAX // 2]:
                     del _verify_cache[oldest]
-        _verify_cache[key] = (now + VERIFY_CACHE_SECONDS, copy.deepcopy(user), detail)
+        _verify_cache[key] = (now + seconds, copy.deepcopy(user), detail)
 
 
 def is_verified(authorization: str | None) -> bool:
@@ -120,5 +154,5 @@ def authenticated_user(authorization: str | None) -> dict:
     if not user.get('id'):
         _remember(key, None, 'Invalid account', now)
         raise _reject('Invalid account')
-    _remember(key, user, '', now)
+    _remember(key, user, '', now, _cache_seconds(authorization))
     return user
