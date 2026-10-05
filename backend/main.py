@@ -41,10 +41,32 @@ import tasks
 # Refuse to start in production without a durable PostgreSQL database.
 database.validate_database_configuration()
 
+LOCAL_DEV_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+
+def cors_origins() -> list[str]:
+    """Browser origins allowed to call the API. Local dev servers only outside production;
+    in production the frontend is served from the same origin as the API."""
+    return [] if database.is_production() else list(LOCAL_DEV_ORIGINS)
+
+
+def docs_settings() -> dict:
+    """The interactive docs and the OpenAPI schema are for local development only."""
+    if database.is_production():
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {}
+
+
 app = FastAPI(
     title="Bindit API",
     version="1.2.0",
     description="Practice, accounts, profiles, secure progress tracking, personalized quizzes, AI flashcards, and AI tutoring.",
+    **docs_settings(),
 )
 
 social_reads = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bindit-social")
@@ -64,12 +86,7 @@ def gather(*calls):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1083,7 +1100,7 @@ def limit_action(student_id: str, action: str, limit: int, window_minutes: int =
 
 @app.get("/")
 def home():
-    return {"message": "bindet backend is running", "version": app.version, "docs": "/docs"}
+    return {"message": "bindet backend is running", "version": app.version}
 
 
 HEALTH_DB_CACHE_SECONDS = 5.0

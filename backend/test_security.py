@@ -547,5 +547,28 @@ class RequestBodyLimitTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 413)
 
 
+
+class ProductionHardeningTests(unittest.TestCase):
+    def test_localhost_origins_and_docs_are_development_only(self):
+        with patch.dict(os.environ, {"VERCEL": "1"}):
+            self.assertEqual(main.cors_origins(), [])
+            settings = main.docs_settings()
+        self.assertEqual(settings, {"docs_url": None, "redoc_url": None, "openapi_url": None})
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        client = TestClient(FastAPI(**settings))
+        for path in ("/docs", "/redoc", "/openapi.json"):
+            self.assertEqual(client.get(path).status_code, 404)
+        with patch.dict(os.environ, {"APP_ENV": "production"}):
+            self.assertEqual(main.cors_origins(), [])
+        env = {key: value for key, value in os.environ.items() if key not in ("VERCEL", "APP_ENV")}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIn("http://localhost:5173", main.cors_origins())
+            self.assertEqual(main.docs_settings(), {})
+
+    def test_home_does_not_advertise_docs(self):
+        self.assertNotIn("docs", main.home())
+
+
 if __name__ == "__main__":
     unittest.main()
