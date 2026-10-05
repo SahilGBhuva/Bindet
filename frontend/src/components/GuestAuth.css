@@ -207,4 +207,9 @@
   .auth-aside { display: none; }
   .auth-card { justify-content: flex-start; padding-top: 28px; }
   .auth-card__top { margin-bottom: 40px; }
+
+  /* Touch: 16px fields (no iOS zoom on focus) and 40px tall text actions. */
+  .auth-input { height: 46px; font-size: 16px; }
+  .auth-pass button { top: 3px; height: 40px; }
+  .auth-text-btn { min-height: 40px; }
 }
