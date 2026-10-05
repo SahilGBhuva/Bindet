@@ -217,9 +217,31 @@ def ai_session_id(*parts: str) -> str:
     return f"bindit-{hashlib.blake2s(value.encode('utf-8'), digest_size=16).hexdigest()}"
 
 
+def question_scope_is_shared(source_text: str) -> bool:
+    """Questions without the student's notes go to a bank every student draws from."""
+    return not source_text.strip()
+
+
+def neutral_personalization(target_topic: str) -> dict:
+    """What the model is told about the student for a shared question: nothing.
+
+    A banked shared question is served to other students, so it must never depend on
+    (or reveal) one student's weak topics, accuracy or streak.
+    """
+    return {
+        "overall_attempts": 0,
+        "overall_accuracy": None,
+        "current_topic": target_topic,
+        "current_topic_attempts": 0,
+        "current_topic_accuracy": None,
+        "weak_topics": [],
+        "streak": 0,
+    }
+
+
 def question_cache_key(student_id: str, course: str, unit: str, focus: str, difficulty: int, source_text: str) -> str:
-    """Share generic questions, while keeping note-grounded questions private."""
-    owner_scope = student_id if source_text.strip() else "shared"
+    """Share generic questions, while keeping note-grounded (personalized) questions private."""
+    owner_scope = "shared" if question_scope_is_shared(source_text) else student_id
     source_fingerprint = hashlib.blake2s(source_text.encode("utf-8"), digest_size=12).hexdigest() if source_text else "none"
     return ai_session_id(owner_scope, course, unit, focus, str(difficulty), source_fingerprint)
 
@@ -1666,6 +1688,10 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             (note_store.context_for, student_id, course, unit),
         )
         cache_key = question_cache_key(student_id, data.notes.course, data.notes.unit, data.topic, difficulty, source_text)
+        if question_scope_is_shared(source_text):
+            # Shared bank: the model gets no student data. Only the difficulty (part of the
+            # key) adapts to the student.
+            personalization = neutral_personalization(target_topic)
         # A banked question costs no AI call and no AI quota.
         cached = questions.cached_question(cache_key, student_id)
         if cached:

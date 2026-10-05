@@ -67,7 +67,8 @@ class PersonalizedQuizTests(unittest.TestCase):
         self.assertEqual(response.difficulty, 3)
         kwargs = mocked.call_args.kwargs
         self.assertEqual(kwargs['difficulty'], 3)
-        self.assertEqual(kwargs['personalization']['current_topic_accuracy'], 100.0)
+        # Without notes the question goes to the shared bank, so the model gets no student data.
+        self.assertEqual(kwargs['personalization'], main.neutral_personalization('Quadratic Functions'))
 
     def test_struggling_student_gets_easier_question(self):
         student = 'learning-student'
@@ -89,7 +90,23 @@ class PersonalizedQuizTests(unittest.TestCase):
             response = main.generate_question(request, 'Bearer test')
 
         self.assertEqual(response.difficulty, 1)
+        self.assertEqual(mocked.call_args.kwargs['personalization']['weak_topics'], [])
+
+    def test_only_private_note_grounded_questions_are_personalized(self):
+        student = 'notes-student'
+        main.database.update_progress(student, 'Photosynthesis', False, 0)
+        main.database.update_progress(student, 'Photosynthesis', False, 0)
+        request = main.QuestionRequest(topic='mixed', difficulty=2, notes=main.NoteContext(course='Biology', unit='Photosynthesis'))
+        generated = {'question': 'What gas do plants take in?', 'correct_answer': 'Carbon dioxide', 'topic': 'Photosynthesis'}
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': student}), \
+                patch.object(main.note_store, 'context_for', return_value=(['leaf.pdf'], 'Plants take in carbon dioxide.')), \
+                patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked, \
+                patch.object(main.questions, 'save_to_bank') as banked:
+            main.generate_question(request, 'Bearer test')
         self.assertIn('Photosynthesis', mocked.call_args.kwargs['personalization']['weak_topics'])
+        key = banked.call_args.args[0]
+        self.assertEqual(key, main.question_cache_key(student, 'Biology', 'Photosynthesis', 'mixed', 1, 'Plants take in carbon dioxide.'))
+        self.assertNotEqual(key, main.question_cache_key('someone-else', 'Biology', 'Photosynthesis', 'mixed', 1, 'Plants take in carbon dioxide.'))
 
     def test_school_quiz_does_not_fall_back_to_unrelated_math_when_ai_fails(self):
         request = main.QuestionRequest(
