@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,6 +39,19 @@ app = FastAPI(
 )
 
 social_reads = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bindit-social")
+# Runs the independent database steps that precede an AI call side by side, so a
+# request pays for the slowest of them instead of their sum.
+ai_prep = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bindit-ai-prep")
+
+
+def gather(*calls):
+    """Run (function, *args) calls concurrently and return their results in order.
+
+    The first failure (in call order) is re-raised once every call has been
+    started, so a failed limit check still raises the same error it always did.
+    """
+    futures = [ai_prep.submit(function, *args) for function, *args in calls]
+    return [future.result() for future in futures]
 
 app.add_middleware(
     CORSMiddleware,
@@ -906,8 +919,17 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
     return parts
 
 
+# Streamed replies must reach the browser token by token: no caching, no proxy
+# buffering (nginx-style X-Accel-Buffering) and no transforms such as compression.
+SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+
+
 def sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, default=str, ensure_ascii=False)}\n\n"
+
+
+TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
+TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 
 
 @app.post("/api/tutor/messages")
@@ -917,21 +939,33 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     content = data.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
-    try:
-        database.check_social_rate_limit(owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
-    except ValueError as error:
-        raise HTTPException(status_code=429, detail="You’ve sent a lot of messages this hour. Take a short break and try again soon.", headers={"Retry-After": "300"}) from error
     image_parts = tutor_image_parts(data.images)
+    ai_tutor.warm_connection()  # the TLS/HTTP2 setup overlaps the database work below
+
+    # Independent preparation runs side by side: the hourly limit, the conversation
+    # with its recent turns, and the student's notes when the request names them.
+    requested_course, requested_unit = data.course.strip(), data.unit.strip()
+    limit = ai_prep.submit(database.check_social_rate_limit, owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
+    existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id) if data.conversation_id else None
+    # Only this student's own notes are ever used for grounding.
+    early_context = ai_prep.submit(note_store.context_for, owner, requested_course, requested_unit, 12_000) if requested_course and requested_unit else None
     try:
-        conversation = tutor.get_conversation(owner, data.conversation_id) if data.conversation_id else tutor.start_conversation(owner, content, data.course.strip(), data.unit.strip())
+        limit.result()
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
+    try:
+        conversation, history = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
-    course = data.course.strip() or conversation["course"]
-    unit = data.unit.strip() or conversation["unit"]
-    history = tutor.history_for_model(owner, conversation["id"])
-    user_message = tutor.add_message(owner, conversation["id"], "user", content, [image.name for image in data.images])
-    # Only this student's own notes are ever used for grounding.
-    labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+    course = requested_course or conversation["course"]
+    unit = requested_unit or conversation["unit"]
+    if early_context:
+        labels, source_text = early_context.result()
+    else:
+        labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+    # History was read above, so saving the new turn now cannot duplicate it. The write
+    # overlaps the model's time to first token instead of delaying the request.
+    saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
     route = ai_tutor.tutor_route(content, bool(image_parts))
     model_messages = [
         {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
@@ -942,27 +976,36 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     def events():
         chunks: list[str] = []
         saved = False
-        yield sse("meta", {"conversation": conversation, "user_message": user_message, "tier": route["tier"], "grounded_in": labels[:10]})
+        user_sent = False
+        yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
         try:
             for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
+                if not user_sent:
+                    user_sent = True
+                    yield sse("user", {"user_message": saving.result()})
                 chunks.append(chunk)
                 yield sse("delta", {"text": chunk})
             reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
             saved = True
             yield sse("done", {"message": reply})
         except ai_tutor.AITutorError:
+            if not user_sent:
+                user_sent = True
+                yield sse("user", {"user_message": saving.result()})
             if chunks:
                 reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks) + "\n\n(The reply was cut off.)", model_tier=route["tier"])
                 saved = True
                 yield sse("done", {"message": reply, "partial": True})
             else:
-                yield sse("error", {"message": "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."})
+                yield sse("error", {"message": TUTOR_UNAVAILABLE, "retry": True})
         finally:
-            # The student stopped the reply or left: keep what was already written.
+            # The student stopped the reply or left: keep what was already written,
+            # after the question it answers.
             if chunks and not saved:
+                saving.result()
                 tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+    return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.get("/api/friends/search")
@@ -1259,37 +1302,42 @@ def group_analytics_route(group_id: str, authorization: Annotated[str | None, He
         raise social_error(error) from error
 
 
-@app.post("/api/generate-question", response_model=QuestionResponse)
-def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None):
-    has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
-    if has_school_context:
-        student_id = auth.authenticated_user(authorization)["id"]
-        try:
-            database.check_social_rate_limit(student_id, "question_request", 80, 1440)
-        except ValueError as error:
-            raise social_error(error) from error
-    else:
-        student_id = verified_student_id(data.student_id, authorization)
-        if authorization:
-            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
-        else:
-            # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
-            limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
+QUIZ_UNAVAILABLE = "AI quiz generation is temporarily unavailable. Try again in a moment."
+FLASHCARDS_UNAVAILABLE = "AI flashcard generation is temporarily unavailable. Try again in a moment."
 
+
+def _rate_limited(student_id: str, action: str, limit: int, window_minutes: int) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/generate-question", response_model=QuestionResponse)
+def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None, background: BackgroundTasks = None):  # type: ignore[assignment]
+    has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
     if has_school_context and data.notes:
-        target_topic = data.notes.unit.strip() or data.notes.course.strip()
-        difficulty, personalization = quiz_personalization(student_id, data.difficulty, target_topic)
-        source_labels, source_text = note_store.context_for(student_id, data.notes.course.strip(), data.notes.unit.strip())
+        student_id = auth.authenticated_user(authorization)["id"]
+        ai_tutor.warm_connection()
+        course, unit = data.notes.course.strip(), data.notes.unit.strip()
+        target_topic = unit or course
+        # The daily limit, the student's record and their notes are independent reads; fetch them together.
+        _, (difficulty, personalization), (source_labels, source_text) = gather(
+            (_rate_limited, student_id, "question_request", 80, 1440),
+            (quiz_personalization, student_id, data.difficulty, target_topic),
+            (note_store.context_for, student_id, course, unit),
+        )
         cache_key = question_cache_key(student_id, data.notes.course, data.notes.unit, data.topic, difficulty, source_text)
+        # A banked question costs no AI call and no AI quota.
         cached = questions.cached_question(cache_key, student_id)
         if cached:
             ai_question = cached
         else:
+            _rate_limited(student_id, "ai_question", 40, 1440)
             try:
-                database.check_social_rate_limit(student_id, "ai_question", 40, 1440)
                 ai_question = ai_tutor.generate_question(
-                    course=data.notes.course.strip(),
-                    unit=data.notes.unit.strip(),
+                    course=course,
+                    unit=unit,
                     source_labels=source_labels,
                     focus=data.topic,
                     difficulty=difficulty,
@@ -1298,12 +1346,16 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                     session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
                 )
             except ai_tutor.AITutorError as exc:
-                raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
+                raise HTTPException(status_code=503, detail=QUIZ_UNAVAILABLE) from exc
         question_text, correct_answer, topic = questions.clip_question(
             ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
         )
         if not cached:
-            questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
+            # Banking the new question for reuse does not need to delay this response.
+            if background is not None:
+                background.add_task(questions.save_to_bank, cache_key, question_text, correct_answer, topic, difficulty)
+            else:
+                questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
         generated = GeneratedQuestion(
             question=question_text,
             correct_answer=correct_answer,
@@ -1311,6 +1363,12 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             difficulty=difficulty,
         )
     else:
+        student_id = verified_student_id(data.student_id, authorization)
+        if authorization:
+            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
+        else:
+            # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
+            limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
         generated = generate_math_question(data.topic, data.difficulty)
 
     question_id = questions.save_question(
@@ -1331,18 +1389,19 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)
 def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | None, Header()] = None):
     student_id = auth.authenticated_user(authorization)["id"]
-    try:
-        database.check_social_rate_limit(student_id, "ai_flashcards", 20, 1440)
-    except ValueError as error:
-        raise social_error(error) from error
     course = data.course.strip()
     unit = data.unit.strip()
     if not course and not unit:
         raise HTTPException(status_code=400, detail="Choose a course or unit before generating flashcards")
+    ai_tutor.warm_connection()
 
     target_topic = unit or course
-    _, personalization = quiz_personalization(student_id, 2, target_topic)
-    source_labels, source_text = note_store.context_for(student_id, course, unit)
+    _, (_, personalization), (source_labels, source_text) = gather(
+        (_rate_limited, student_id, "ai_flashcards", 20, 1440),
+        (quiz_personalization, student_id, 2, target_topic),
+        # The model only ever sees the first 12,000 characters, so read no more than that.
+        (note_store.context_for, student_id, course, unit, 12_000),
+    )
     try:
         cards = ai_tutor.generate_flashcards(
             course=course,
@@ -1354,7 +1413,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             session_id=ai_session_id(student_id, course, unit, "flashcards"),
         )
     except ai_tutor.AITutorError as exc:
-        raise HTTPException(status_code=503, detail="AI flashcard generation is temporarily unavailable. Try again in a moment.") from exc
+        raise HTTPException(status_code=503, detail=FLASHCARDS_UNAVAILABLE) from exc
 
     personalized = bool(personalization.get("overall_attempts", 0))
     return FlashcardResponse(
