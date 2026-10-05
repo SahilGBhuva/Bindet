@@ -80,6 +80,74 @@ async def measure_request_time(request, call_next):
     response.headers["X-Bindit-Response-Ms"] = f'{elapsed_ms:.1f}'
     return response
 
+# Whole-request cap. Vercel now accepts much larger bodies, but nothing here needs
+# more than a 10 MB note upload or three tutor images (4 MB each before base64).
+MAX_REQUEST_BYTES = 12 * 1024 * 1024
+
+
+class RequestBodyLimit:
+    """Pure ASGI middleware: refuse oversized bodies with 413 before any route uses them.
+
+    Content-Length is checked up front. Bodies without one (chunked) are counted as
+    they stream in; once over the cap the app sees the body end early, and whatever
+    it answers is replaced with the 413, so a missing header cannot slip past.
+    """
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES):
+        self.app = app
+        self.max_bytes = max_bytes
+
+    def _response(self, status: int, detail: str) -> JSONResponse:
+        return JSONResponse(status_code=status, content={"detail": detail})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        too_large = f"That request is too large. Keep it under {self.max_bytes // (1024 * 1024)} MB."
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None:
+            try:
+                length = int(declared)
+            except ValueError:
+                await self._response(400, "Invalid Content-Length header")(scope, receive, send)
+                return
+            if length > self.max_bytes:
+                await self._response(413, too_large)(scope, receive, send)
+                return
+        received = 0
+        overflowed = False
+        replaced = False
+
+        async def counted_receive():
+            nonlocal received, overflowed
+            if overflowed:
+                return {"type": "http.disconnect"}
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    overflowed = True
+                    return {"type": "http.request", "body": b"", "more_body": False}
+            return message
+
+        async def guarded_send(message):
+            nonlocal replaced
+            if not overflowed:
+                await send(message)
+                return
+            if not replaced and message["type"] == "http.response.start":
+                replaced = True
+                response = self._response(413, too_large)
+                await send({"type": "http.response.start", "status": 413, "headers": response.raw_headers})
+                await send({"type": "http.response.body", "body": response.body})
+
+        await self.app(scope, counted_receive, guarded_send)
+
+
+# Added last so it is the outermost middleware and runs before rate limiting or auth.
+app.add_middleware(RequestBodyLimit)
+
 Topic = Literal["addition", "subtraction", "multiplication", "division", "mixed"]
 
 # Unauthenticated callers choose their own ID, so it is stored under this prefix.
@@ -173,13 +241,16 @@ NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
 GUEST_QUESTIONS_PER_DAY = 300
 TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
-TUTOR_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+TUTOR_IMAGE_MAX_BYTES = 4 * 1024 * 1024
+TUTOR_IMAGE_TOO_LARGE = "Images must be 4 MB or smaller"
 
 
 class TutorImage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(default="image", max_length=120)
-    data_url: str = Field(min_length=20, max_length=7_200_000)
+    # 4 MB of image data is about 5.6 million base64 characters; tutor_image_parts
+    # checks the exact decoded size, so this only stops absurd payloads early.
+    data_url: str = Field(min_length=20, max_length=5_600_000)
 
 
 class TutorMessageRequest(BaseModel):
@@ -889,14 +960,30 @@ def delete_tutor_conversation(conversation_id: str, authorization: Annotated[str
         raise HTTPException(status_code=404, detail="Conversation not found") from error
 
 
+def sniff_image_type(raw: bytes) -> str | None:
+    """Identify an image by its magic bytes; the declared data URL type is never trusted."""
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
-    """Validate data URLs (type, size, real base64) before anything is sent to a model."""
+    """Validate data URLs (type, size, real base64, magic bytes) before anything is sent to a model."""
     parts = []
     for image in images:
         header, _, encoded = image.data_url.partition(",")
         content_type = header.removeprefix("data:").removesuffix(";base64")
         if not header.startswith("data:") or not header.endswith(";base64") or content_type not in TUTOR_IMAGE_TYPES:
             raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
+        # Cheap length check before decoding: 4 base64 characters carry 3 bytes.
+        if len(encoded) > (TUTOR_IMAGE_MAX_BYTES + 2) // 3 * 4 + 4:
+            raise HTTPException(status_code=413, detail=TUTOR_IMAGE_TOO_LARGE)
         try:
             raw = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
@@ -904,8 +991,13 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
         if not raw:
             raise HTTPException(status_code=400, detail="That image is empty")
         if len(raw) > TUTOR_IMAGE_MAX_BYTES:
-            raise HTTPException(status_code=413, detail="Images must be 5 MB or smaller")
-        parts.append({"type": "image_url", "image_url": {"url": image.data_url}})
+            raise HTTPException(status_code=413, detail=TUTOR_IMAGE_TOO_LARGE)
+        actual_type = sniff_image_type(raw)
+        if actual_type is None:
+            raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
+        # A mislabelled but genuine image is relabelled with its real type.
+        data_url = image.data_url if actual_type == content_type else f"data:{actual_type};base64,{encoded}"
+        parts.append({"type": "image_url", "image_url": {"url": data_url}})
     return parts
 
 

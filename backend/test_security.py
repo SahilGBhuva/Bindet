@@ -344,5 +344,82 @@ class AuthVerificationCacheTests(unittest.TestCase):
             self.assertEqual(auth.authenticated_user("Bearer good")["id"], "alex-id")
 
 
+class TutorImageValidationTests(unittest.TestCase):
+    @staticmethod
+    def data_url(content_type, raw):
+        import base64
+        return f"data:{content_type};base64," + base64.b64encode(raw).decode()
+
+    def parts(self, url):
+        return main.tutor_image_parts([main.TutorImage(data_url=url)])
+
+    def test_real_images_pass_and_are_relabelled_by_magic_bytes(self):
+        samples = {
+            "image/png": b"\x89PNG\r\n\x1a\n" + b"0" * 32,
+            "image/jpeg": b"\xff\xd8\xff\xe0" + b"0" * 32,
+            "image/gif": b"GIF89a" + b"0" * 32,
+            "image/webp": b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"0" * 32,
+        }
+        for content_type, raw in samples.items():
+            self.assertEqual(self.parts(self.data_url(content_type, raw))[0]["image_url"]["url"][:len(content_type) + 5],
+                             f"data:{content_type}")
+        relabelled = self.parts(self.data_url("image/png", samples["image/gif"]))
+        self.assertTrue(relabelled[0]["image_url"]["url"].startswith("data:image/gif;base64,"))
+
+    def test_disguised_files_are_refused(self):
+        for raw in (b"<svg onload=alert(1)>", b"%PDF-1.7 not an image", b"<html><script>x</script>"):
+            with self.assertRaises(main.HTTPException) as caught:
+                self.parts(self.data_url("image/png", raw))
+            self.assertEqual(caught.exception.status_code, 415)
+        with self.assertRaises(main.HTTPException) as caught:
+            self.parts(self.data_url("image/svg+xml", b"<svg/>"))
+        self.assertEqual(caught.exception.status_code, 415)
+
+    def test_images_over_four_megabytes_are_refused(self):
+        self.assertEqual(main.TUTOR_IMAGE_MAX_BYTES, 4 * 1024 * 1024)
+        at_limit = self.data_url("image/png", b"\x89PNG\r\n\x1a\n" + b"0" * (main.TUTOR_IMAGE_MAX_BYTES - 8))
+        self.assertEqual(len(self.parts(at_limit)), 1)
+        over = self.data_url("image/png", b"\x89PNG\r\n\x1a\n" + b"0" * (main.TUTOR_IMAGE_MAX_BYTES - 7))
+        with self.assertRaises(main.HTTPException) as caught:
+            self.parts(over)
+        self.assertEqual(caught.exception.status_code, 413)
+
+
+class RequestBodyLimitTests(unittest.TestCase):
+    def small_app(self):
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
+        async def echo(request):
+            return PlainTextResponse(str(len(await request.body())))
+        # Same position as in main.app: inside Starlette's error middleware, outside the routes.
+        return Starlette(routes=[Route("/echo", echo, methods=["POST"])],
+                         middleware=[Middleware(main.RequestBodyLimit, max_bytes=100)])
+
+    def test_declared_length_over_the_cap_is_refused(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(self.small_app())
+        self.assertEqual(client.post("/echo", content=b"x" * 100).text, "100")
+        self.assertEqual(client.post("/echo", content=b"x" * 101).status_code, 413)
+
+    def test_streamed_body_without_length_is_counted(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(self.small_app())
+
+        def chunks():
+            for _ in range(5):
+                yield b"x" * 40
+        response = client.post("/echo", content=chunks())
+        self.assertEqual(response.status_code, 413)
+
+    def test_main_app_refuses_bodies_over_twelve_megabytes(self):
+        from fastapi.testclient import TestClient
+        response = TestClient(main.app).post("/api/tasks", content=b"x" * (main.MAX_REQUEST_BYTES + 1),
+                                             headers={"Content-Type": "application/json"})
+        self.assertEqual(response.status_code, 413)
+
+
 if __name__ == "__main__":
     unittest.main()
