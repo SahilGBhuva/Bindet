@@ -499,9 +499,23 @@ export function Goals({ session }: { session: AuthSession | null }) {
           </p>
 
           <div className="tasks-tabbar">
-            <div className="tasks-tabs" role="tablist" aria-label="Task views">
+            <div
+              className="tasks-tabs"
+              role="tablist"
+              aria-label="Task views"
+              onKeyDown={(event) => {
+                // Arrow keys, Home and End move between the tabs (one tab stop for the whole list).
+                const at = TABS.findIndex((item) => item.id === tab)
+                const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: TABS.length - 1 }[event.key]
+                if (to === undefined) return
+                event.preventDefault()
+                const next = TABS[(to + TABS.length) % TABS.length]
+                setTab(next.id)
+                document.getElementById(`tasks-tab-${next.id}`)?.focus()
+              }}
+            >
               {TABS.map((item) => (
-                <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="tasks-tab" aria-selected={tab === item.id} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
+                <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="tasks-tab" aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
                   <Icon name={item.icon} />{item.label}
                 </button>
               ))}
