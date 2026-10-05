@@ -547,8 +547,10 @@ export function streamTutorMessage(
   let frame = 0
   let idleTimer = 0
 
+  let fallback = 0
   const flush = () => {
     if (frame) cancelAnimationFrame(frame)
+    window.clearTimeout(fallback)
     frame = 0
     if (!pending) return
     const text = pending
@@ -575,7 +577,11 @@ export function streamTutorMessage(
     else if (name === 'user') handlers.onSaved?.(payload.user_message)
     else if (name === 'delta') {
       pending += payload.text
-      if (!frame) frame = requestAnimationFrame(flush)
+      if (!frame) {
+        frame = requestAnimationFrame(flush)
+        // Frames pause in background tabs; text still lands, just less often.
+        fallback = window.setTimeout(flush, 120)
+      }
     } else if (name === 'done') {
       flush()
       finished = true
@@ -620,6 +626,7 @@ export function streamTutorMessage(
     finished = true
     window.clearTimeout(idleTimer)
     if (frame) cancelAnimationFrame(frame)
+    window.clearTimeout(fallback)
     xhr.abort()
   }
 }
