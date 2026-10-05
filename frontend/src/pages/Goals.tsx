@@ -439,6 +439,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       ? <TaskPanel
           key={selected.id}
           task={selected}
+          me={me}
           detail={details[selected.id]}
           groups={groups}
           courses={courses}
@@ -837,8 +838,8 @@ function AssigneePicker({ members, value, onChange, labelledBy }: { members: Stu
 
 /* ---------- details card ---------- */
 
-function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExpand, onPatch, onDelete, onDetail, onCounts, onError }: {
-  task: Task; detail?: TaskDetail; groups: StudyGroup[]; courses: string[]; today: string; token: string
+function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, onExpand, onPatch, onDelete, onDetail, onCounts, onError }: {
+  task: Task; detail?: TaskDetail; groups: StudyGroup[]; courses: string[]; today: string; token: string; me: string
   onClose: () => void; onExpand: () => void; onPatch: (changes: TaskInput) => void; onDelete: () => void
   onDetail: (change: (detail: TaskDetail) => TaskDetail) => void
   onCounts: (change: Counts) => void
@@ -1013,8 +1014,16 @@ function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExp
                 </label>
                 <label className="ui-field"><span>Group</span>
                   <select className="ui-select" value={task.group_id ?? ''} disabled={!manageable || pending}
-                    onChange={(event) => onPatch({ group_id: event.target.value || null, assignee_ids: [task.owner.student_id] })}>
-                    <option value="">Personal</option>
+                    onChange={(event) => {
+                      const next = event.target.value || null
+                      // Moving between groups removes other people's comments and links (the server enforces this).
+                      if (task.group_id && next !== task.group_id && !window.confirm('Move this task? Comments and links from other people will be removed.')) {
+                        event.target.value = task.group_id
+                        return
+                      }
+                      onPatch({ group_id: next, assignee_ids: [task.owner.student_id] })
+                    }}>
+                    {!task.group_id || task.owner.student_id === me ? <option value="">Personal</option> : null}
                     {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </label>
