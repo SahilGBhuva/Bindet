@@ -13,7 +13,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Path as PathParam
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -248,6 +249,12 @@ def question_cache_key(student_id: str, course: str, unit: str, focus: str, diff
     return ai_session_id(owner_scope, course, unit, focus, str(difficulty), source_fingerprint)
 
 
+# Database row IDs (32-bit integer columns). Anything outside this range can't exist,
+# so it is refused before it reaches a query.
+MAX_DB_ID = 2**31 - 1
+DbId = Annotated[int, PathParam(ge=1, le=MAX_DB_ID)]
+
+
 class AnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question_id: str = Field(min_length=16, max_length=64)
@@ -377,7 +384,7 @@ class TaskCreate(BaseModel):
     due_time: str | None = Field(default=None, max_length=5)
     group_id: str | None = Field(default=None, max_length=32)
     assignee_ids: list[str] | None = Field(default=None, max_length=10)
-    milestone_id: int | None = None
+    milestone_id: int | None = Field(default=None, ge=0, le=MAX_DB_ID)
     kind: Literal["task", "event"] = "task"
     location: str = Field(default="", max_length=160)
 
@@ -395,7 +402,7 @@ class TaskUpdate(BaseModel):
     due_time: str | None = Field(default=None, max_length=5)
     assignee_ids: list[str] | None = Field(default=None, max_length=10)
     group_id: str | None = Field(default=None, max_length=32)
-    milestone_id: int | None = None
+    milestone_id: int | None = Field(default=None, ge=0, le=MAX_DB_ID)
     sort_order: int | None = None
     kind: Literal["task", "event"] | None = None
     location: str | None = Field(default=None, max_length=160)
@@ -499,12 +506,21 @@ class ProgressResponse(BaseModel):
     recent_xp: list[DailyXp] = Field(default_factory=list)
 
 
+AVATAR_PATH_PATTERN = r"^$|^[A-Za-z0-9-]{1,100}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:jpg|png|webp|gif)$"
+
+
+def avatar_path_belongs_to(student_id: str, avatar_path: str | None) -> bool:
+    return not avatar_path or avatar_path.split("/", 1)[0] == student_id
+
+
 class AccountProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[a-z0-9_]{3,24}$")
     display_name: str = Field(min_length=1, max_length=40)
     guest_id: str | None = Field(default=None, min_length=1, max_length=100)
-    avatar_path: str | None = Field(default=None, max_length=500)
+    # Empty, or a path in the student's own storage folder: "<student_id>/<uuid>.<ext>"
+    # (the shape storage.upload_private_image creates). The owner part is checked in the route.
+    avatar_path: str | None = Field(default=None, max_length=200, pattern=AVATAR_PATH_PATTERN)
     daily_goal: int | None = None
 
 
@@ -538,11 +554,13 @@ class AuthConfigResponse(BaseModel):
 
 
 class DailyLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     # Ignored: the student is always the authenticated caller. Accepted for older clients.
     student_id: str | None = Field(default=None, max_length=100)
 
 
 class FriendRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     friend_code: str = Field(min_length=4, max_length=12)
 
 
@@ -551,17 +569,20 @@ class FriendRequestDecision(BaseModel):
 
 
 class FriendQuestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     friend_id: str = Field(min_length=1, max_length=100)
     target_xp: int = Field(default=100, ge=50, le=1000)
 
 
 class StudyGroupCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=2, max_length=48)
     description: str = Field(default="", max_length=160)
     weekly_goal_xp: int = Field(default=500, ge=100, le=10000)
 
 
 class StudyGroupJoin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     invite_code: str = Field(min_length=6, max_length=10)
 
 
@@ -571,6 +592,7 @@ class SocialPrivacyUpdate(BaseModel):
 
 
 class SocialReportCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     user_id: str = Field(min_length=1, max_length=100)
     reason: str = Field(min_length=2, max_length=40)
     details: str = Field(default="", max_length=1000)
@@ -1224,7 +1246,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
 
 
 @app.get("/api/notes", response_model=list[NoteResponse])
-def get_notes(course: str, unit: str, authorization: Annotated[str | None, Header()] = None):
+def get_notes(course: Annotated[str, Query(max_length=120)], unit: Annotated[str, Query(max_length=160)], authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     return [note_response(row) for row in note_store.list_notes(user["id"], course.strip(), unit.strip())]
 
@@ -1334,7 +1356,7 @@ def tutor_conversations(authorization: Annotated[str | None, Header()] = None):
 
 
 @app.get("/api/tutor/conversations/{conversation_id}/messages")
-def tutor_messages(conversation_id: str, before: int | None = None, authorization: Annotated[str | None, Header()] = None):
+def tutor_messages(conversation_id: str, before: Annotated[int | None, Query(ge=1, le=MAX_DB_ID)] = None, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         return tutor.list_messages(user["id"], conversation_id, before_id=before)
@@ -1549,7 +1571,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
 
 
 @app.get("/api/friends/search")
-def search_friends(q: str = "", authorization: Annotated[str | None, Header()] = None):
+def search_friends(q: Annotated[str, Query(max_length=60)] = "", authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "search", 60)
@@ -1559,7 +1581,7 @@ def search_friends(q: str = "", authorization: Annotated[str | None, Header()] =
 
 
 @app.post("/api/social/activity/{event_id}/reaction")
-def react_to_social_activity(event_id: int, authorization: Annotated[str | None, Header()] = None):
+def react_to_social_activity(event_id: DbId, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "reaction", 80)
@@ -1621,7 +1643,7 @@ def create_friend_request(data: FriendRequestCreate, authorization: Annotated[st
 
 
 @app.post("/api/friends/requests/{request_id}")
-def decide_friend_request(request_id: int, data: FriendRequestDecision, authorization: Annotated[str | None, Header()] = None):
+def decide_friend_request(request_id: DbId, data: FriendRequestDecision, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "friend_decision", 40)
@@ -1655,6 +1677,8 @@ def start_friend_quest(data: FriendQuestCreate, authorization: Annotated[str | N
 @app.put("/api/account/profile", response_model=ProfileResponse)
 def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
+    if not avatar_path_belongs_to(user["id"], data.avatar_path):
+        raise HTTPException(status_code=400, detail="Choose an image you uploaded yourself as your avatar")
     limit_action(user["id"], "profile_update", 30)
     try:
         profile = database.onboard_account(
@@ -1738,7 +1762,7 @@ def add_checklist_item_route(task_id: str, data: ChecklistItemCreate, authorizat
 
 
 @app.patch("/api/tasks/{task_id}/checklist/{item_id}")
-def update_checklist_item_route(task_id: str, item_id: int, data: ChecklistItemUpdate, authorization: Annotated[str | None, Header()] = None):
+def update_checklist_item_route(task_id: str, item_id: DbId, data: ChecklistItemUpdate, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
@@ -1748,7 +1772,7 @@ def update_checklist_item_route(task_id: str, item_id: int, data: ChecklistItemU
 
 
 @app.delete("/api/tasks/{task_id}/checklist/{item_id}")
-def delete_checklist_item_route(task_id: str, item_id: int, authorization: Annotated[str | None, Header()] = None):
+def delete_checklist_item_route(task_id: str, item_id: DbId, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
@@ -1768,7 +1792,7 @@ def add_task_comment_route(task_id: str, data: TaskCommentCreate, authorization:
 
 
 @app.delete("/api/tasks/{task_id}/comments/{comment_id}")
-def delete_task_comment_route(task_id: str, comment_id: int, authorization: Annotated[str | None, Header()] = None):
+def delete_task_comment_route(task_id: str, comment_id: DbId, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:
@@ -1790,7 +1814,7 @@ def add_task_attachment_route(task_id: str, data: TaskAttachmentCreate, authoriz
 
 
 @app.delete("/api/tasks/{task_id}/attachments/{attachment_id}")
-def delete_task_attachment_route(task_id: str, attachment_id: int, authorization: Annotated[str | None, Header()] = None):
+def delete_task_attachment_route(task_id: str, attachment_id: DbId, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:
@@ -1819,7 +1843,7 @@ def create_milestone_route(group_id: str, data: MilestoneCreate, authorization: 
 
 
 @app.delete("/api/study-groups/{group_id}/milestones/{milestone_id}")
-def delete_milestone_route(group_id: str, milestone_id: int, authorization: Annotated[str | None, Header()] = None):
+def delete_milestone_route(group_id: str, milestone_id: DbId, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     limit_action(user["id"], "task_write", TASK_WRITE_LIMIT)
     try:

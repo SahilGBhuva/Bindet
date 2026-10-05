@@ -102,6 +102,16 @@ class RequestBoundsTests(unittest.TestCase):
             (main.NoteContext, {"course": "Biology", "unit": "Cells", "extra": 1}),
             (main.FlashcardRequest, {"course": "Biology", "unit": "Cells", "extra": 1}),
             (main.AccountProfileUpdate, {"username": "alex", "display_name": "Alex", "extra": 1}),
+            (main.FriendRequestCreate, {"friend_code": "ABCD1234", "extra": 1}),
+            (main.FriendQuestCreate, {"friend_id": "f", "target_xp": 100, "extra": 1}),
+            (main.StudyGroupCreate, {"name": "Bio", "extra": 1}),
+            (main.StudyGroupJoin, {"invite_code": "ABCDEFGH", "extra": 1}),
+            (main.SocialReportCreate, {"user_id": "u", "reason": "spam", "extra": 1}),
+            (main.DailyLoginRequest, {"student_id": "s", "extra": 1}),
+            (main.TaskCreate, {"title": "t", "milestone_id": 2**31}),
+            (main.TaskUpdate, {"milestone_id": -1}),
+            (main.AccountProfileUpdate, {"username": "alex", "display_name": "Alex", "avatar_path": "../etc/passwd"}),
+            (main.AccountProfileUpdate, {"username": "alex", "display_name": "Alex", "avatar_path": "https://evil.example/x.png"}),
         ):
             with self.subTest(model=model.__name__), self.assertRaises(ValidationError):
                 model(**payload)
@@ -112,6 +122,53 @@ class RequestBoundsTests(unittest.TestCase):
         })
         main.FlashcardRequest(student_id="guest-abc", course="Biology", unit="Cells", files=[], count=10)
         main.AccountProfileUpdate(username="alex", display_name="Alex", daily_goal=20)
+        # Exactly what lib/api.ts sends for these routes.
+        main.DailyLoginRequest(student_id="0b7c2c9e-0000-4000-8000-000000000000")
+        main.FriendRequestCreate(friend_code="ABCD1234")
+        main.FriendQuestCreate(friend_id="f", target_xp=100)
+        main.StudyGroupCreate(name="Bio crew", description="", weekly_goal_xp=500)
+        main.StudyGroupJoin(invite_code="ABCDEFGH")
+        main.SocialReportCreate(user_id="u", reason="inappropriate_behavior", details="")
+        main.TaskUpdate(milestone_id=None)
+        main.TaskUpdate(milestone_id=0)
+
+    def test_query_and_path_parameters_are_bounded(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(main.app)
+        headers = {"Authorization": "Bearer test"}
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "bounds-id"}):
+            cases = [
+                ("get", "/api/notes?course=" + "c" * 121 + "&unit=u"),
+                ("get", "/api/notes?course=c&unit=" + "u" * 161),
+                ("get", "/api/friends/search?q=" + "q" * 61),
+                ("get", "/api/tutor/conversations/abc/messages?before=0"),
+                ("get", f"/api/tutor/conversations/abc/messages?before={2**31}"),
+                ("post", f"/api/social/activity/{2**31}/reaction"),
+                ("post", "/api/social/activity/0/reaction"),
+                ("delete", f"/api/tasks/t/comments/{2**63}"),
+                ("delete", "/api/tasks/t/attachments/-1"),
+                ("delete", f"/api/tasks/t/checklist/{2**31}"),
+                ("delete", f"/api/study-groups/g/milestones/{2**31}"),
+            ]
+            for method, url in cases:
+                with self.subTest(url=url[:80]):
+                    self.assertEqual(getattr(client, method)(url, headers=headers).status_code, 422)
+            response = client.post(f"/api/friends/requests/{2**31}", json={"accept": True}, headers=headers)
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(client.get("/api/friends/search?q=" + "q" * 60, headers=headers).status_code, 200)
+
+    def test_avatar_path_must_be_in_the_students_own_folder(self):
+        database.reset_db()
+        mine = "alex-id/0b7c2c9e-1111-4000-8000-000000000000.png"
+        theirs = "sam-id/0b7c2c9e-1111-4000-8000-000000000000.png"
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+            saved = main.update_account_profile(main.AccountProfileUpdate(username="alex", display_name="Alex", avatar_path=mine), "Bearer t")
+            self.assertEqual(saved["avatar_path"], mine)
+            with self.assertRaises(main.HTTPException) as caught:
+                main.update_account_profile(main.AccountProfileUpdate(username="alex", display_name="Alex", avatar_path=theirs), "Bearer t")
+            self.assertEqual(caught.exception.status_code, 400)
+            cleared = main.update_account_profile(main.AccountProfileUpdate(username="alex", display_name="Alex", avatar_path=""), "Bearer t")
+            self.assertEqual(cleared["avatar_path"], "")
 
 
 class SocialQueryTests(unittest.TestCase):
