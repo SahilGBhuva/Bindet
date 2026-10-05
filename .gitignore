@@ -14,11 +14,17 @@ frontend/dist-ssr
 *.local
 
 # Python backend
-backend/venv/
+# No trailing slash, so a backend/venv symlink is ignored too.
+backend/venv
 .venv/
+.pytest_cache/
+*.sqlite*
 __pycache__/
 *.py[cod]
 backend/*.db
+
+# Vercel CLI project link
+.vercel/
 
 # Secrets
 .env

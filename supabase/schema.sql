@@ -1,5 +1,6 @@
 -- bindit schema for Supabase Postgres.
--- Apply supabase/migrations in order for existing databases.
+-- Reference only: the backend creates these tables on first start, then
+-- supabase/migrations are applied in filename order (see supabase/README.md).
 
 create table if not exists student_progress (
   student_id text primary key,
@@ -75,9 +76,11 @@ create table if not exists uploaded_images (
   created_at timestamptz not null default timezone('utc', now())
 );
 
+-- Same column types as backend/note_store.py. student_id holds a Supabase user
+-- id or a guest id, so it is not a foreign key to auth.users.
 create table if not exists study_notes (
-  id uuid primary key,
-  student_id uuid not null references auth.users(id) on delete cascade,
+  id varchar(36) primary key,
+  student_id varchar(100) not null,
   course varchar(120) not null,
   unit varchar(160) not null,
   file_name varchar(255) not null,
