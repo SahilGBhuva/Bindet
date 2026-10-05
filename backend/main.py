@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import random
 import re
+import threading
 import time
 import unicodedata
 import hashlib
@@ -313,6 +315,19 @@ class QuestionResponse(BaseModel):
 
 
 TUTOR_HOURLY_LIMIT = 60
+TUTOR_DAILY_LIMIT = 200
+# Replies routed to OPENROUTER_TUTOR_STRONG_MODEL per account per day; after that the
+# normal model answers hard questions too.
+TUTOR_STRONG_PER_DAY = 30
+# Most characters of earlier turns sent with each tutor message (newest kept first).
+TUTOR_HISTORY_MAX_CHARS = 16_000
+# Tutor replies one account may be streaming at once, per server instance.
+TUTOR_MAX_CONCURRENT_STREAMS = 2
+# A stream that never started (the client left before the first byte) frees its slot after this.
+TUTOR_STREAM_SLOT_SECONDS = 300
+# Every paid AI call across all accounts per day; past it AI features pause with a 503.
+AI_DAILY_GLOBAL_LIMIT_DEFAULT = 20_000
+GLOBAL_AI_BUDGET_ID = "global:ai"
 NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
 GUEST_QUESTIONS_PER_DAY = 300
@@ -956,6 +971,86 @@ FIRST_TRY_XP = 10
 RETRY_XP = 5
 
 
+AI_PAUSED = "bindit’s AI features have reached today’s limit. Please try again later."
+
+
+def ai_daily_global_limit() -> int:
+    try:
+        return max(0, int(os.getenv("AI_DAILY_GLOBAL_LIMIT", "") or AI_DAILY_GLOBAL_LIMIT_DEFAULT))
+    except ValueError:
+        return AI_DAILY_GLOBAL_LIMIT_DEFAULT
+
+
+def global_ai_available() -> bool:
+    """Spend one call from the shared daily AI budget. False once it is used up.
+
+    Counted in the database, so the budget holds across every server instance.
+    Callers check their per-student limits first, so refused requests cost nothing here.
+    """
+    try:
+        database.check_social_rate_limit(GLOBAL_AI_BUDGET_ID, "ai_call", ai_daily_global_limit(), 1440)
+    except ValueError:
+        return False
+    return True
+
+
+def spend_global_ai_call() -> None:
+    """Like global_ai_available, but answers a friendly 503 when the budget is used up."""
+    if not global_ai_available():
+        raise HTTPException(status_code=503, detail=AI_PAUSED, headers={"Retry-After": "3600"})
+
+
+class StreamSlots:
+    """In-memory count of the tutor replies each account is streaming on this instance."""
+
+    def __init__(self) -> None:
+        self._slots: dict[str, dict[int, float]] = {}
+        self._lock = threading.Lock()
+        self._next = 0
+
+    def acquire(self, owner: str, limit: int, now: float | None = None) -> int | None:
+        """A slot token, or None when the account already has `limit` live streams."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            live = {token: started for token, started in self._slots.get(owner, {}).items()
+                    if now - started < TUTOR_STREAM_SLOT_SECONDS}
+            if len(live) >= limit:
+                self._slots[owner] = live
+                return None
+            self._next += 1
+            live[self._next] = now
+            self._slots[owner] = live
+            return self._next
+
+    def release(self, owner: str, token: int) -> None:
+        with self._lock:
+            live = self._slots.get(owner)
+            if live is not None:
+                live.pop(token, None)
+                if not live:
+                    del self._slots[owner]
+
+    def reset(self) -> None:
+        with self._lock:
+            self._slots.clear()
+
+
+tutor_streams = StreamSlots()
+
+
+def trim_history(history: list[dict], max_chars: int = TUTOR_HISTORY_MAX_CHARS) -> list[dict]:
+    """The most recent turns whose text adds up to at most max_chars."""
+    kept: list[dict] = []
+    used = 0
+    for item in reversed(history):
+        size = len(item.get("content") or "")
+        if used + size > max_chars:
+            break
+        kept.append(item)
+        used += size
+    return list(reversed(kept))
+
+
 def limit_action(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Durable per-action limit (shared across server instances); raises a friendly 429."""
     try:
@@ -1098,6 +1193,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
                 raise HTTPException(status_code=415, detail=NOTE_IMAGE_MISMATCH)
             content_type = actual_type
             limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+            spend_global_ai_call()
             ai_tutor.warm_connection()
             # The image goes to the vision model only; it is never stored.
             text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
@@ -1109,6 +1205,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
                     limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+                    spend_global_ai_call()
                     ai_tutor.warm_connection()
                     ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
                     text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
@@ -1311,8 +1408,34 @@ def sse(event: str, payload: dict) -> str:
 
 OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable. Try again in a moment, or upload a text PDF, DOCX or TXT instead."
 TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
+TUTOR_DAILY_LIMITED = "You’ve reached today’s tutor limit. It resets within a day."
+TUTOR_TOO_MANY_STREAMS = "The tutor is still answering your other messages. Wait for one to finish, then try again."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
+
+
+def tutor_limits(owner: str) -> None:
+    """Hourly then daily per-account tutor limits. Raises ValueError("hour" | "day")."""
+    try:
+        database.check_social_rate_limit(owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
+    except ValueError as error:
+        raise ValueError("hour") from error
+    try:
+        database.check_social_rate_limit(owner, "tutor_message_day", TUTOR_DAILY_LIMIT, 1440)
+    except ValueError as error:
+        raise ValueError("day") from error
+
+
+def capped_tutor_route(owner: str, content: str, has_images: bool) -> dict:
+    """ai_tutor.tutor_route, but the configured strong model only TUTOR_STRONG_PER_DAY times a day."""
+    route = ai_tutor.tutor_route(content, has_images)
+    strong = ai_tutor.OPENROUTER_TUTOR_STRONG_MODEL
+    if strong and route["model"] == strong and strong != ai_tutor.OPENROUTER_MODEL:
+        try:
+            database.check_social_rate_limit(owner, "tutor_strong", TUTOR_STRONG_PER_DAY, 1440)
+        except ValueError:
+            route = {**route, "model": ai_tutor.OPENROUTER_MODEL}
+    return route
 
 
 @app.post("/api/tutor/messages")
@@ -1323,26 +1446,40 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
     image_parts = tutor_image_parts(data.images)
+    slot = tutor_streams.acquire(owner, TUTOR_MAX_CONCURRENT_STREAMS)
+    if slot is None:
+        raise HTTPException(status_code=429, detail=TUTOR_TOO_MANY_STREAMS, headers={"Retry-After": "10"})
+    try:
+        return _send_tutor_message(data, owner, content, image_parts, slot)
+    except BaseException:
+        tutor_streams.release(owner, slot)
+        raise
+
+
+def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, image_parts: list[dict], slot: int):
     ai_tutor.warm_connection()  # the TLS/HTTP2 setup overlaps the database work below
 
     # Independent preparation runs side by side: the hourly limit, the conversation
     # with its recent turns, and the student's notes when the request names them.
     requested_course, requested_unit = data.course.strip(), data.unit.strip()
-    limit = ai_prep.submit(database.check_social_rate_limit, owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
+    limit = ai_prep.submit(tutor_limits, owner)
     existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id) if data.conversation_id else None
     # Only this student's own notes are ever used for grounding.
     early_context = ai_prep.submit(note_store.context_for, owner, requested_course, requested_unit, 12_000) if requested_course and requested_unit else None
     try:
         limit.result()
     except ValueError as error:
+        if str(error) == "day":
+            raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED, headers={"Retry-After": "3600"}) from error
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
+    spend_global_ai_call()
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
     # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
     retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
-    history = [{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)]
+    history = trim_history([{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)])
     course = requested_course or conversation["course"]
     unit = requested_unit or conversation["unit"]
     if early_context:
@@ -1356,7 +1493,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
         saving.set_result(retry_of)
     else:
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
-    route = ai_tutor.tutor_route(content, bool(image_parts))
+    route = capped_tutor_route(owner, content, bool(image_parts))
     model_messages = [
         {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
         *history,
@@ -1402,6 +1539,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
             else:
                 yield sse("error", {"message": TUTOR_UNAVAILABLE, "retry": True})
         finally:
+            tutor_streams.release(owner, slot)
             # The student stopped the reply or left: keep what was already written,
             # after the question it answers.
             if chunks and not saved and saved_user():
@@ -1745,6 +1883,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             ai_question = cached
         else:
             _rate_limited(student_id, "ai_question", 40, 1440)
+            spend_global_ai_call()
             try:
                 ai_question = ai_tutor.generate_question(
                     course=course,
@@ -1813,6 +1952,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
         # The model only ever sees the first 12,000 characters, so read no more than that.
         (note_store.context_for, student_id, course, unit, 12_000),
     )
+    spend_global_ai_call()
     try:
         cards = ai_tutor.generate_flashcards(
             course=course,
@@ -1869,6 +2009,9 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         try:
             if not authorization:
                 raise ai_tutor.AITutorError("Sign in for AI grading")
+            if not global_ai_available():
+                # The shared AI budget is used up: grade with the offline fallback instead.
+                raise ai_tutor.AITutorError("AI budget used up")
             ai_result = ai_tutor.grade_answer(
                 question=question["question"],
                 correct_answer=question["correct_answer"],

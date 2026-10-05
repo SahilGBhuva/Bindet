@@ -168,6 +168,74 @@ class TutorTests(unittest.TestCase):
                 self.send("alex")
         self.assertEqual(caught.exception.status_code, 429)
 
+    def test_tutor_messages_have_a_daily_cap(self):
+        with patch.object(main, "TUTOR_DAILY_LIMIT", 2):
+            self.send("alex")
+            self.send("alex")
+            with self.assertRaises(HTTPException) as caught:
+                self.send("alex")
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertEqual(caught.exception.detail, main.TUTOR_DAILY_LIMITED)
+
+    def test_history_sent_to_the_model_is_capped_by_characters(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        for index in range(12):
+            tutor.add_message("alex", conversation_id, "user" if index % 2 == 0 else "assistant", f"{index}:" + "x" * 3000)
+        _, captured = self.send("alex", conversation_id=conversation_id, content="And then?")
+        history = captured["messages"][1:-1]
+        self.assertLessEqual(sum(len(item["content"]) for item in history), main.TUTOR_HISTORY_MAX_CHARS)
+        self.assertTrue(history[-1]["content"].startswith("11:"))  # the newest turns are the ones kept
+        self.assertEqual(main.trim_history([{"role": "user", "content": "a" * 10}, {"role": "assistant", "content": "b" * 5}], 6),
+                         [{"role": "assistant", "content": "b" * 5}])
+
+    def test_strong_model_is_used_a_limited_number_of_times_a_day(self):
+        hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
+        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 1):
+            _, first = self.send("alex", content=hard)
+            _, second = self.send("alex", content=hard)
+            _, other = self.send("sam", content=hard)
+        self.assertEqual(first["route"]["model"], "strong/model")
+        self.assertEqual(second["route"]["model"], ai_tutor.OPENROUTER_MODEL)
+        self.assertEqual(second["route"]["tier"], "deep")
+        self.assertEqual(other["route"]["model"], "strong/model")
+
+    def test_global_daily_ai_budget_pauses_ai_with_a_503(self):
+        with patch.dict(os.environ, {"AI_DAILY_GLOBAL_LIMIT": "1"}):
+            self.send("alex")
+            with self.assertRaises(HTTPException) as caught:
+                self.send("sam")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail, main.AI_PAUSED)
+        # Counted durably, under one shared id.
+        with database.engine().connect() as connection:
+            count = connection.execute(database.select(database.func.count()).select_from(database.social_action_events).where(
+                database.social_action_events.c.student_id == main.GLOBAL_AI_BUDGET_ID)).scalar_one()
+        self.assertEqual(count, 1)
+        # A refused request does not hold a stream slot.
+        self.assertIsNotNone(main.tutor_streams.acquire("sam", 1))
+        main.tutor_streams.reset()
+
+    def test_each_account_streams_at_most_two_replies_at_once(self):
+        main.tutor_streams.reset()
+        with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=lambda **_: iter(["Hi"])):
+            request = main.TutorMessageRequest(content="What is a cell?")
+            first = main.send_tutor_message(request, "Bearer t")
+            second = main.send_tutor_message(request, "Bearer t")
+            with self.assertRaises(HTTPException) as caught:
+                main.send_tutor_message(request, "Bearer t")
+            self.assertEqual(caught.exception.status_code, 429)
+            parse_events(first)  # finishing one frees its slot
+            third = main.send_tutor_message(request, "Bearer t")
+            parse_events(second)
+            parse_events(third)
+        self.assertEqual(main.tutor_streams._slots, {})
+        # A stream that never started gives its slot back after a while.
+        slots = main.StreamSlots()
+        self.assertIsNotNone(slots.acquire("x", 1, now=0.0))
+        self.assertIsNone(slots.acquire("x", 1, now=1.0))
+        self.assertIsNotNone(slots.acquire("x", 1, now=main.TUTOR_STREAM_SLOT_SECONDS + 1))
+
     def test_routing_uses_fast_model_for_simple_questions(self):
         self.assertEqual(ai_tutor.tutor_route("What is a cell?", False)["tier"], "fast")
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
