@@ -22,6 +22,15 @@ class QuestionTableLockdownTests(unittest.TestCase):
         self.assertIn("question_bank", database.RLS_TABLES)
         self.assertIn("generated_questions", database.RLS_TABLES)
 
+    def test_task_and_tutor_tables_are_locked_down(self):
+        import tasks
+        for table in (*tasks.TASK_TABLES, "tutor_conversations", "tutor_messages"):
+            self.assertIn(table, database.RLS_TABLES)
+            self.assertIn(table, database.CLIENT_REVOKED_TABLES)
+        # Tables the browser reads (directly or inside RLS policies) keep their grants.
+        self.assertNotIn("study_group_members", database.CLIENT_REVOKED_TABLES)
+        self.assertNotIn("study_notes", database.CLIENT_REVOKED_TABLES)
+
     def test_postgres_init_enables_rls_and_revokes_client_grants(self):
         fake_engine = MagicMock()
         fake_engine.dialect.name = "postgresql"

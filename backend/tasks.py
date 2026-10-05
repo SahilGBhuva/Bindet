@@ -15,7 +15,7 @@ from functools import lru_cache
 from urllib.parse import urlparse
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
+    Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
     UniqueConstraint, case, delete, func, or_, select, update,
 )
 
@@ -54,6 +54,7 @@ tasks = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
+    Index("ix_workspace_tasks_owner_group", "owner_id", "group_id"),
 )
 
 task_assignees = Table(
@@ -93,6 +94,7 @@ task_activity = Table(
     Column("kind", String(24), nullable=False),
     Column("detail", String(240), nullable=False, default=""),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Index("ix_workspace_task_activity_group_created", "group_id", "created_at"),
 )
 
 task_attachments = Table(
@@ -132,6 +134,7 @@ def init_tasks() -> None:
         # Served only through the API; with RLS on and no policy PostgREST denies access.
         with database.engine().begin() as connection:
             database.enable_row_level_security(connection, TASK_TABLES)
+            database.revoke_client_access(connection, TASK_TABLES)
 
 
 def _now() -> datetime:

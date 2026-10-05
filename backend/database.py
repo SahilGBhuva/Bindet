@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Integer, MetaData, String, Table, Text,
+    Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
     UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, text, update,
 )
 from sqlalchemy.engine import Engine, make_url
@@ -65,6 +65,7 @@ friendships = Table(
     Column("recipient_id", String(100), ForeignKey("profiles.student_id", ondelete="CASCADE"), nullable=False),
     Column("status", String(10), nullable=False, default="pending"),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Index("ix_friendships_recipient_status", "recipient_id", "status"),
     UniqueConstraint("requester_id", "recipient_id", name="uq_friend_request_direction"),
 )
 
@@ -78,6 +79,7 @@ friend_quests = Table(
     Column("status", String(12), nullable=False, default="active"),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
+    Index("ix_friend_quests_partner", "partner_id"),
 )
 
 study_groups = Table(
@@ -107,6 +109,7 @@ xp_events = Table(
     Column("student_id", String(100), ForeignKey("student_progress.student_id", ondelete="CASCADE"), nullable=False, index=True),
     Column("xp", Integer, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Index("ix_xp_events_student_created", "student_id", "created_at"),
 )
 
 social_reactions = Table(
@@ -128,6 +131,7 @@ social_notifications = Table(
     Column("message", String(240), nullable=False),
     Column("is_read", Boolean, nullable=False, default=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Index("ix_social_notifications_recipient_created", "recipient_id", "created_at"),
 )
 
 social_blocks = Table(
@@ -137,6 +141,7 @@ social_blocks = Table(
     Column("blocked_id", String(100), ForeignKey("profiles.student_id", ondelete="CASCADE"), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("blocker_id", "blocked_id", name="uq_social_block"),
+    Index("ix_social_blocks_blocked", "blocked_id"),
 )
 
 social_reports = Table(
@@ -155,6 +160,7 @@ social_action_events = Table(
     Column("student_id", String(100), nullable=False, index=True),
     Column("action", String(24), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Index("ix_social_action_events_student_action_created", "student_id", "action", "created_at"),
 )
 
 uploaded_images = Table(
@@ -197,7 +203,10 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "friend_quests",
+    "friendships",
     "generated_questions",
+    "profiles",
     "progress_claims",
     "question_bank",
     "social_action_events",
@@ -207,8 +216,36 @@ RLS_TABLES = (
     "social_reports",
     "study_group_members",
     "study_groups",
+    "student_progress",
     "study_tasks",
+    "topic_progress",
+    "tutor_conversations",
+    "tutor_messages",
+    "uploaded_images",
+    "workspace_group_milestones",
+    "workspace_task_activity",
+    "workspace_task_assignees",
+    "workspace_task_attachments",
+    "workspace_task_checklist",
+    "workspace_task_comments",
+    "workspace_tasks",
     "xp_events",
+)
+
+# Backend-only tables the frontend never reads through PostgREST, so Supabase's
+# default anon/authenticated grants are removed as well. Tables used inside
+# client-facing RLS policies (study_group_members) or read by the browser
+# (study_notes) must not be listed here.
+CLIENT_REVOKED_TABLES = (
+    "tutor_conversations",
+    "tutor_messages",
+    "workspace_group_milestones",
+    "workspace_task_activity",
+    "workspace_task_assignees",
+    "workspace_task_attachments",
+    "workspace_task_checklist",
+    "workspace_task_comments",
+    "workspace_tasks",
 )
 
 
@@ -295,14 +332,20 @@ def revoke_client_access(connection, tables) -> None:
     """Remove Supabase's default anon/authenticated grants from backend-only tables.
 
     Runs as one DO block so a database without those roles (plain Postgres)
-    skips it instead of aborting the surrounding transaction.
+    skips it instead of aborting the surrounding transaction. Each table is
+    guarded with to_regclass, so tables another module has not created yet are
+    skipped (that module revokes again once it creates them).
     """
-    names = ", ".join(f"public.{table}" for table in tables)
+    statements = " ".join(
+        f"IF to_regclass('public.{table}') IS NOT NULL THEN "
+        f"REVOKE ALL ON TABLE public.{table} FROM anon, authenticated; END IF;"
+        for table in tables
+    )
     connection.exec_driver_sql(
         "DO $$ BEGIN "
         "IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') "
         "AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN "
-        f"REVOKE ALL ON TABLE {names} FROM anon, authenticated; "
+        f"{statements} "
         "END IF; END $$"
     )
 
@@ -434,6 +477,7 @@ def init_db() -> None:
     if active_engine.dialect.name == "postgresql":
         with active_engine.begin() as connection:
             enable_row_level_security(connection, RLS_TABLES)
+            revoke_client_access(connection, CLIENT_REVOKED_TABLES)
             connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_path varchar(500) NOT NULL DEFAULT ''")
             connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS daily_goal integer NOT NULL DEFAULT 20")
             connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS discoverable boolean NOT NULL DEFAULT true")
