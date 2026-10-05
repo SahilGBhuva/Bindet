@@ -324,8 +324,21 @@ def delete_task(owner_id: str, task_id: str) -> None:
 
 
 def enable_row_level_security(connection, tables) -> None:
-    for table in tables:
-        connection.exec_driver_sql(f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY")
+    """Turn RLS on for the listed public tables that exist and still have it off.
+
+    ALTER TABLE takes an ACCESS EXCLUSIVE lock even when RLS is already on, which
+    would queue every read of a busy table behind each cold start, so tables are
+    checked first and only the ones that need it are altered.
+    """
+    names = list(tables)
+    if not names:
+        return
+    pending = connection.execute(text(
+        "SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace "
+        "AND relkind IN ('r', 'p') AND NOT relrowsecurity AND relname = ANY(:names)"
+    ), {"names": names}).scalars().all()
+    for table in pending:
+        connection.exec_driver_sql(f'ALTER TABLE public."{table}" ENABLE ROW LEVEL SECURITY')
 
 
 def revoke_client_access(connection, tables) -> None:
@@ -482,6 +495,19 @@ def engine() -> Engine:
     return create_engine(url, **engine_options(url))
 
 
+# Columns added after the first release, for databases created before them.
+POSTGRES_ADDED_COLUMNS = (
+    ("profiles.avatar_path", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_path varchar(500) NOT NULL DEFAULT ''"),
+    ("profiles.daily_goal", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS daily_goal integer NOT NULL DEFAULT 20"),
+    ("profiles.discoverable", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS discoverable boolean NOT NULL DEFAULT true"),
+    ("profiles.allow_friend_requests", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_friend_requests boolean NOT NULL DEFAULT true"),
+    ("profiles.updated_at", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())"),
+    ("student_progress.login_streak", "ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS login_streak integer NOT NULL DEFAULT 0"),
+    ("student_progress.best_login_streak", "ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS best_login_streak integer NOT NULL DEFAULT 0"),
+    ("student_progress.last_login_date", "ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS last_login_date date"),
+)
+
+
 @lru_cache(maxsize=1)
 def init_db() -> None:
     """Create/check tables once per warm process instead of on every request."""
@@ -491,14 +517,15 @@ def init_db() -> None:
         with active_engine.begin() as connection:
             enable_row_level_security(connection, RLS_TABLES)
             revoke_client_access(connection, CLIENT_REVOKED_TABLES)
-            connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_path varchar(500) NOT NULL DEFAULT ''")
-            connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS daily_goal integer NOT NULL DEFAULT 20")
-            connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS discoverable boolean NOT NULL DEFAULT true")
-            connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_friend_requests boolean NOT NULL DEFAULT true")
-            connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())")
-            connection.exec_driver_sql("ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS login_streak integer NOT NULL DEFAULT 0")
-            connection.exec_driver_sql("ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS best_login_streak integer NOT NULL DEFAULT 0")
-            connection.exec_driver_sql("ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS last_login_date date")
+            # Like RLS above, ADD COLUMN IF NOT EXISTS locks the table even when the
+            # column exists, so only run the ones that are actually missing.
+            existing = set(connection.execute(text(
+                "SELECT table_name || '.' || column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name IN ('profiles', 'student_progress')"
+            )).scalars().all())
+            for column, statement in POSTGRES_ADDED_COLUMNS:
+                if column not in existing:
+                    connection.exec_driver_sql(statement)
     if active_engine.dialect.name == "sqlite":
         columns = {column["name"] for column in inspect(active_engine).get_columns("student_progress")}
         if "last_active_date" not in columns:

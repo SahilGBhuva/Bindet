@@ -35,16 +35,25 @@ class QuestionTableLockdownTests(unittest.TestCase):
         fake_engine = MagicMock()
         fake_engine.dialect.name = "postgresql"
         connection = fake_engine.begin.return_value.__enter__.return_value
+        # pg_class reports both tables with RLS still off.
+        connection.execute.return_value.scalars.return_value.all.return_value = ["question_bank", "generated_questions"]
         with patch.object(questions.metadata, "create_all"):
             questions._init_question_tables.__wrapped__(fake_engine)
         statements = [call.args[0] for call in connection.exec_driver_sql.call_args_list]
-        self.assertIn("ALTER TABLE IF EXISTS question_bank ENABLE ROW LEVEL SECURITY", statements)
-        self.assertIn("ALTER TABLE IF EXISTS generated_questions ENABLE ROW LEVEL SECURITY", statements)
+        self.assertIn('ALTER TABLE public."question_bank" ENABLE ROW LEVEL SECURITY', statements)
+        self.assertIn('ALTER TABLE public."generated_questions" ENABLE ROW LEVEL SECURITY', statements)
         revoke = [statement for statement in statements if "REVOKE" in statement]
         self.assertEqual(len(revoke), 1)
         self.assertIn("public.question_bank", revoke[0])
         # Guarded so a Postgres without Supabase's roles does not fail.
         self.assertIn("pg_roles", revoke[0])
+
+
+    def test_rls_is_only_altered_where_it_is_off(self):
+        connection = MagicMock()
+        connection.execute.return_value.scalars.return_value.all.return_value = []
+        database.enable_row_level_security(connection, ("question_bank",))
+        connection.exec_driver_sql.assert_not_called()
 
 
 class XpFarmingTests(unittest.TestCase):
