@@ -449,24 +449,37 @@ def _uses_supabase_pooler(url: str) -> bool:
     return "pooler.supabase.com" in url or ":6543" in url
 
 
+def engine_options(url: str, serverless: bool | None = None) -> dict:
+    """create_engine keyword arguments for this URL.
+
+    * SQLite (local dev and tests): one file, shared across threads.
+    * Supabase transaction pooler (port 6543 / pooler.supabase.com): PgBouncer-style
+      transaction pooling cannot keep server-side prepared statements, so psycopg's
+      automatic preparation is turned off.
+    * Serverless (Vercel): a small LIFO pool per warm instance. The pooler does the
+      real multiplexing; LIFO lets idle extras age out, pre-ping and recycle replace
+      connections the pooler closed, and short timeouts fail fast instead of hanging
+      a function until the platform kills it.
+    """
+    if url.startswith("sqlite"):
+        return {"pool_pre_ping": True, "connect_args": {"check_same_thread": False}}
+    if serverless is None:
+        serverless = bool(os.getenv("VERCEL"))
+    options: dict = {"pool_pre_ping": True}
+    connect_args: dict = {"connect_timeout": 10}
+    if _uses_supabase_pooler(url):
+        connect_args["prepare_threshold"] = None
+    options["connect_args"] = connect_args
+    if serverless:
+        # /api/friends fans out to 4 reader threads, so allow 4 connections in total.
+        options.update(pool_size=2, max_overflow=2, pool_recycle=300, pool_timeout=10, pool_use_lifo=True)
+    return options
+
+
 @lru_cache(maxsize=1)
 def engine() -> Engine:
     url = database_url()
-    kwargs: dict = {"pool_pre_ping": True}
-    if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
-    else:
-        connect_args: dict = {}
-        if _uses_supabase_pooler(url):
-            # PgBouncer transaction mode does not support prepared statements.
-            connect_args["prepare_threshold"] = None
-        if connect_args:
-            kwargs["connect_args"] = connect_args
-        if os.getenv("VERCEL"):
-            # Keep one connection alive inside a warm serverless instance. The
-            # Supabase transaction pooler safely multiplexes these small pools.
-            kwargs.update(pool_size=2, max_overflow=2, pool_recycle=300)
-    return create_engine(url, **kwargs)
+    return create_engine(url, **engine_options(url))
 
 
 @lru_cache(maxsize=1)

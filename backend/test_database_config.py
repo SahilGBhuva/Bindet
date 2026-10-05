@@ -101,5 +101,26 @@ class DatabaseConfigurationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+class EngineOptionTests(unittest.TestCase):
+    def test_sqlite_keeps_thread_sharing_and_no_pool_sizes(self):
+        options = database.engine_options("sqlite:///tmp/test.db", serverless=True)
+        self.assertEqual(options["connect_args"], {"check_same_thread": False})
+        self.assertNotIn("pool_size", options)
+
+    def test_supabase_transaction_pooler_disables_prepared_statements(self):
+        url = database._normalized_database_url(POOLER_URL)
+        options = database.engine_options(url, serverless=True)
+        self.assertIsNone(options["connect_args"]["prepare_threshold"])
+        self.assertTrue(options["pool_pre_ping"])
+        self.assertEqual((options["pool_size"], options["max_overflow"]), (2, 2))
+        self.assertTrue(options["pool_use_lifo"])
+        self.assertLessEqual(options["pool_recycle"], 300)
+
+    def test_direct_postgres_keeps_prepared_statements(self):
+        options = database.engine_options("postgresql+psycopg://u:p@db.example.com:5432/app", serverless=False)
+        self.assertNotIn("prepare_threshold", options["connect_args"])
+        self.assertNotIn("pool_size", options)
+
+
 if __name__ == "__main__":
     unittest.main()
