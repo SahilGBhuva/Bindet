@@ -195,7 +195,7 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   }
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(data?.detail ?? `Bindit could not complete that request (${response.status}).`)
+    throw new Error(data?.detail ?? `bindit could not complete that request (${response.status}).`)
   }
   return response.json() as Promise<T>
 }
@@ -320,7 +320,7 @@ export async function getProgress(studentId: string, accessToken?: string, force
   if (response.status === 404) return null
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(data?.detail ?? `Bindit could not load progress (${response.status}).`)
+    throw new Error(data?.detail ?? `bindit could not load progress (${response.status}).`)
   }
   const data = await response.json() as Progress
   progressCache.set(studentId, { savedAt: Date.now(), data })
@@ -336,7 +336,7 @@ export async function getAccountProfile(accessToken: string, force = false): Pro
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (response.status === 404) return null
-  if (!response.ok) throw new Error('Could not load your Bindit profile.')
+  if (!response.ok) throw new Error('Could not load your bindit profile.')
   const data = await response.json() as Profile
   profileCache.set(identity, { savedAt: Date.now(), data })
   writeSessionCache(`bindit:profile:${identity}`, data)

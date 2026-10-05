@@ -385,6 +385,11 @@
 .tasks-calendar__chip:hover { border-color: var(--color-border-strong); }
 .tasks-calendar__chip.is-done span { color: var(--color-text-tertiary); text-decoration: line-through; }
 .tasks-calendar__chip.is-selected { border-color: var(--color-text); }
+/* Narrow day cells give the title the room and drop the time (it stays in the tooltip and details). */
+.tasks-calendar__day { container-type: inline-size; }
+@container (max-width: 120px) {
+  .tasks-calendar__chip time { display: none; }
+}
 .tasks-calendar__more { padding: 0 5px; color: var(--color-text-tertiary); font-size: var(--text-2xs); }
 
 /* Narrow screens get an agenda list instead of the month grid. */
@@ -661,6 +666,22 @@
   }
   .tasks-title { align-self: start; }
   .tasks-notice { justify-self: stretch; width: auto; margin: var(--space-4) 0 0 8px; }
+
+  /* Touch: 40px targets for the tiny tools, tabs and task bars. */
+  .tasks-icon-button,
+  .tasks-icon-button.is-tiny,
+  .tasks-box__head .tasks-icon-button { width: 40px; height: 40px; }
+  .tasks-box__head .tasks-icon-button { margin-block: -6px; }
+  .tasks-notice .tasks-icon-button { width: 40px; height: 40px; margin: -8px -8px -8px 0; }
+  .tasks-switch { height: 40px; }
+  .tasks-tab { min-height: 40px; }
+  .task-card__main { min-height: 44px; padding: 10px 12px; }
+  /* The drawn pills stay small; an invisible margin makes them easy to tap. */
+  .task-pill { position: relative; }
+  .task-pill::after { content: ""; position: absolute; inset: -9px -4px; }
+  .task-title-input,
+  .task-location__input,
+  .task-details { font-size: 16px; }
 
   .tasks-boxes { flex-direction: column; align-items: stretch; }
   .tasks-box,

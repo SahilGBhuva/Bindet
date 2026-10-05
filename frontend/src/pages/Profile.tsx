@@ -519,7 +519,23 @@ export function Profile({ session, onError }: ProfileProps) {
             ) : groupList.length && activeGroup ? (
               <div className="ui-panel profile__groups">
                 {groupList.length > 1 ? (
-                  <div className="ui-tabs profile__group-tabs" role="tablist" aria-label="Your study groups">
+                  <div
+                    className="ui-tabs profile__group-tabs"
+                    role="tablist"
+                    aria-label="Your study groups"
+                    onKeyDown={(event) => {
+                      // Arrow keys, Home and End move between groups (one tab stop for the list).
+                      const at = groupList.findIndex((group) => group.id === activeGroup.id)
+                      const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: groupList.length - 1 }[event.key]
+                      if (to === undefined) return
+                      event.preventDefault()
+                      const next = groupList[(to + groupList.length) % groupList.length]
+                      setActiveGroupId(next.id)
+                      const tab = document.getElementById(`group-tab-${next.id}`)
+                      tab?.focus()
+                      tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+                    }}
+                  >
                     {groupList.map((group) => (
                       <button
                         key={group.id}
@@ -528,6 +544,7 @@ export function Profile({ session, onError }: ProfileProps) {
                         id={`group-tab-${group.id}`}
                         className="ui-tab"
                         aria-selected={activeGroup.id === group.id}
+                        tabIndex={activeGroup.id === group.id ? 0 : -1}
                         aria-controls="group-panel"
                         onClick={() => setActiveGroupId(group.id)}
                       >

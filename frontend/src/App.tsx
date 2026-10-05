@@ -34,7 +34,12 @@ const Games = lazy(loaders.games)
 const More = lazy(loaders.more)
 
 /* The routes students open most often after Home, fetched while the browser is idle. */
-const PREFETCH: (keyof typeof loaders)[] = ['tools', 'goals', 'tutor', 'chat']
+const PREFETCH: (keyof typeof loaders)[] = ['goals', 'stats', 'tools', 'tutor', 'chat']
+
+/* Pointing at or focusing a page icon starts loading that page, so the click rarely waits. */
+function warm(screen: Screen) {
+  if (screen in loaders) void loaders[screen as keyof typeof loaders]().catch(() => undefined)
+}
 
 function currentScreen(): Screen {
   const raw = window.location.hash.replace('#', '').split('?')[0]
@@ -146,7 +151,7 @@ function AppShell() {
           {PAGE_ICONS.map((item) => {
             const current = navScreen === item.id
             return (
-              <a key={item.id} className={`app-bar__page${current ? ' is-active' : ''}`} href={`#${item.id}`} aria-current={current ? 'page' : undefined} aria-label={item.id === 'chat' && unread ? `${item.label}, ${unread} unread` : item.label} title={item.label}>
+              <a key={item.id} className={`app-bar__page${current ? ' is-active' : ''}`} href={`#${item.id}`} aria-current={current ? 'page' : undefined} aria-label={item.id === 'chat' && unread ? `${item.label}, ${unread} unread` : item.label} title={item.label} onPointerEnter={() => warm(item.id)} onFocus={() => warm(item.id)}>
                 <NavIcon kind={item.id} />
                 {item.id === 'chat' && unread ? <i className="app-bar__dot" aria-hidden="true" /> : null}
               </a>
@@ -154,14 +159,14 @@ function AppShell() {
           })}
         </nav>
         <div className="app-bar__panels">
-          <button type="button" className="app-bar__merge" onClick={() => setRailCollapsed(true)} title="Merge the sidebar into the icon strip">Merge</button>
-          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
+          <button type="button" className="app-bar__merge" aria-pressed={railCollapsed} onClick={() => setRailCollapsed(true)} title="Merge the sidebar into the icon strip">Merge</button>
+          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" aria-pressed={!railCollapsed} title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11M5 5.5 2.5 8 5 10.5M11 5.5 13.5 8 11 10.5" /></svg>
           </button>
         </div>
       </header>
       <main className={`sheet is-${screen}`} id="main-content" tabIndex={-1} key={screen}>
-        <Suspense fallback={<PageSkeleton />}>
+        <Suspense fallback={<PageSkeleton sketch={screen === 'goals' || screen === 'stats'} />}>
           {screen === 'home' ? <Home session={session} /> : null}
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
           {screen === 'tutor' ? <Tutor session={session} /> : null}
@@ -181,10 +186,13 @@ function AppShell() {
   )
 }
 
-/* Matches the page frame (header rule, then content) so the swap does not jump. */
-function PageSkeleton() {
+/*
+ * Matches the page frame so the swap does not jump: a ruled header and panels for the standard
+ * pages; for the sketch pages (Tasks, Project statistics) a small title and open blocks, no rule.
+ */
+function PageSkeleton({ sketch = false }: { sketch?: boolean }) {
   return (
-    <div className="app-skeleton ui-page" aria-busy="true" aria-label="Loading page">
+    <div className={`app-skeleton ui-page${sketch ? ' is-sketch' : ''}`} aria-busy="true" aria-label="Loading page">
       <div className="app-skeleton__header"><span className="ui-skeleton" /><span className="ui-skeleton" /></div>
       <div className="app-skeleton__body"><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /></div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Profile, StudyGroup, Task } from './api'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -219,10 +219,14 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const [groupParam, setGroupParam] = useState(readGroupParam)
   const [unreadTotal, setUnreadTotal] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const menuPanel = useRef<HTMLDivElement>(null)
   const [layout, setLayout] = useState<Layout>(() => data.sandboxed ? DEFAULT_LAYOUT : readLayout())
   const [important, setImportant] = useState<string[]>(() => data.sandboxed ? [] : readImportant())
   const [editing, setEditing] = useState(false)
   const [now, setNow] = useState(() => data.now())
+  // A failed refresh with nothing cached says so (the rail retries every 30 seconds) instead of looking empty.
+  const [failed, setFailed] = useState({ tasks: false, groups: false })
 
   // Courses can change on other pages, so reread the local notebook whenever the page changes.
   if (seenActive !== active) {
@@ -259,6 +263,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         else setTasks((current) => current ?? [])
         if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
         else setGroups((current) => current ?? [])
+        setFailed({ tasks: nextTasks.status === 'rejected', groups: nextGroups.status === 'rejected' })
         setNow(data.now())
       })
     }
@@ -268,9 +273,15 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [data, session, onUnreadChange])
 
+  // The phone menu takes focus when it opens and hands it back to the Menu button when it closes.
   useEffect(() => {
     if (!menuOpen) return
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false) }
+    menuPanel.current?.querySelector<HTMLElement>('a, button')?.focus()
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      menuButton.current?.focus({ preventScroll: true })
+    }
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [menuOpen])
@@ -343,11 +354,12 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   )
 
   const empty = (content: ReactNode) => <p className="bindit-rail__empty">{content}</p>
+  const offline = empty('Couldn’t load. Retrying shortly.')
 
   const groupLink = (group: StudyGroup, glyph: ReactNode, extra = '') => {
     const current = active === 'stats' && groupParam === group.id
     return (
-      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'page' : undefined}>
+      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'page' : undefined} title={group.name}>
         <span className="bindit-rail__glyph">{glyph}</span>
         <span className="bindit-rail__entry-text">{group.name}</span>
       </a>
@@ -361,14 +373,14 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {highlighted.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals">
+                <a className="bindit-rail__entry" href="#goals" title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--dot" aria-hidden="true">·</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
               </li>
             ))}
           </ul>
-        ) : empty('Nothing pressing right now.'),
+        ) : failed.tasks ? offline : empty('Nothing pressing right now.'),
     },
     directory: {
       body: (
@@ -377,7 +389,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             const current = active === 'tools' && course.name === notebook.activeCourse
             return (
               <li key={course.name}>
-                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} onClick={() => openCourse(course)}>
+                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} title={course.name} onClick={() => openCourse(course)}>
                   <span className="bindit-rail__glyph">{index % 3 === 2 ? glyphs.circle : glyphs.square}</span>
                   <span className="bindit-rail__entry-text">{course.name}</span>
                 </a>
@@ -397,10 +409,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         <ul className="bindit-rail__entries">
           {importantGroups.map((group) => <li key={group.id}>{groupLink(group, glyphs.triangle)}</li>)}
         </ul>
-      ) : empty(<a className="ui-link" href="#profile">Join a study group</a>),
+      ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join a study group</a>),
     },
     groups: {
-      count: groups?.length,
+      count: failed.groups && !groups?.length ? undefined : groups?.length,
       body: groupsLoading ? skeletonRows(3) : groups?.length ? (
         <ul className="bindit-rail__entries">
           {nestGroups(groups).map(({ group, child }) => {
@@ -422,24 +434,24 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             )
           })}
         </ul>
-      ) : empty(<a className="ui-link" href="#profile">Join or start a study group</a>),
+      ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join or start a study group</a>),
     },
     tasks: {
-      count: tasks ? openTasks.length : undefined,
+      count: tasks && !(failed.tasks && !tasks.length) ? openTasks.length : undefined,
       hatch: true,
       body: tasksLoading ? skeletonRows(2)
         : nextTasks.length ? (
           <ul className="bindit-rail__entries">
             {nextTasks.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals">
+                <a className="bindit-rail__entry" href="#goals" title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--star" aria-hidden="true">*</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
               </li>
             ))}
           </ul>
-        ) : empty(openTasks.length ? 'The rest are highlighted above.' : <>All clear. <a className="ui-link" href="#goals">Add a task</a></>),
+        ) : failed.tasks && !openTasks.length ? offline : empty(openTasks.length ? 'The rest are highlighted above.' : <>All clear. <a className="ui-link" href="#goals">Add a task</a></>),
     },
   }
 
@@ -557,7 +569,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             </a>
           )
         })}
-        <button type="button" className={`bindit-tabbar__item${menuOpen || !TAB_BAR.includes(active) ? ' is-active' : ''}`} aria-expanded={menuOpen} aria-controls="bindit-menu" onClick={() => setMenuOpen((open) => !open)}>
+        <button type="button" ref={menuButton} className={`bindit-tabbar__item${menuOpen || !TAB_BAR.includes(active) ? ' is-active' : ''}`} aria-expanded={menuOpen} aria-controls="bindit-menu" onClick={() => setMenuOpen((open) => !open)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" /></svg>
           <span>Menu</span>
           {unreadTotal ? <i className="bindit-tabbar__dot" aria-hidden="true" /> : null}
@@ -565,8 +577,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       </nav>
 
       {menuOpen ? (
-        <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setMenuOpen(false) }}>
-          <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages">
+        <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } }}>
+          <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages" ref={menuPanel}>
             {SECTIONS.map((section) => (
               <div key={section.label}>
                 <span className="bindit-sheet__section">{section.label}</span>
@@ -577,6 +589,24 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                 </ul>
               </div>
             ))}
+            {groups?.length ? (
+              <div>
+                <span className="bindit-sheet__section">My Groups</span>
+                <ul className="bindit-sheet__groups">
+                  {nestGroups(groups).map(({ group, child }) => {
+                    const current = active === 'stats' && groupParam === group.id
+                    return (
+                      <li key={group.id} className={child ? 'is-child' : undefined}>
+                        <a href={`#stats?group=${encodeURIComponent(group.id)}`} className={current ? 'is-active' : ''} aria-current={current ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+                          <span className="bindit-sheet__glyph">{glyphs.people}</span>
+                          <span className="bindit-rail__entry-text">{group.name}</span>
+                        </a>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : null}
             <div className="bindit-sheet__footer">
               <a href="#settings" onClick={() => setMenuOpen(false)}><NavIcon kind="settings" />Settings</a>
               <a href="#more" onClick={() => setMenuOpen(false)}><NavIcon kind="more" />Help</a>

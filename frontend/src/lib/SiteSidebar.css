@@ -101,7 +101,7 @@
 .bindit-rail__account .bindit-rail__mini { width: 22px; height: 22px; margin-left: -4px; }
 
 /* Sections: lots of white space between them, as drawn. */
-.bindit-rail__block { display: grid; gap: 6px; min-width: 0; }
+.bindit-rail__block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 
 .bindit-rail__heading { display: flex; align-items: center; gap: 6px; min-height: 22px; margin: 0; font: inherit; }
 
@@ -165,7 +165,9 @@
 .bindit-rail__controls { display: flex; align-items: center; gap: 0; margin-left: auto; }
 
 /* Rows: 13px, tight rhythm, tiny outline glyphs. */
-.bindit-rail__entries { display: grid; gap: 1px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+.bindit-rail__entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+/* Long course, group and task names end in an ellipsis instead of widening the rail. */
+.bindit-rail__entries > li { min-width: 0; }
 
 .bindit-rail__entry {
   display: flex;
@@ -447,6 +449,26 @@
   .bindit-sheet__grid a.is-active { border-color: var(--color-text); }
   .bindit-sheet__grid svg,
   .bindit-sheet__footer svg { color: var(--color-text-tertiary); }
+  /* My Groups in the phone menu: the rail's group list, one 44px row each. */
+  .bindit-sheet__groups { display: grid; margin: 6px 0 0; padding: 0; list-style: none; }
+  .bindit-sheet__groups li + li { border-top: 1px solid var(--color-border); }
+  .bindit-sheet__groups a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    text-decoration: none;
+  }
+  .bindit-sheet__groups a.is-active { font-weight: var(--weight-semibold); }
+  .bindit-sheet__groups a:active { background: var(--color-surface-hover); }
+  .bindit-sheet__groups li.is-child a { padding-left: 34px; }
+  .bindit-sheet__glyph { display: grid; flex: none; place-items: center; width: 16px; color: var(--color-text-tertiary); }
+  .bindit-sheet .bindit-sheet__glyph svg { width: 14px; height: 14px; stroke-width: 1.4; }
   .bindit-sheet__footer { display: flex; gap: 6px; padding-top: 12px; border-top: 1px solid var(--color-border); }
   .bindit-sheet__footer a { flex: 1; }
   .bindit-sheet__footer .bindit-rail__theme { width: 46px; height: 46px; border: 1px solid var(--color-border); }

@@ -19,6 +19,9 @@
   .app-shell:has(> .app-bar) > .bindit-rail { grid-column: 1; grid-row: 1 / span 2; }
   .app-shell > .app-bar { grid-column: 2; grid-row: 1; }
   .app-bar ~ .sheet { grid-column: 2; grid-row: 2; min-height: calc(100vh - 48px); }
+  /* Full-height rooms (Messages, Tutor) fit under the page bar, so their composer never falls below the fold. */
+  .app-bar ~ .sheet.is-chat > .chat,
+  .app-bar ~ .sheet.is-tutor > .tutor { height: calc(100vh - 48px); height: calc(100dvh - 48px); }
 }
 
 .app-bar {
@@ -64,9 +67,13 @@
   font-weight: var(--weight-medium);
   line-height: 1;
   cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-standard);
+  transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-instant) var(--ease-standard);
 }
 .app-bar__merge:hover { background: var(--color-surface-hover); }
+.app-bar__merge[aria-pressed="true"] { background: var(--color-surface-active); }
+.app-bar__merge:active,
+.app-bar__expand:active,
+.app-bar__page:active { transform: translateY(1px); }
 
 .app-bar__expand {
   display: grid;
@@ -119,6 +126,11 @@
 .app-skeleton__body { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
 .app-skeleton__body span { height: 220px; border-radius: var(--radius-lg); }
 .app-skeleton__body span:last-child { grid-column: 1 / -1; height: 140px; }
+.app-skeleton.is-sketch .app-skeleton__header { padding-bottom: 0; margin-bottom: 40px; border-bottom: 0; }
+.app-skeleton.is-sketch .app-skeleton__header span:last-child { width: min(240px, 60%); height: 22px; }
+.app-skeleton.is-sketch .app-skeleton__body { grid-template-columns: 1fr 1fr 1.4fr; gap: 20px; }
+.app-skeleton.is-sketch .app-skeleton__body span { height: 260px; }
+.app-skeleton.is-sketch .app-skeleton__body span:last-child { grid-column: auto; height: 180px; }
 
 @media (max-width: 860px) {
   .app-shell,
@@ -126,5 +138,6 @@
   .app-bar { display: none; }
   .app-shell > .sheet { min-width: 0; min-height: calc(100vh - 52px); padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .app-toast { right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); left: 16px; max-width: none; }
-  .app-skeleton__body { grid-template-columns: 1fr; }
+  .app-skeleton__body,
+  .app-skeleton.is-sketch .app-skeleton__body { grid-template-columns: 1fr; }
 }

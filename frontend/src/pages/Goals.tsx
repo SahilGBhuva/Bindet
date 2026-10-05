@@ -499,9 +499,23 @@ export function Goals({ session }: { session: AuthSession | null }) {
           </p>
 
           <div className="tasks-tabbar">
-            <div className="tasks-tabs" role="tablist" aria-label="Task views">
+            <div
+              className="tasks-tabs"
+              role="tablist"
+              aria-label="Task views"
+              onKeyDown={(event) => {
+                // Arrow keys, Home and End move between the tabs (one tab stop for the whole list).
+                const at = TABS.findIndex((item) => item.id === tab)
+                const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: TABS.length - 1 }[event.key]
+                if (to === undefined) return
+                event.preventDefault()
+                const next = TABS[(to + TABS.length) % TABS.length]
+                setTab(next.id)
+                document.getElementById(`tasks-tab-${next.id}`)?.focus()
+              }}
+            >
               {TABS.map((item) => (
-                <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="tasks-tab" aria-selected={tab === item.id} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
+                <button key={item.id} id={`tasks-tab-${item.id}`} type="button" role="tab" className="tasks-tab" aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} aria-controls="tasks-tabpanel" onClick={() => setTab(item.id)}>
                   <Icon name={item.icon} />{item.label}
                 </button>
               ))}
@@ -532,7 +546,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
         {panel || !phone ? (
           <>
             {drawerOpen ? <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} /> : null}
-            <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
+            <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} role={drawerOpen ? 'dialog' : undefined} aria-modal={drawerOpen || undefined} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
               {panel ?? <p className="tasks-panel__empty">{tasks.length ? 'Pick a task to see its details.' : 'No tasks yet. Use ⊞ to add one.'}</p>}
             </aside>
           </>
@@ -693,7 +707,7 @@ function CalendarView({ tasks, today, selectedId, onSelect, onCompose }: {
   const monthDays = days.filter((day) => day.getMonth() === cursor.getMonth() && byDay.has(isoDay(day)))
   const chip = (task: Task) => (
     <button key={task.id} type="button" className={`tasks-calendar__chip${task.status === 'done' ? ' is-done' : ''}${task.id === selectedId ? ' is-selected' : ''}`}
-      onClick={() => onSelect(task.id)} title={task.title}>
+      onClick={() => onSelect(task.id)} title={task.due_time ? `${timeLabel(task.due_time)} · ${task.title}` : task.title}>
       {task.due_time ? <time>{timeLabel(task.due_time)}</time> : null}<span>{task.title}</span>
     </button>
   )

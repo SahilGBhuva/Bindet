@@ -491,6 +491,19 @@
   .home-row__time { font-size: var(--text-xs); }
 }
 
+@container home (max-width: 780px) {
+  /* Touch: rows and small icons get 40px targets without changing the drawing. */
+  .home-notice__row { min-height: 40px; }
+  /* Invisible padding: ~40px tap areas that keep the drawn rhythm. */
+  .home-stats a,
+  .home-carousel__all { padding-block: 10px; margin-block: -10px; }
+  .home-stats { gap: 8px; }
+  .home-team__icon { width: 40px; height: 40px; }
+  .home-banner__theme::after { content: ""; position: absolute; inset: -8px -6px; }
+  .home-notice__title a { display: inline-block; padding-block: 10px; margin-block: -10px; }
+  .home-row { min-height: 44px; }
+}
+
 @container home (max-width: 420px) {
   .home-row { grid-template-columns: 70px minmax(0, 1fr); row-gap: 0; padding: 4px 0; }
   .home-row__time { grid-column: 2; }
