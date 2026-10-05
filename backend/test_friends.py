@@ -56,6 +56,52 @@ class FriendsTests(unittest.TestCase):
         updated = database.active_friend_quests("alex-id")[0]
         self.assertEqual(updated["progress_xp"], 40)
 
+    def quest_status(self, quest_id):
+        with database.engine().connect() as connection:
+            return connection.execute(database.select(database.friend_quests.c.status).where(
+                database.friend_quests.c.id == quest_id)).scalar_one()
+
+    def test_unfriending_or_blocking_cancels_quests(self):
+        self.become_friends()
+        quest = database.create_friend_quest("alex-id", "sam-id", 100)
+        database.remove_friend("sam-id", "alex-id")
+        self.assertEqual(self.quest_status(quest["id"]), "cancelled")
+        self.assertEqual(database.active_friend_quests("alex-id"), [])
+        self.become_friends()
+        quest = database.create_friend_quest("sam-id", "alex-id", 100)
+        database.block_person("alex-id", "sam-id")
+        self.assertEqual(self.quest_status(quest["id"]), "cancelled")
+        self.assertEqual(database.active_friend_quests("sam-id"), [])
+
+    def test_quests_are_only_listed_with_current_friends(self):
+        self.become_friends()
+        quest = database.create_friend_quest("alex-id", "sam-id", 100)
+        # Even if a stale active row survives (data from before this fix), it is hidden once not friends.
+        with database.engine().begin() as connection:
+            connection.execute(database.delete(database.friendships))
+            connection.execute(database.update(database.friend_quests).values(status="active"))
+        self.assertEqual(database.active_friend_quests("alex-id"), [])
+        self.assertEqual(self.quest_status(quest["id"]), "active")
+
+    def test_finished_and_expired_quests_are_stored_and_free_the_pair(self):
+        self.become_friends()
+        quest = database.create_friend_quest("alex-id", "sam-id", 50)
+        database.update_progress("sam-id", "History", True, 60)
+        listed = database.active_friend_quests("alex-id")
+        self.assertEqual([item["status"] for item in listed], ["complete"])  # still shown until its week ends
+        self.assertEqual(self.quest_status(quest["id"]), "complete")
+        second = database.create_friend_quest("sam-id", "alex-id", 100)
+        self.assertNotEqual(second["id"], quest["id"])
+        self.assertEqual(second["status"], "active")
+        # Past its end date, an unfinished quest is stored as expired and a new one can start.
+        with database.engine().begin() as connection:
+            connection.execute(database.update(database.friend_quests).where(database.friend_quests.c.id == second["id"]).values(
+                expires_at=database.datetime.now(database.timezone.utc) - database.timedelta(days=1)))
+        third = database.create_friend_quest("alex-id", "sam-id", 100)
+        self.assertEqual(self.quest_status(second["id"]), "expired")
+        self.assertNotIn(second["id"], [item["id"] for item in database.active_friend_quests("alex-id")])
+        self.assertIn(third["id"], [item["id"] for item in database.active_friend_quests("alex-id")])
+
     def test_friend_endpoints_use_authenticated_identity(self):
         with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
             result = main.create_friend_request(main.FriendRequestCreate(friend_code=self.sam["friend_code"]), "Bearer test")

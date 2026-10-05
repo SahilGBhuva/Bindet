@@ -1357,6 +1357,21 @@ def leave_study_group(student_id: str, group_id: str, on_leave=None) -> bool:
     return bool(result.rowcount)
 
 
+def _between(first_id: str, second_id: str):
+    """Quests created by either student with the other as partner."""
+    return or_(
+        and_(friend_quests.c.creator_id == first_id, friend_quests.c.partner_id == second_id),
+        and_(friend_quests.c.creator_id == second_id, friend_quests.c.partner_id == first_id),
+    )
+
+
+def _cancel_quests_between(connection, first_id: str, second_id: str) -> None:
+    """A quest only makes sense between friends; unfriending or blocking ends it."""
+    connection.execute(update(friend_quests).where(
+        _between(first_id, second_id), friend_quests.c.status.in_(("active", "complete")),
+    ).values(status="cancelled"))
+
+
 def remove_friend(student_id: str, friend_id: str) -> bool:
     init_db()
     with engine().begin() as connection:
@@ -1364,6 +1379,7 @@ def remove_friend(student_id: str, friend_id: str) -> bool:
             and_(friendships.c.requester_id == student_id, friendships.c.recipient_id == friend_id),
             and_(friendships.c.requester_id == friend_id, friendships.c.recipient_id == student_id),
         )))
+        _cancel_quests_between(connection, student_id, friend_id)
     return bool(result.rowcount)
 
 
@@ -1381,15 +1397,15 @@ def create_friend_quest(student_id: str, friend_id: str, target_xp: int = 100) -
         )).first()
         if not friendship:
             raise ValueError("friend_not_found")
+        _advisory_lock(connection, "quest:" + ":".join(sorted((student_id, friend_id))))
         existing = connection.execute(select(friend_quests).where(
-            friend_quests.c.status == "active",
-            or_(
-                and_(friend_quests.c.creator_id == student_id, friend_quests.c.partner_id == friend_id),
-                and_(friend_quests.c.creator_id == friend_id, friend_quests.c.partner_id == student_id),
-            ),
+            friend_quests.c.status == "active", _between(student_id, friend_id),
         )).mappings().first()
         if existing:
-            return _quest_result(connection, existing, student_id)
+            # A finished or expired quest no longer blocks a new one with the same friend.
+            result = _settle_quest(connection, existing, student_id)
+            if result["status"] == "active":
+                return result
         total = connection.execute(select(student_progress.c.total_xp).where(
             student_progress.c.student_id.in_([student_id, friend_id])
         )).scalars().all()
@@ -1402,6 +1418,16 @@ def create_friend_quest(student_id: str, friend_id: str, target_xp: int = 100) -
         return _quest_result(connection, row, student_id)
 
 
+def _settle_quest(connection, row: dict, student_id: str) -> dict:
+    """The quest's view for student_id, storing complete/expired once it is no longer active."""
+    result = _quest_result(connection, row, student_id)
+    if row["status"] == "active" and result["status"] in ("complete", "expired"):
+        connection.execute(update(friend_quests).where(
+            friend_quests.c.id == row["id"], friend_quests.c.status == "active",
+        ).values(status=result["status"]))
+    return result
+
+
 def _quest_result(connection, row: dict, student_id: str) -> dict:
     ids = [row["creator_id"], row["partner_id"]]
     profiles_by_id = {item["student_id"]: item for item in connection.execute(
@@ -1412,20 +1438,40 @@ def _quest_result(connection, row: dict, student_id: str) -> dict:
     expires_at = row["expires_at"]
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
-    status = "complete" if progress >= row["target_xp"] else ("expired" if expires_at < datetime.now(timezone.utc) else row["status"])
+    if row["status"] not in ("active", "complete"):
+        status = row["status"]
+    elif progress >= row["target_xp"] or row["status"] == "complete":
+        status = "complete"
+    elif expires_at < datetime.now(timezone.utc):
+        status = "expired"
+    else:
+        status = "active"
     friend_id = row["partner_id"] if row["creator_id"] == student_id else row["creator_id"]
     friend = profiles_by_id.get(friend_id, {})
     return {"id": row["id"], "friend_id": friend_id, "friend_name": friend.get("display_name") or friend.get("username") or "Friend", "target_xp": row["target_xp"], "progress_xp": min(progress, row["target_xp"]), "status": status, "expires_at": expires_at}
 
 
 def active_friend_quests(student_id: str) -> list[dict]:
+    """Running quests with current friends, plus completed ones until their week ends.
+
+    Quests that ran out are stored as expired (or complete) here and stop showing.
+    """
     init_db()
-    with engine().connect() as connection:
+    with engine().begin() as connection:
+        friends = set(_friend_ids(connection, student_id))
+        if not friends:
+            return []
         rows = connection.execute(select(friend_quests).where(
-            or_(friend_quests.c.creator_id == student_id, friend_quests.c.partner_id == student_id),
-            friend_quests.c.status == "active",
+            or_(
+                and_(friend_quests.c.creator_id == student_id, friend_quests.c.partner_id.in_(friends)),
+                and_(friend_quests.c.partner_id == student_id, friend_quests.c.creator_id.in_(friends)),
+            ),
+            friend_quests.c.status.in_(("active", "complete")),
         ).order_by(friend_quests.c.created_at.desc())).mappings().all()
-        return [_quest_result(connection, row, student_id) for row in rows]
+        results = [_settle_quest(connection, row, student_id) for row in rows]
+    now = datetime.now(timezone.utc)
+    return [result for result in results
+            if result["status"] == "active" or (result["status"] == "complete" and result["expires_at"] >= now)]
 
 
 def friend_leaderboard(student_id: str) -> list[dict]:
@@ -1606,6 +1652,7 @@ def block_person(student_id: str, blocked_id: str) -> None:
             and_(friendships.c.requester_id == student_id, friendships.c.recipient_id == blocked_id),
             and_(friendships.c.requester_id == blocked_id, friendships.c.recipient_id == student_id),
         )))
+        _cancel_quests_between(connection, student_id, blocked_id)
         if not connection.execute(select(social_blocks).where(social_blocks.c.blocker_id == student_id, social_blocks.c.blocked_id == blocked_id)).first():
             connection.execute(social_blocks.insert().values(blocker_id=student_id, blocked_id=blocked_id, created_at=datetime.now(timezone.utc)))
 
