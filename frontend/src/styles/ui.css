@@ -820,3 +820,20 @@
   .ui-stat:nth-child(n + 3) { border-top: 1px solid var(--color-border); }
   .ui-stat__value { font-size: var(--text-xl); }
 }
+
+/*
+ * Touch. On phones and touch screens every shared control is at least 40px tall, and
+ * fields use 16px text so iOS does not zoom the page when one is focused.
+ */
+@media (max-width: 860px), (pointer: coarse) {
+  .ui-button,
+  .ui-button--sm,
+  .ui-input,
+  .ui-select { height: 40px; }
+  .ui-button--sm { padding-inline: 12px; }
+  .ui-segmented__item { height: 40px; }
+  .ui-menu__item { height: 40px; }
+  .ui-input,
+  .ui-select,
+  .ui-textarea { font-size: 16px; }
+}
