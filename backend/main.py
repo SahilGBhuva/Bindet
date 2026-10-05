@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+import re
 import time
+import unicodedata
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -440,9 +442,121 @@ def truthy_alias(value: str) -> str:
     return aliases.get(normalize_text(value), normalize_text(value))
 
 
+_FILE_NAME = re.compile(r"^[^\s/\\]+\.[a-z]{2,4}$")
+
+
 def file_stem(value: str) -> str:
+    """A note's file name without its extension, so "mendel" matches "mendel.pdf".
+
+    Only a single word ending in a short alphabetic extension counts as a file
+    name; "3.7 cm" or "3.5" keep their full text so "3" can never match them.
+    """
     text = normalize_text(value)
-    return text.rsplit(".", 1)[0] if "." in text else text
+    return text.rsplit(".", 1)[0] if _FILE_NAME.match(text) else text
+
+
+# --- Deterministic grading ----------------------------------------------------------
+# Answers that can be judged exactly are graded here, instantly and for free; only
+# genuinely open answers go to the AI grader.
+
+_NUMBER_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+}
+_QUANTITY = re.compile(
+    r"^(?P<number>[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:e[-+]?\d+)?)"
+    r"(?:\s*/\s*(?P<denominator>\d+))?"
+    r"\s*(?P<unit>%|[a-zµ°][a-zµ°²³/^0-9]{0,11})?$"
+)
+_ARTICLE = re.compile(r"^(?:the|a|an)\s+")
+MATH_TOPICS = {"addition", "subtraction", "multiplication", "division"}
+
+
+def canonical_answer(value: str) -> str:
+    """Case, width, spacing, surrounding quotes, a leading article and a final full stop
+    never change what an answer means. Inner symbols are kept: "-f(x)" and "f(-x)" differ."""
+    text = unicodedata.normalize("NFKC", value).replace("\u2212", "-").casefold()
+    text = " ".join(text.split()).strip("\"'`“”‘’ ")
+    text = text.rstrip(".!? ").strip()
+    return _ARTICLE.sub("", text)
+
+
+def parse_quantity(value: str) -> tuple[Decimal, str, int] | None:
+    """(value, unit, decimal places) for answers like "12", "3.5 cm", "1/2", "40%", "seven"."""
+    text = canonical_answer(value)
+    if text in _NUMBER_WORDS:
+        return Decimal(_NUMBER_WORDS[text]), "", 0
+    match = _QUANTITY.match(text)
+    if not match or not any(char.isdigit() for char in match["number"]):
+        return None
+    try:
+        number = Decimal(match["number"].replace(",", ""))
+        if match["denominator"]:
+            denominator = Decimal(match["denominator"])
+            if denominator == 0:
+                return None
+            # A fraction is exact, so it may match a rounded decimal at any precision.
+            return number / denominator, match["unit"] or "", 28
+    except InvalidOperation:
+        return None
+    if not number.is_finite():
+        return None
+    places = max(0, -number.as_tuple().exponent) if "e" not in match["number"] else 0
+    return number, match["unit"] or "", places
+
+
+def _rounds_to(exact: Decimal, rounded: Decimal, places: int) -> bool:
+    """True when `rounded`, given to `places` (2 or more) decimals, is `exact` correctly rounded."""
+    if places < 2 or places > 12:
+        return False
+    try:
+        return exact.quantize(Decimal(1).scaleb(-places)) == rounded
+    except InvalidOperation:
+        return False
+
+
+def quantities_match(student: tuple[Decimal, str, int], reference: tuple[Decimal, str, int]) -> bool:
+    student_value, _, student_places = student
+    reference_value, reference_unit, reference_places = reference
+    # A missing % sign is forgiven, and "0.4" also answers "40%".
+    candidates = [student_value]
+    if reference_unit == "%" and student[1] != "%":
+        candidates.append(student_value * 100)
+    for value in candidates:
+        if value == reference_value:
+            return True
+        if abs(value - reference_value) <= Decimal("1e-9") * max(Decimal(1), abs(reference_value)):
+            return True
+        # Correct rounding either way: 3.14 for 3.14159, or 0.333 written for an exact 1/3.
+        if _rounds_to(reference_value, value, student_places) or _rounds_to(value, reference_value, reference_places):
+            return True
+    return False
+
+
+def deterministic_verdict(student_answer: str, correct_answer: str, topic: str = "") -> bool | None:
+    """True or False when the answer can be judged exactly, None when it needs the AI grader.
+
+    Correct answers are recognised for every question. An answer is only judged
+    wrong here when that is certain and an AI explanation would add nothing: a
+    blank answer, or a wrong number on a generated arithmetic exercise.
+    """
+    if not canonical_answer(student_answer):
+        return False
+    if answers_match(student_answer, correct_answer):
+        return True
+    student = parse_quantity(student_answer)
+    reference = parse_quantity(correct_answer)
+    if student and reference:
+        units_agree = not student[1] or not reference[1] or student[1] == reference[1] or "%" in (student[1], reference[1])
+        if units_agree and quantities_match(student, reference):
+            return True
+        if topic in MATH_TOPICS and not student[1] and not reference[1]:
+            return False
+        return None
+    if canonical_answer(student_answer) == canonical_answer(correct_answer):
+        return True
+    return None
 
 
 def answers_match(student_answer: str, correct_answer: str) -> bool:
@@ -1433,15 +1547,22 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
     if question["completed"] == questions.COMPLETED:
         raise HTTPException(status_code=409, detail="Question already completed")
 
-    exact_match = answers_match(data.student_answer, question["correct_answer"])
-    if exact_match:
+    verdict = deterministic_verdict(data.student_answer, question["correct_answer"], question["topic"])
+    grading_source: Literal["deterministic", "ai", "fallback"] = "deterministic"
+    if verdict is True:
         correct = True
         score = 100
         mistake_type = None
         misconception = None
         explanation = "Correct! Great work."
         hint = None
-        grading_source: Literal["deterministic", "ai", "fallback"] = "deterministic"
+    elif verdict is False:
+        correct = False
+        score = 0
+        mistake_type = classify_mistake(data.student_answer, question["correct_answer"])
+        misconception = None
+        explanation = "Not quite yet. Use the hint and try again."
+        hint = make_hint(question["question"], mistake_type)
     else:
         if authorization:
             try:
