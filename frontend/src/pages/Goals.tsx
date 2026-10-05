@@ -693,7 +693,7 @@ function CalendarView({ tasks, today, selectedId, onSelect, onCompose }: {
   const monthDays = days.filter((day) => day.getMonth() === cursor.getMonth() && byDay.has(isoDay(day)))
   const chip = (task: Task) => (
     <button key={task.id} type="button" className={`tasks-calendar__chip${task.status === 'done' ? ' is-done' : ''}${task.id === selectedId ? ' is-selected' : ''}`}
-      onClick={() => onSelect(task.id)} title={task.title}>
+      onClick={() => onSelect(task.id)} title={task.due_time ? `${timeLabel(task.due_time)} · ${task.title}` : task.title}>
       {task.due_time ? <time>{timeLabel(task.due_time)}</time> : null}<span>{task.title}</span>
     </button>
   )

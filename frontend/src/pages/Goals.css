@@ -385,6 +385,11 @@
 .tasks-calendar__chip:hover { border-color: var(--color-border-strong); }
 .tasks-calendar__chip.is-done span { color: var(--color-text-tertiary); text-decoration: line-through; }
 .tasks-calendar__chip.is-selected { border-color: var(--color-text); }
+/* Narrow day cells give the title the room and drop the time (it stays in the tooltip and details). */
+.tasks-calendar__day { container-type: inline-size; }
+@container (max-width: 120px) {
+  .tasks-calendar__chip time { display: none; }
+}
 .tasks-calendar__more { padding: 0 5px; color: var(--color-text-tertiary); font-size: var(--text-2xs); }
 
 /* Narrow screens get an agenda list instead of the month grid. */
