@@ -800,6 +800,17 @@ def health():
     return {"status": "healthy"}
 
 
+@app.post("/api/ai/warm")
+def warm_ai():
+    """Called when a student is about to use an AI feature (focusing the tutor, opening a quiz).
+
+    It wakes this instance and opens the pooled OpenRouter connection ahead of the
+    real request. It needs no sign-in because it touches no student data and sends
+    nothing to the model; it runs at most once every few minutes per instance.
+    """
+    return {"warming": ai_tutor.warm_connection()}
+
+
 @app.get("/api/auth/config", response_model=AuthConfigResponse)
 def auth_config():
     url, key = auth.public_settings()
@@ -1618,9 +1629,13 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
             raise HTTPException(status_code=409, detail="Question already completed")
         # Full credit on the first try; retrying after a wrong answer earns less, so guessing doesn't pay.
         xp = FIRST_TRY_XP if prior == questions.OPEN else RETRY_XP
+        record = database.update_progress(student_id, question["topic"], correct, xp)
     else:
-        questions.mark_missed(student_id, data.question_id)
-    record = database.update_progress(student_id, question["topic"], correct, xp)
+        # Marking the miss and recording the attempt are independent writes.
+        _, record = gather(
+            (questions.mark_missed, student_id, data.question_id),
+            (database.update_progress, student_id, question["topic"], correct, xp),
+        )
     return AnswerResponse(
         correct=correct,
         score=score,
