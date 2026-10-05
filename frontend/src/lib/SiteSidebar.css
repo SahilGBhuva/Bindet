@@ -101,7 +101,7 @@
 .bindit-rail__account .bindit-rail__mini { width: 22px; height: 22px; margin-left: -4px; }
 
 /* Sections: lots of white space between them, as drawn. */
-.bindit-rail__block { display: grid; gap: 6px; min-width: 0; }
+.bindit-rail__block { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
 
 .bindit-rail__heading { display: flex; align-items: center; gap: 6px; min-height: 22px; margin: 0; font: inherit; }
 
@@ -165,7 +165,9 @@
 .bindit-rail__controls { display: flex; align-items: center; gap: 0; margin-left: auto; }
 
 /* Rows: 13px, tight rhythm, tiny outline glyphs. */
-.bindit-rail__entries { display: grid; gap: 1px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+.bindit-rail__entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+/* Long course, group and task names end in an ellipsis instead of widening the rail. */
+.bindit-rail__entries > li { min-width: 0; }
 
 .bindit-rail__entry {
   display: flex;

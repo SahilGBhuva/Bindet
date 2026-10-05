@@ -359,7 +359,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const groupLink = (group: StudyGroup, glyph: ReactNode, extra = '') => {
     const current = active === 'stats' && groupParam === group.id
     return (
-      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'page' : undefined}>
+      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'page' : undefined} title={group.name}>
         <span className="bindit-rail__glyph">{glyph}</span>
         <span className="bindit-rail__entry-text">{group.name}</span>
       </a>
@@ -373,7 +373,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {highlighted.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals">
+                <a className="bindit-rail__entry" href="#goals" title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--dot" aria-hidden="true">·</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
@@ -389,7 +389,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             const current = active === 'tools' && course.name === notebook.activeCourse
             return (
               <li key={course.name}>
-                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} onClick={() => openCourse(course)}>
+                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} title={course.name} onClick={() => openCourse(course)}>
                   <span className="bindit-rail__glyph">{index % 3 === 2 ? glyphs.circle : glyphs.square}</span>
                   <span className="bindit-rail__entry-text">{course.name}</span>
                 </a>
@@ -444,7 +444,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {nextTasks.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals">
+                <a className="bindit-rail__entry" href="#goals" title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--star" aria-hidden="true">*</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
