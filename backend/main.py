@@ -7,7 +7,7 @@ import unicodedata
 import hashlib
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -565,14 +565,37 @@ def normalize_text(value: str) -> str:
     return " ".join(value.strip().lower().split())
 
 
+# Numbers further than this many powers of ten from 1 are not graded as numbers.
+# Huge exponents ("1e999999999") overflow or stall Decimal arithmetic, and no real
+# answer needs them; such text is compared as text instead.
+MAX_DECIMAL_EXPONENT = 50
+
+
+def finite_decimal(text: str) -> Decimal | None:
+    """Decimal(text) when it is a finite number of sane magnitude, else None.
+
+    NaN, sNaN and Infinity are refused, as is any value whose exponent or magnitude
+    is beyond MAX_DECIMAL_EXPONENT. Never raises.
+    """
+    try:
+        number = Decimal(text)
+        if not number.is_finite():
+            return None
+        exponent = number.as_tuple().exponent
+        if not isinstance(exponent, int) or abs(exponent) > MAX_DECIMAL_EXPONENT:
+            return None
+        if number and abs(number.adjusted()) > MAX_DECIMAL_EXPONENT:
+            return None
+        return number
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
 def parse_number(value: str) -> Decimal | None:
     cleaned = value.strip().replace(",", "")
     if cleaned.endswith("%"):
         cleaned = cleaned[:-1].strip()
-    try:
-        return Decimal(cleaned)
-    except InvalidOperation:
-        return None
+    return finite_decimal(cleaned)
 
 
 def truthy_alias(value: str) -> str:
@@ -628,18 +651,18 @@ def parse_quantity(value: str) -> tuple[Decimal, str, int] | None:
     match = _QUANTITY.match(text)
     if not match or not any(char.isdigit() for char in match["number"]):
         return None
-    try:
-        number = Decimal(match["number"].replace(",", ""))
-        if match["denominator"]:
-            denominator = Decimal(match["denominator"])
-            if denominator == 0:
-                return None
+    number = finite_decimal(match["number"].replace(",", ""))
+    if number is None:
+        return None
+    if match["denominator"]:
+        denominator = finite_decimal(match["denominator"])
+        if denominator is None or denominator == 0:
+            return None
+        try:
             # A fraction is exact, so it may match a rounded decimal at any precision.
             return number / denominator, match["unit"] or "", 28
-    except InvalidOperation:
-        return None
-    if not number.is_finite():
-        return None
+        except ArithmeticError:
+            return None
     places = max(0, -number.as_tuple().exponent) if "e" not in match["number"] else 0
     return number, match["unit"] or "", places
 
@@ -650,11 +673,18 @@ def _rounds_to(exact: Decimal, rounded: Decimal, places: int) -> bool:
         return False
     try:
         return exact.quantize(Decimal(1).scaleb(-places)) == rounded
-    except InvalidOperation:
+    except ArithmeticError:
         return False
 
 
 def quantities_match(student: tuple[Decimal, str, int], reference: tuple[Decimal, str, int]) -> bool:
+    try:
+        return _quantities_match(student, reference)
+    except ArithmeticError:
+        return False
+
+
+def _quantities_match(student: tuple[Decimal, str, int], reference: tuple[Decimal, str, int]) -> bool:
     student_value, _, student_places = student
     reference_value, reference_unit, reference_places = reference
     # A missing % sign is forgiven, and "0.4" also answers "40%".
@@ -701,7 +731,10 @@ def answers_match(student_answer: str, correct_answer: str) -> bool:
     student_number = parse_number(student_answer)
     correct_number = parse_number(correct_answer)
     if student_number is not None and correct_number is not None:
-        return student_number == correct_number
+        try:
+            return student_number == correct_number
+        except ArithmeticError:
+            return False
     if truthy_alias(student_answer) == truthy_alias(correct_answer):
         return True
     if file_stem(student_answer) == file_stem(correct_answer) and file_stem(correct_answer):
@@ -715,12 +748,15 @@ def classify_mistake(student_answer: str, correct_answer: str) -> str:
     student_number = parse_number(student_answer)
     correct_number = parse_number(correct_answer)
     if student_number is not None and correct_number is not None:
-        if student_number == -correct_number:
-            return "sign_error"
-        if abs(student_number - correct_number) == 1:
-            return "off_by_one"
-        if correct_number != 0 and (student_number * 10 == correct_number or student_number == correct_number * 10):
-            return "place_value_error"
+        try:
+            if student_number == -correct_number:
+                return "sign_error"
+            if abs(student_number - correct_number) == 1:
+                return "off_by_one"
+            if correct_number != 0 and (student_number * 10 == correct_number or student_number == correct_number * 10):
+                return "place_value_error"
+        except ArithmeticError:
+            return "concept_or_format_error"
         return "calculation_error"
     return "concept_or_format_error"
 

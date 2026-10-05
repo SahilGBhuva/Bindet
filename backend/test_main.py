@@ -177,6 +177,30 @@ class BinditBackendTests(unittest.TestCase):
         self.assertFalse(main.answers_match('3', '3.5'))
         self.assertTrue(main.answers_match('mendel', 'mendel.pdf'))
 
+    def test_hostile_numbers_never_crash_the_grader(self):
+        hostile = ['sNaN', '-sNaN', 'NaN', 'Infinity', '-Infinity', 'inf', '1e999999999', '1e-999999999',
+                   '1e51', '1/0', '1e999999999/3', 'sNaN%', '12', '0', '3.5 cm']
+        for student in hostile:
+            for reference in hostile:
+                with self.subTest(student=student, reference=reference):
+                    main.deterministic_verdict(student, reference, 'addition')
+                    main.answers_match(student, reference)
+                    main.classify_mistake(student, reference)
+        for value in ('sNaN', 'NaN', 'Infinity', '1e999999999', '1e-51', '1' + '0' * 60):
+            self.assertIsNone(main.parse_number(value))
+            self.assertIsNone(main.parse_quantity(value))
+        self.assertEqual(main.parse_number('1e50'), main.Decimal('1e50'))
+        self.assertIs(main.deterministic_verdict('1e999999999', '1e999999999', 'addition'), True)  # same text
+        self.assertIs(main.deterministic_verdict('NaN', '4', 'addition'), None)
+
+    def test_hostile_answers_are_graded_through_the_route(self):
+        for answer in ('sNaN', '1e999999999', 'Infinity', 'NaN'):
+            question_id = self.save_math_question('guest:student-1')
+            request = main.AnswerRequest(question_id=question_id, student_answer=answer, student_id='student-1')
+            with patch.object(main.ai_tutor, 'grade_answer', side_effect=main.ai_tutor.AITutorError('offline')):
+                result = main.analyze_answer(request, None)
+            self.assertFalse(result.correct)
+
     def test_authenticated_identity_overrides_spoofed_student_id(self):
         question_id = self.save_math_question('account-1')
         request = main.AnswerRequest(question_id=question_id, student_answer='4', student_id='spoofed')
