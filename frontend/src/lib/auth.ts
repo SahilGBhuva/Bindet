@@ -295,6 +295,34 @@ export type AuthRedirect =
 
 let authRedirect: AuthRedirect | null = null
 
+const LINK_EXPIRED_MESSAGE = 'That link is invalid or has expired. Request a new one and try again.'
+const REDIRECT_ERROR_MESSAGES: Record<string, string> = {
+  otp_expired: LINK_EXPIRED_MESSAGE,
+  flow_state_expired: LINK_EXPIRED_MESSAGE,
+  flow_state_not_found: LINK_EXPIRED_MESSAGE,
+  bad_jwt: LINK_EXPIRED_MESSAGE,
+  bad_code_verifier: LINK_EXPIRED_MESSAGE,
+  invalid_request: LINK_EXPIRED_MESSAGE,
+  unauthorized_client: LINK_EXPIRED_MESSAGE,
+  access_denied: 'That link was not accepted. Request a new one and try again.',
+  otp_disabled: 'Email links are turned off right now. Log in with your password instead.',
+  email_address_not_authorized: 'We can’t send email to that address. Try another one.',
+  over_email_send_rate_limit: 'Too many emails were sent. Wait a few minutes, then request a new link.',
+  over_request_rate_limit: 'Too many attempts. Wait a few minutes and try again.',
+  user_banned: 'This account can’t sign in right now.',
+  signup_disabled: 'New accounts can’t be created right now.',
+  server_error: 'Something went wrong on our side. Request a new link and try again.',
+  temporarily_unavailable: 'Accounts are briefly unavailable. Try again in a few minutes.',
+  unexpected_failure: 'Something went wrong on our side. Request a new link and try again.',
+}
+
+/** A fixed, friendly message for a known error code from an email link; never the URL's own text. */
+function redirectErrorMessage(errorCode: string | null, errorName: string | null) {
+  return (errorCode && REDIRECT_ERROR_MESSAGES[errorCode])
+    || (errorName && REDIRECT_ERROR_MESSAGES[errorName])
+    || 'That link did not work. Request a new one and try again.'
+}
+
 /**
  * Reads what the auth server put in the URL fragment after an email link
  * (sign-up confirmation, password recovery) and removes it from the address
@@ -305,14 +333,15 @@ export function takeAuthRedirect(): AuthRedirect {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const accessToken = params.get('access_token')
   const refreshToken = params.get('refresh_token')
-  const errorCode = params.get('error') ?? params.get('error_code')
-  const errorDescription = params.get('error_description')
-  if (accessToken || refreshToken || errorCode || errorDescription) {
+  const errorCode = params.get('error_code')
+  const errorName = params.get('error')
+  const hasError = Boolean(errorCode || errorName || params.get('error_description'))
+  if (accessToken || refreshToken || hasError) {
     window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${window.location.search}`)
   }
-  if (errorCode || errorDescription) {
-    const message = (errorDescription || 'That link did not work.').replace(/\s+/g, ' ').trim().slice(0, 240)
-    authRedirect = { kind: 'error', message: /expired|invalid/i.test(message) ? `${message}. Request a new link and try again.` : message }
+  if (hasError) {
+    // Anyone can craft this URL, so its free-text error_description is never shown.
+    authRedirect = { kind: 'error', message: redirectErrorMessage(errorCode, errorName) }
   } else if (accessToken && refreshToken) {
     const expiresIn = Number(params.get('expires_in'))
     authRedirect = { kind: 'tokens', accessToken, refreshToken, expiresIn, type: params.get('type') ?? '' }
