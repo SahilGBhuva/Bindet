@@ -140,6 +140,29 @@ class FriendsTests(unittest.TestCase):
         self.assertEqual([member["weekly_xp"] for member in refreshed["members"]], [30, 20])
         self.assertEqual(len(refreshed["activity"]), 2)
 
+    def test_listing_several_groups_keeps_each_groups_members_and_activity_apart(self):
+        database.onboard_account("kim-id", "kim", "Kim", None)
+        bio = database.create_study_group("alex-id", "Bio crew")
+        chem = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("sam-id", bio["invite_code"])
+        database.join_study_group("kim-id", chem["invite_code"])
+        for _ in range(10):
+            database.update_progress("sam-id", "Biology", True, 10)
+        database.update_progress("kim-id", "Chemistry", True, 20)
+        database.block_person("alex-id", "kim-id")
+        groups = {group["name"]: group for group in database.list_study_groups("alex-id")}
+        self.assertEqual({m["student_id"] for m in groups["Bio crew"]["members"]}, {"alex-id", "sam-id"})
+        self.assertEqual({m["student_id"] for m in groups["Chem crew"]["members"]}, {"alex-id", "kim-id"})
+        self.assertEqual(len(groups["Bio crew"]["activity"]), 8)
+        self.assertEqual({item["student_id"] for item in groups["Bio crew"]["activity"]}, {"sam-id"})
+        # Blocked members still count toward the group but leave the viewer's feed.
+        self.assertEqual(groups["Chem crew"]["activity"], [])
+        self.assertEqual(groups["Chem crew"]["weekly_xp"], 20)
+        self.assertEqual(groups["Bio crew"]["role"], "owner")
+        self.assertEqual(database.get_study_group("kim-id", chem["id"])["role"], "member")
+        with self.assertRaisesRegex(ValueError, "group_not_found"):
+            database.get_study_group("kim-id", bio["id"])
+
     def test_group_members_can_leave_but_owner_cannot(self):
         group = database.create_study_group("alex-id", "Exam week")
         database.join_study_group("sam-id", group["invite_code"])

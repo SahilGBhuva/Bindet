@@ -340,35 +340,39 @@ def _validated_milestone(connection, group_id: str | None, milestone_id) -> int 
     return found
 
 
+def _summary_select():
+    """Task rows plus their counts, group name and owner name, in one statement."""
+    def count(table, *conditions):
+        return select(func.count()).select_from(table).where(table.c.task_id == tasks.c.id, *conditions).scalar_subquery()
+    return select(
+        tasks,
+        count(task_checklist).label("checklist_total"),
+        count(task_checklist, task_checklist.c.done.is_(True)).label("checklist_done"),
+        count(task_comments).label("comment_count"),
+        count(task_attachments).label("attachment_count"),
+        select(database.study_groups.c.name).where(database.study_groups.c.id == tasks.c.group_id)
+            .scalar_subquery().label("group_name"),
+        select(database.profiles.c.display_name).where(database.profiles.c.student_id == tasks.c.owner_id)
+            .scalar_subquery().label("owner_name"),
+    )
+
+
 def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, str]) -> list[dict]:
+    """Shape rows from _summary_select(); one more query fetches assignees and their names."""
     if not rows:
         return []
     ids = [row["id"] for row in rows]
-    assignees: dict[str, list[str]] = defaultdict(list)
-    for task_id, assignee in connection.execute(select(task_assignees.c.task_id, task_assignees.c.student_id).where(
+    assignees: dict[str, list[tuple[str, str | None]]] = defaultdict(list)
+    for task_id, assignee, name in connection.execute(select(
+        task_assignees.c.task_id, task_assignees.c.student_id, database.profiles.c.display_name,
+    ).outerjoin(database.profiles, database.profiles.c.student_id == task_assignees.c.student_id).where(
         task_assignees.c.task_id.in_(ids),
-    ).order_by(task_assignees.c.assigned_at)).all():
-        assignees[task_id].append(assignee)
-    checklist = {task_id: (total, int(done or 0)) for task_id, total, done in connection.execute(select(
-        task_checklist.c.task_id, func.count(), func.sum(case((task_checklist.c.done.is_(True), 1), else_=0)),
-    ).where(task_checklist.c.task_id.in_(ids)).group_by(task_checklist.c.task_id)).all()}
-    comments = dict(connection.execute(select(task_comments.c.task_id, func.count()).where(
-        task_comments.c.task_id.in_(ids),
-    ).group_by(task_comments.c.task_id)).all())
-    attachments = dict(connection.execute(select(task_attachments.c.task_id, func.count()).where(
-        task_attachments.c.task_id.in_(ids),
-    ).group_by(task_attachments.c.task_id)).all())
-    group_ids = {row["group_id"] for row in rows if row["group_id"]}
-    group_names = dict(connection.execute(select(database.study_groups.c.id, database.study_groups.c.name).where(
-        database.study_groups.c.id.in_(group_ids),
-    )).all()) if group_ids else {}
-    people = {row["owner_id"] for row in rows} | {person for values in assignees.values() for person in values}
-    names = _names(connection, people)
+    ).order_by(task_assignees.c.assigned_at, task_assignees.c.id)).all():
+        assignees[task_id].append((assignee, name))
     results = []
     for row in rows:
         role = roles.get(row["group_id"]) if row["group_id"] else None
         task_assigned = assignees.get(row["id"], [])
-        total, done = checklist.get(row["id"], (0, 0))
         results.append({
             "id": row["id"], "title": row["title"], "description": row["description"],
             "course": row["course"], "project": row["project"], "status": row["status"],
@@ -376,14 +380,14 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
             "priority": row["priority"],
             "due_date": row["due_date"].isoformat() if row["due_date"] else None,
             "due_time": row["due_time"], "milestone_id": row["milestone_id"], "sort_order": row["sort_order"],
-            "group_id": row["group_id"], "group_name": group_names.get(row["group_id"]) if row["group_id"] else None,
-            "owner": {"student_id": row["owner_id"], "display_name": names.get(row["owner_id"], "Student")},
-            "assignees": [{"student_id": person, "display_name": names.get(person, "Student")} for person in task_assigned],
-            "checklist_total": total, "checklist_done": done,
-            "comment_count": int(comments.get(row["id"], 0)),
-            "attachment_count": int(attachments.get(row["id"], 0)),
+            "group_id": row["group_id"], "group_name": row["group_name"] if row["group_id"] else None,
+            "owner": {"student_id": row["owner_id"], "display_name": row["owner_name"] or "Student"},
+            "assignees": [{"student_id": person, "display_name": name or "Student"} for person, name in task_assigned],
+            "checklist_total": int(row["checklist_total"] or 0), "checklist_done": int(row["checklist_done"] or 0),
+            "comment_count": int(row["comment_count"] or 0),
+            "attachment_count": int(row["attachment_count"] or 0),
             "created_at": _utc(row["created_at"]), "updated_at": _utc(row["updated_at"]), "completed_at": _utc(row["completed_at"]),
-            "can_edit": _can_edit(row, student_id, role, set(task_assigned)),
+            "can_edit": _can_edit(row, student_id, role, {person for person, _name in task_assigned}),
             "can_manage": _can_manage(row, student_id, role),
             "can_delete": _can_delete(row, student_id, role),
         })
@@ -391,7 +395,7 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
 
 
 def _summary(connection, task_id: str, student_id: str) -> dict:
-    row = connection.execute(select(tasks).where(tasks.c.id == task_id)).mappings().one()
+    row = connection.execute(_summary_select().where(tasks.c.id == task_id)).mappings().one()
     return _summaries(connection, [dict(row)], student_id, _my_group_roles(connection, student_id))[0]
 
 
@@ -407,7 +411,7 @@ def list_tasks(student_id: str, group_id: str | None = None, limit: int = MAX_LI
         else:
             personal = (tasks.c.owner_id == student_id) & tasks.c.group_id.is_(None)
             visible = or_(personal, tasks.c.group_id.in_(list(roles))) if roles else personal
-        rows = connection.execute(select(tasks).where(visible).order_by(
+        rows = connection.execute(_summary_select().where(visible).order_by(
             (tasks.c.status == "done").asc(), tasks.c.due_date.is_(None).asc(), tasks.c.due_date.asc(),
             tasks.c.sort_order.asc(), tasks.c.created_at.desc(),
         ).limit(max(1, min(limit, MAX_LIST)))).mappings().all()
@@ -801,10 +805,15 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
     init_tasks()
     today = today or _now().date()
     with database.engine().connect() as connection:
-        role = _group_role(connection, group_id, student_id)
-        if role is None:
+        # Current members only: the viewer's own membership row gates the whole report.
+        group = connection.execute(select(database.study_groups, database.study_group_members.c.role.label("viewer_role")).join(
+            database.study_group_members, database.study_group_members.c.group_id == database.study_groups.c.id,
+        ).where(
+            database.study_groups.c.id == group_id, database.study_group_members.c.student_id == student_id,
+        )).mappings().first()
+        if group is None:
             raise ValueError("group_not_found")
-        group = connection.execute(select(database.study_groups).where(database.study_groups.c.id == group_id)).mappings().one()
+        role = group["viewer_role"]
         members = connection.execute(select(
             database.profiles.c.student_id, database.profiles.c.display_name, database.profiles.c.username,
             database.study_group_members.c.role,
@@ -814,46 +823,51 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
         rows = connection.execute(select(
             tasks.c.id, tasks.c.status, tasks.c.due_date, tasks.c.created_at, tasks.c.completed_at,
         ).where(tasks.c.group_id == group_id)).mappings().all()
-        workload = connection.execute(select(
-            task_assignees.c.student_id, func.count(), func.sum(case((tasks.c.status == "done", 1), else_=0)),
-        ).join(tasks, tasks.c.id == task_assignees.c.task_id).where(tasks.c.group_id == group_id)
-          .group_by(task_assignees.c.student_id)).all()
         milestones = _milestone_rows(connection, group_id)
-        activity = connection.execute(select(task_activity, tasks.c.title).join(
+        activity = connection.execute(select(task_activity, tasks.c.title, database.profiles.c.display_name.label("actor_name")).join(
             tasks, tasks.c.id == task_activity.c.task_id,
-        ).where(task_activity.c.group_id == group_id).order_by(
-            task_activity.c.created_at.desc(), task_activity.c.id.desc(),
-        ).limit(20)).mappings().all()
-        names = _names(connection, {row["actor_id"] for row in activity})
+        ).outerjoin(database.profiles, database.profiles.c.student_id == task_activity.c.actor_id).where(
+            task_activity.c.group_id == group_id,
+        ).order_by(task_activity.c.created_at.desc(), task_activity.c.id.desc()).limit(20)).mappings().all()
         # Who has done anything lately: task activity or practice XP in the last 7 days.
+        # Practice is reduced to a yes/no per member; no XP amounts or times leave this function.
         week_ago = datetime.combine(today - timedelta(days=6), datetime.min.time(), tzinfo=timezone.utc)
         member_ids = [member["student_id"] for member in members]
-        recent_actors = set(connection.execute(select(task_activity.c.actor_id).where(
-            task_activity.c.group_id == group_id, task_activity.c.created_at >= week_ago,
-        )).scalars().all())
         recent_xp = set(connection.execute(select(database.xp_events.c.student_id).where(
             database.xp_events.c.student_id.in_(member_ids), database.xp_events.c.created_at >= week_ago,
-        )).scalars().all()) if member_ids else set()
-        # "No response": open to-do tasks where no assignee has touched the task since it was created.
+        ).distinct()).scalars().all()) if member_ids else set()
         assigned = defaultdict(set)
         for task_id, person in connection.execute(select(task_assignees.c.task_id, task_assignees.c.student_id).join(
             tasks, tasks.c.id == task_assignees.c.task_id,
         ).where(tasks.c.group_id == group_id)).all():
             assigned[task_id].add(person)
+        # One pass over the group's activity, grouped per task and actor: who touched which
+        # task after creating it (for "no response"), and who was active this week.
         touched = defaultdict(set)
-        for task_id, actor, kind in connection.execute(select(task_activity.c.task_id, task_activity.c.actor_id, task_activity.c.kind).where(
-            task_activity.c.group_id == group_id,
+        recent_actors = set()
+        for task_id, actor, kind, latest in connection.execute(select(
+            task_activity.c.task_id, task_activity.c.actor_id, task_activity.c.kind, func.max(task_activity.c.created_at),
+        ).where(task_activity.c.group_id == group_id).group_by(
+            task_activity.c.task_id, task_activity.c.actor_id, task_activity.c.kind,
         )).all():
             if kind != "created":
                 touched[task_id].add(actor)
+            if latest is not None and _utc(latest if isinstance(latest, datetime) else datetime.fromisoformat(str(latest))) >= week_ago:
+                recent_actors.add(actor)
 
+    statuses = {row["id"]: row["status"] for row in rows}
+    workload: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for task_id, people in assigned.items():
+        for person in people:
+            workload[person][0] += 1
+            workload[person][1] += statuses.get(task_id) == "done"
     by_status = {status: 0 for status in STATUSES}
     for row in rows:
         by_status[row["status"]] = by_status.get(row["status"], 0) + 1
     total = len(rows)
     done = by_status["done"]
     overdue = sum(1 for row in rows if row["status"] != "done" and row["due_date"] and row["due_date"] < today)
-    load = {person: (count, int(finished or 0)) for person, count, finished in workload}
+    load = {person: (count, finished) for person, (count, finished) in workload.items()}
 
     start = today - timedelta(days=days - 1)
     series = []
@@ -914,7 +928,7 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
         "projected_finish": projected,
         "activity": [{
             "id": row["id"], "task_id": row["task_id"], "task_title": row["title"], "kind": row["kind"],
-            "detail": row["detail"], "actor_name": names.get(row["actor_id"], "Student"), "created_at": _utc(row["created_at"]),
+            "detail": row["detail"], "actor_name": row["actor_name"] or "Student", "created_at": _utc(row["created_at"]),
         } for row in activity],
     }
 

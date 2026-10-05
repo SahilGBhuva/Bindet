@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
-    UniqueConstraint, and_, create_engine, delete, func, inspect, or_, select, text, update,
+    UniqueConstraint, and_, create_engine, delete, func, inspect, literal, or_, select, text, union_all, update,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import ArgumentError
@@ -1260,63 +1260,81 @@ def _blocked_by(connection, student_id: str) -> set[str]:
     )).scalars())
 
 
-def _study_group_result(connection, student_id: str, group: dict) -> dict:
-    membership = connection.execute(select(study_group_members.c.role).where(
-        study_group_members.c.group_id == group["id"], study_group_members.c.student_id == student_id,
-    )).scalar_one_or_none()
-    if membership is None:
-        raise ValueError("group_not_found")
+def _study_group_results(connection, student_id: str, groups: list[dict], roles: dict[str, str]) -> list[dict]:
+    """Build several groups' views in three queries total (blocks, members, activity)
+    instead of four per group. roles maps group ID to the viewer's role."""
+    if not groups:
+        return []
+    group_ids = [group["id"] for group in groups]
     today_utc = datetime.now(timezone.utc).date()
     week_start = datetime.combine(today_utc - timedelta(days=today_utc.weekday()), datetime.min.time(), tzinfo=timezone.utc)
-    group_member_ids = select(study_group_members.c.student_id).where(study_group_members.c.group_id == group["id"])
+    member_ids_query = select(study_group_members.c.student_id).where(study_group_members.c.group_id.in_(group_ids))
     weekly = select(
         xp_events.c.student_id, func.sum(xp_events.c.xp).label("weekly_xp"),
     ).where(
-        xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(group_member_ids),
+        xp_events.c.created_at >= week_start, xp_events.c.student_id.in_(member_ids_query),
     ).group_by(xp_events.c.student_id).subquery()
-    members = connection.execute(select(
+    member_rows = connection.execute(select(
+        study_group_members.c.group_id,
         profiles.c.student_id, profiles.c.username, profiles.c.display_name, profiles.c.avatar_path,
         study_group_members.c.role, study_group_members.c.joined_at,
         func.coalesce(weekly.c.weekly_xp, 0).label("weekly_xp"),
     ).join(study_group_members, profiles.c.student_id == study_group_members.c.student_id)
       .outerjoin(weekly, profiles.c.student_id == weekly.c.student_id)
-      .where(study_group_members.c.group_id == group["id"])
+      .where(study_group_members.c.group_id.in_(group_ids))
       .order_by(func.coalesce(weekly.c.weekly_xp, 0).desc(), profiles.c.display_name.asc())).mappings().all()
+    members: dict[str, list[dict]] = {group_id: [] for group_id in group_ids}
+    for row in member_rows:
+        member = dict(row)
+        members[member.pop("group_id")].append(member)
     # The viewer's activity feed leaves out anyone they have blocked.
     blocked = _blocked_by(connection, student_id)
-    member_ids = [member["student_id"] for member in members if member["student_id"] not in blocked]
-    activity = connection.execute(select(
-        xp_events.c.id, xp_events.c.student_id, xp_events.c.xp, xp_events.c.created_at,
-        profiles.c.display_name,
-    ).join(profiles, profiles.c.student_id == xp_events.c.student_id)
-      .where(xp_events.c.student_id.in_(member_ids))
-      .order_by(xp_events.c.created_at.desc()).limit(8)).mappings().all() if member_ids else []
-    weekly_xp = sum(int(member["weekly_xp"] or 0) for member in members)
-    return {
+    per_group = []
+    for group_id in group_ids:
+        visible = [member["student_id"] for member in members[group_id] if member["student_id"] not in blocked]
+        if visible:
+            per_group.append(select(
+                literal(group_id).label("group_id"), xp_events.c.id, xp_events.c.student_id, xp_events.c.xp,
+                xp_events.c.created_at, profiles.c.display_name,
+            ).join(profiles, profiles.c.student_id == xp_events.c.student_id)
+              .where(xp_events.c.student_id.in_(visible))
+              .order_by(xp_events.c.created_at.desc()).limit(8).subquery())
+    activity: dict[str, list[dict]] = {group_id: [] for group_id in group_ids}
+    if per_group:
+        # One round trip: each group's newest 8 events, combined with UNION ALL.
+        combined = union_all(*[select(*part.c) for part in per_group]).subquery()
+        for row in connection.execute(select(combined).order_by(combined.c.created_at.desc())).mappings():
+            item = dict(row)
+            activity[item.pop("group_id")].append(item)
+    return [{
         "id": group["id"], "name": group["name"], "description": group["description"],
         "invite_code": group["invite_code"], "weekly_goal_xp": group["weekly_goal_xp"],
-        "weekly_xp": weekly_xp, "role": membership, "created_at": group["created_at"],
-        "members": [dict(member) for member in members], "activity": [dict(item) for item in activity],
-    }
+        "weekly_xp": sum(int(member["weekly_xp"] or 0) for member in members[group["id"]]),
+        "role": roles[group["id"]], "created_at": group["created_at"],
+        "members": members[group["id"]], "activity": activity[group["id"]],
+    } for group in groups]
 
 
 def get_study_group(student_id: str, group_id: str) -> dict:
     init_db()
     with engine().connect() as connection:
-        group = connection.execute(select(study_groups).where(study_groups.c.id == group_id)).mappings().first()
-        if not group:
+        row = connection.execute(select(study_groups, study_group_members.c.role.label("viewer_role")).join(
+            study_group_members, study_groups.c.id == study_group_members.c.group_id,
+        ).where(study_groups.c.id == group_id, study_group_members.c.student_id == student_id)).mappings().first()
+        if not row:
             raise ValueError("group_not_found")
-        return _study_group_result(connection, student_id, group)
+        return _study_group_results(connection, student_id, [dict(row)], {group_id: row["viewer_role"]})[0]
 
 
 def list_study_groups(student_id: str) -> list[dict]:
     init_db()
     with engine().connect() as connection:
-        groups = connection.execute(select(study_groups).join(
+        rows = connection.execute(select(study_groups, study_group_members.c.role.label("viewer_role")).join(
             study_group_members, study_groups.c.id == study_group_members.c.group_id,
         ).where(study_group_members.c.student_id == student_id)
           .order_by(study_group_members.c.joined_at.desc())).mappings().all()
-        return [_study_group_result(connection, student_id, group) for group in groups]
+        groups = [dict(row) for row in rows]
+        return _study_group_results(connection, student_id, groups, {group["id"]: group["viewer_role"] for group in groups})
 
 
 def leave_study_group(student_id: str, group_id: str, on_leave=None) -> bool:
@@ -1493,10 +1511,19 @@ def suggested_people(student_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _friend_ids(connection, student_id: str) -> list[str]:
+    """Accepted friends only. Cheaper than list_friends when just the IDs are needed."""
+    rows = connection.execute(select(friendships.c.requester_id, friendships.c.recipient_id).where(
+        friendships.c.status == "accepted",
+        or_(friendships.c.requester_id == student_id, friendships.c.recipient_id == student_id),
+    )).all()
+    return [recipient if requester == student_id else requester for requester, recipient in rows]
+
+
 def activity_feed(student_id: str) -> list[dict]:
     init_db()
-    ids = [student_id] + [friend["student_id"] for friend in list_friends(student_id)]
     with engine().connect() as connection:
+        ids = [student_id, *_friend_ids(connection, student_id)]
         rows = connection.execute(select(
             xp_events.c.id, xp_events.c.student_id, xp_events.c.xp, xp_events.c.created_at,
             profiles.c.display_name, profiles.c.username,
@@ -1515,8 +1542,8 @@ def activity_feed(student_id: str) -> list[dict]:
 
 def react_to_activity(student_id: str, event_id: int) -> dict:
     init_db()
-    visible = {student_id} | {friend["student_id"] for friend in list_friends(student_id)}
     with engine().begin() as connection:
+        visible = {student_id, *_friend_ids(connection, student_id)}
         event = connection.execute(select(xp_events).where(xp_events.c.id == event_id, xp_events.c.student_id.in_(visible))).mappings().first()
         if not event:
             raise ValueError("activity_not_found")
