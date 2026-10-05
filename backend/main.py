@@ -5,7 +5,7 @@ import re
 import time
 import unicodedata
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -1070,6 +1070,7 @@ def sse(event: str, payload: dict) -> str:
 OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable. Try again in a moment, or upload a text PDF, DOCX or TXT instead."
 TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
+TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
 
 
 @app.post("/api/tutor/messages")
@@ -1094,9 +1095,12 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     except ValueError as error:
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
     try:
-        conversation, history = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
+        conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
+    # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
+    retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
+    history = [{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)]
     course = requested_course or conversation["course"]
     unit = requested_unit or conversation["unit"]
     if early_context:
@@ -1105,13 +1109,24 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
         labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
     # History was read above, so saving the new turn now cannot duplicate it. The write
     # overlaps the model's time to first token instead of delaying the request.
-    saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
+    if retry_of:
+        saving: Future = Future()
+        saving.set_result(retry_of)
+    else:
+        saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
     route = ai_tutor.tutor_route(content, bool(image_parts))
     model_messages = [
         {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
         *history,
         {"role": "user", "content": [{"type": "text", "text": content}, *image_parts] if image_parts else content},
     ]
+
+    def saved_user() -> bool:
+        try:
+            saving.result()
+            return True
+        except Exception:  # the database write failed; the student is told to resend
+            return False
 
     def events():
         chunks: list[str] = []
@@ -1122,6 +1137,9 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
             for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
                 if not user_sent:
                     user_sent = True
+                    if not saved_user():
+                        yield sse("error", {"message": TUTOR_NOT_SAVED, "retry": True})
+                        return
                     yield sse("user", {"user_message": saving.result()})
                 chunks.append(chunk)
                 yield sse("delta", {"text": chunk})
@@ -1131,6 +1149,9 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
         except ai_tutor.AITutorError:
             if not user_sent:
                 user_sent = True
+                if not saved_user():
+                    yield sse("error", {"message": TUTOR_NOT_SAVED, "retry": True})
+                    return
                 yield sse("user", {"user_message": saving.result()})
             if chunks:
                 reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks) + "\n\n(The reply was cut off.)", model_tier=route["tier"])
@@ -1141,8 +1162,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
         finally:
             # The student stopped the reply or left: keep what was already written,
             # after the question it answers.
-            if chunks and not saved:
-                saving.result()
+            if chunks and not saved and saved_user():
                 tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
