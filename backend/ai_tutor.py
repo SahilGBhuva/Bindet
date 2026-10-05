@@ -227,7 +227,7 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
         "temperature": 0.35,
         "max_tokens": 1400 if route["tier"] == "deep" else 900,
         "reasoning": {"effort": route["effort"], "exclude": True},
-        "provider": {"sort": "latency", "allow_fallbacks": True},
+        "provider": {"sort": "latency", "preferred_max_latency": 1.5, "allow_fallbacks": True},
         "messages": messages,
     }
     if session_id:
