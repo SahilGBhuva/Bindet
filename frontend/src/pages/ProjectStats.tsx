@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import type { AuthSession } from '../lib/auth'
 import {
   createMilestone,
@@ -682,10 +682,26 @@ function textWidth(text: string, size: number) {
   return text.length * size * 0.56
 }
 
+const VIEW_WIDTH = 560
+
 function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; unit: string }) {
   const [activeKey, setActiveKey] = useState<string | null>(null)
+  // Label size in chart units, so the printed text stays about 12px however small the chart is drawn.
+  const [font, setFont] = useState(13)
+  const figure = useRef<HTMLElement>(null)
   const titleId = useId()
   const total = wedges.reduce((sum, wedge) => sum + wedge.value, 0)
+
+  useEffect(() => {
+    const node = figure.current
+    if (!node || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width
+      if (width > 0) setFont(Math.min(22, Math.max(13, Math.round((12 * VIEW_WIDTH) / width))))
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const laid = useMemo(() => {
     const shares = wedges.map((wedge) => (total > 0 ? wedge.value / total : 0))
@@ -696,17 +712,17 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
       const mid = (t0 + t1) / 2
       const span = share * Math.PI
       const pct = Math.round(share * 100)
-      const inside = span * LABEL_R > Math.max(textWidth(wedge.label, 13), textWidth(`${pct}%`, 13)) + 14
+      const inside = span * LABEL_R > Math.max(textWidth(wedge.label, font), textWidth(`${pct}%`, font)) + 14
       return { ...wedge, share, pct, t0, t1, mid, inside }
     })
-  }, [wedges, total])
+  }, [wedges, total, font])
 
   const active = laid.find((wedge) => wedge.key === activeKey) ?? null
 
   return (
-    <figure className="pst-fan" aria-labelledby={titleId}>
+    <figure className="pst-fan" aria-labelledby={titleId} ref={figure}>
       <figcaption id={titleId} className="sr-only">{title}</figcaption>
-      <svg viewBox="-20 -24 560 280" className="pst-fan__svg" role="group" aria-labelledby={titleId}>
+      <svg viewBox={`-20 -24 ${VIEW_WIDTH} 280`} className="pst-fan__svg" role="group" aria-labelledby={titleId} style={{ '--fan-font': `${font}px` } as CSSProperties}>
         {total > 0 ? laid.filter((wedge) => wedge.value > 0).map((wedge) => (
           <path
             key={wedge.key}
@@ -730,8 +746,8 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
             const [x, y] = polar(wedge.mid, LABEL_R)
             return (
               <g key={wedge.key} transform={`translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${rotate.toFixed(2)})`} className="pst-fan__text" aria-hidden="true">
-                <text y={-4} textAnchor="middle" className="pst-fan__label">{wedge.label}</text>
-                <text y={14} textAnchor="middle" className="pst-fan__pct">{wedge.pct}%</text>
+                <text y={-font * 0.3} textAnchor="middle" className="pst-fan__label">{wedge.label}</text>
+                <text y={font * 1.08} textAnchor="middle" className="pst-fan__pct">{wedge.pct}%</text>
               </g>
             )
           }
@@ -746,7 +762,7 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
         )}
       </svg>
       <p className="pst-fan__readout" aria-live="polite">
-        {active ? `${active.label}: ${plural(active.value, unit)} (${active.pct}%)` : total > 0 ? `${plural(total, unit)} · hover a wedge for details` : 'No tasks assigned yet'}
+        {active ? `${active.label}: ${plural(active.value, unit)} (${active.pct}%)` : total > 0 ? `${plural(total, unit)} · hover or tap a wedge for details` : 'No tasks assigned yet'}
       </p>
       <table className="sr-only">
         <caption>{title}</caption>

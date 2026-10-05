@@ -523,15 +523,15 @@
 
 .pst-fan__label {
   fill: var(--pst-ink);
-  font-size: 13px;
+  font-size: var(--fan-font, 13px);
   font-weight: var(--weight-medium);
 }
 
-.pst-fan__label--out { font-size: 12px; fill: var(--color-text-secondary); }
+.pst-fan__label--out { font-size: calc(var(--fan-font, 13px) - 1px); fill: var(--color-text-secondary); }
 
 .pst-fan__pct {
   fill: var(--pst-ink);
-  font-size: 13px;
+  font-size: var(--fan-font, 13px);
   font-variant-numeric: tabular-nums;
 }
 
@@ -603,6 +603,7 @@
   .pst-mcol--overflow { padding-top: 0; border-left: 1px solid var(--pst-rule); }
   .pst-mcol--overflow .pst-mcol__head { display: none; }
   .pst-mcol--overflow:not(:has(li, button)) { display: none; }
+  .pst-mcol:nth-child(2):has(+ .pst-mcol--overflow li) { padding-bottom: 0; }
 
   .pst-me { min-height: 0; margin-top: var(--space-5); padding: 10px 0 10px 14px; }
 
@@ -616,4 +617,11 @@
   .pst-bottom { grid-template-columns: minmax(0, 1fr); }
   .pst-bottom__left,
   .pst-bottom__right { padding-top: 0; }
+
+  /* Touch: the drawn text actions and chips keep their look with 40px tall targets. */
+  .pst-link,
+  .pst-textbtn,
+  .pst-reports-toggle { min-height: 40px; }
+  .pst-group__select,
+  .pst-view { min-height: 40px; padding-inline: 10px; font-size: var(--text-sm); }
 }
