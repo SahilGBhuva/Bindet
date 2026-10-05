@@ -833,6 +833,7 @@
   .ui-button--sm { padding-inline: 12px; }
   .ui-segmented__item { height: 40px; }
   .ui-menu__item { height: 40px; }
+  button.ui-link { min-height: 40px; }
   .ui-input,
   .ui-select,
   .ui-textarea { font-size: 16px; }
