@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -581,16 +583,37 @@ def _advisory_lock(connection, key: str) -> None:
         connection.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
 
 
+# Old rate-limit events are pruned at most this often per server instance, not on
+# every check: a table-wide DELETE per request would make every limited action slow.
+RATE_EVENT_PRUNE_SECONDS = 600
+RATE_EVENT_RETENTION = timedelta(days=7)
+_last_rate_prune = float("-inf")
+_rate_prune_lock = threading.Lock()
+
+
+def _prune_rate_events_if_due(now: float | None = None) -> bool:
+    """Delete rate-limit events older than the longest window. Returns True if it ran."""
+    global _last_rate_prune
+    now = time.monotonic() if now is None else now
+    with _rate_prune_lock:
+        if now - _last_rate_prune < RATE_EVENT_PRUNE_SECONDS:
+            return False
+        _last_rate_prune = now
+    with engine().begin() as connection:
+        connection.execute(delete(social_action_events).where(
+            social_action_events.c.created_at < datetime.now(timezone.utc) - RATE_EVENT_RETENTION
+        ))
+    return True
+
+
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Use shared storage so limits still hold across serverless instances."""
     init_db()
+    _prune_rate_events_if_due()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
     with engine().begin() as connection:
         # Without the lock, parallel requests could all count below the limit and all insert.
         _advisory_lock(connection, f"rate:{student_id}:{action}")
-        connection.execute(delete(social_action_events).where(
-            social_action_events.c.created_at < datetime.now(timezone.utc) - timedelta(days=7)
-        ))
         count = connection.execute(select(func.count()).select_from(social_action_events).where(
             social_action_events.c.student_id == student_id,
             social_action_events.c.action == action,

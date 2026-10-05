@@ -325,6 +325,32 @@ class BlockVisibilityTests(unittest.TestCase):
         self.assertIn("sam-id", {item["student_id"] for item in kim_view["activity"]})
 
 
+class RateEventPruneTests(unittest.TestCase):
+    def setUp(self):
+        database.reset_db()
+
+    def test_old_events_are_pruned_only_occasionally(self):
+        old = datetime.now(timezone.utc) - timedelta(days=8)
+        with database.engine().begin() as connection:
+            connection.execute(database.social_action_events.insert().values(student_id="old", action="x", created_at=old))
+
+        def count():
+            with database.engine().connect() as connection:
+                return connection.execute(database.select(database.func.count()).select_from(
+                    database.social_action_events).where(database.social_action_events.c.student_id == "old")).scalar_one()
+
+        with patch.object(database, "_last_rate_prune", 1000.0), patch.object(database.time, "monotonic", return_value=1001.0):
+            database.check_social_rate_limit("alex-id", "search", 5)
+            self.assertEqual(count(), 1)  # pruned recently, so no table-wide DELETE this time
+        with patch.object(database, "_last_rate_prune", 1000.0), \
+                patch.object(database.time, "monotonic", return_value=1000.0 + database.RATE_EVENT_PRUNE_SECONDS):
+            database.check_social_rate_limit("alex-id", "search", 5)
+            self.assertEqual(count(), 0)
+        with patch.object(database, "_last_rate_prune", 1000.0):
+            self.assertFalse(database._prune_rate_events_if_due(now=1001.0))
+            self.assertTrue(database._prune_rate_events_if_due(now=1000.0 + database.RATE_EVENT_PRUNE_SECONDS))
+
+
 class AdvisoryLockTests(unittest.TestCase):
     def setUp(self):
         database.reset_db()
