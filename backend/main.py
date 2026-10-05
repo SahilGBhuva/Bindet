@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from sqlalchemy import text
 
 import base64
 import binascii
@@ -740,10 +741,41 @@ def home():
     return {"message": "bindet backend is running", "version": app.version, "docs": "/docs"}
 
 
+HEALTH_DB_CACHE_SECONDS = 5.0
+_health_db_probe: dict = {"at": float("-inf"), "result": None}
+
+
+def _database_probe() -> dict:
+    """select 1, at most once per HEALTH_DB_CACHE_SECONDS per instance.
+
+    /api/health is exempt from the rate limiter, so the cache keeps ?db=1 from
+    becoming a way to hammer the database. Errors are reported without details,
+    because they can include connection information.
+    """
+    now = time.monotonic()
+    if now - _health_db_probe["at"] < HEALTH_DB_CACHE_SECONDS and _health_db_probe["result"] is not None:
+        return _health_db_probe["result"]
+    started = time.perf_counter()
+    try:
+        with database.engine().connect() as connection:
+            connection.execute(text("select 1"))
+        result = {"ok": True, "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+                  "dialect": database.engine().dialect.name}
+    except Exception:  # noqa: BLE001 - any failure means "not reachable"
+        result = {"ok": False, "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
+    _health_db_probe.update(at=now, result=result)
+    return result
+
+
 @app.get("/api/health")
 @app.get("/health", include_in_schema=False)
-def health():
-    return {"status": "healthy"}
+def health(db: bool = False):
+    """Liveness by default (no database work). ?db=1 also checks the database."""
+    if not db:
+        return {"status": "healthy"}
+    probe = _database_probe()
+    body = {"status": "healthy" if probe["ok"] else "degraded", "database": probe}
+    return body if probe["ok"] else JSONResponse(status_code=503, content=body)
 
 
 @app.get("/api/auth/config", response_model=AuthConfigResponse)
