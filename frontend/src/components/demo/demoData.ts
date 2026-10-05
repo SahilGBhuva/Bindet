@@ -313,7 +313,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     kind: ('kind' in task ? task.kind : 'task') as Task['kind'], location: 'location' in task ? task.location : '',
     milestone_id: null, sort_order: 0, group_id: task.group, group_name: task.group === 'g1' ? 'AP Bio study circle' : null,
     owner: me, assignees: [...task.assignees], checklist_total: 0, checklist_done: 0, comment_count: 0, attachment_count: 0,
-    created_at: iso(10), updated_at: iso(1), completed_at: task.status === 'done' ? iso(1) : null, can_edit: false, can_delete: false,
+    created_at: iso(10), updated_at: iso(1), completed_at: task.status === 'done' ? iso(1) : null, can_edit: false, can_delete: false, can_manage: false,
   }))
 
   const wait = <T,>(value: T, ms = 0) => new Promise<T>((resolve) => { setTimeout(() => resolve(value), ms) })

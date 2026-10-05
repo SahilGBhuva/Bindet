@@ -15,7 +15,7 @@ import './Goals.css'
  * (settings, list/board, show completed), today's date, the My Tasks / Group Tasks /
  * Calendar tabs, two compact boxes (To-Do and Assigned) on the left and the selected
  * task's details card on the right. Everything is server data: the server checks
- * ownership and group permissions (can_edit / can_delete) and the UI follows them.
+ * ownership and group permissions (can_edit / can_manage / can_delete) and the UI follows them.
  * Cached lists render first and refresh in the background; edits apply optimistically
  * and roll back with a message on failure. Deletes wait a few seconds for Undo.
  */
@@ -373,7 +373,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       owner: { student_id: me, display_name: 'You' },
       assignees: assigneeIds.map((id) => ({ student_id: id, display_name: group?.members.find((member) => member.student_id === id)?.display_name ?? 'You' })),
       checklist_total: 0, checklist_done: 0, comment_count: 0, attachment_count: 0, created_at: now, updated_at: now,
-      completed_at: null, can_edit: false, can_delete: false,
+      completed_at: null, can_edit: false, can_delete: false, can_manage: false,
     }
     setTasks((current) => [placeholder, ...current])
     setDraft(null)
@@ -852,6 +852,8 @@ function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExp
   const titleRef = useRef<HTMLInputElement>(null)
   const group = groups.find((item) => item.id === task.group_id)
   const editable = task.can_edit
+  // Title, dates, assignees and group belong to the creator and the group owner.
+  const manageable = task.can_manage
   const done = task.status === 'done'
   const pending = task.id.startsWith('temp-')
   const overdue = isOverdue(task, today)
@@ -930,13 +932,13 @@ function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExp
     <div className="task-sheet">
       <div className="task-sheet__icons">
         <button type="button" className="tasks-icon-button is-tiny" onClick={onClose} aria-label="Close details" title="Close"><Icon name="close-box" /></button>
-        <button type="button" className="tasks-icon-button is-tiny" disabled={!editable} onClick={() => { titleRef.current?.focus(); titleRef.current?.select() }}
-          aria-label={`Rename ${task.title}`} title={editable ? 'Rename' : 'You can’t edit this task'}><Icon name="pencil" /></button>
+        <button type="button" className="tasks-icon-button is-tiny" disabled={!manageable} onClick={() => { titleRef.current?.focus(); titleRef.current?.select() }}
+          aria-label={`Rename ${task.title}`} title={manageable ? 'Rename' : 'Only the creator or group owner can rename this'}><Icon name="pencil" /></button>
       </div>
 
       <article className="task-detail-card" aria-label={task.title}>
         <div className="task-detail-card__top">
-          {editable ? (
+          {manageable ? (
             <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140}
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) }}
@@ -988,8 +990,8 @@ function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExp
           <div className="task-more-fields" id={`task-more-${task.id}`}>
             {editable ? (
               <div className="task-form">
-                <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={task.due_date ?? ''} onChange={(event) => onPatch({ due_date: event.target.value || null, ...(event.target.value ? {} : { due_time: null }) })} /></label>
-                <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={task.due_time ?? ''} disabled={!task.due_date} onChange={(event) => onPatch({ due_time: event.target.value || null })} /></label>
+                <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={task.due_date ?? ''} disabled={!manageable} onChange={(event) => onPatch({ due_date: event.target.value || null, ...(event.target.value ? {} : { due_time: null }) })} /></label>
+                <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={task.due_time ?? ''} disabled={!manageable || !task.due_date} onChange={(event) => onPatch({ due_time: event.target.value || null })} /></label>
                 <div className="ui-field is-wide"><span>Type</span><KindToggle value={task.kind} onChange={(kind) => onPatch({ kind })} /></div>
                 <label className="ui-field"><span>Priority</span>
                   <select className="ui-select" value={task.priority} onChange={(event) => onPatch({ priority: event.target.value as TaskPriority })}>
@@ -1006,13 +1008,13 @@ function TaskPanel({ task, detail, groups, courses, today, token, onClose, onExp
                   <datalist id={`task-courses-${task.id}`}>{courses.map((name) => <option key={name} value={name} />)}</datalist>
                 </label>
                 <label className="ui-field"><span>Group</span>
-                  <select className="ui-select" value={task.group_id ?? ''} disabled={!task.can_delete || pending}
+                  <select className="ui-select" value={task.group_id ?? ''} disabled={!manageable || pending}
                     onChange={(event) => onPatch({ group_id: event.target.value || null, assignee_ids: [task.owner.student_id] })}>
                     <option value="">Personal</option>
                     {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </label>
-                {group ? <div className="ui-field is-wide"><span id={`task-assignees-${task.id}`}>Assignees</span><AssigneePicker labelledBy={`task-assignees-${task.id}`} members={group.members} value={task.assignees.map((person) => person.student_id)} onChange={(next) => { if (next.length) onPatch({ assignee_ids: next }) }} /></div> : null}
+                {group && manageable ? <div className="ui-field is-wide"><span id={`task-assignees-${task.id}`}>Assignees</span><AssigneePicker labelledBy={`task-assignees-${task.id}`} members={group.members} value={task.assignees.map((person) => person.student_id)} onChange={(next) => { if (next.length) onPatch({ assignee_ids: next }) }} /></div> : null}
               </div>
             ) : <p className="task-hint">Only the creator, assignees or the group owner can edit this task. You can still comment.</p>}
             {task.group_id ? <p className="task-hint">Created by {task.owner.display_name}{task.assignees.length ? ` · Assigned to ${task.assignees.map((person) => person.display_name).join(', ')}` : ''}</p> : null}

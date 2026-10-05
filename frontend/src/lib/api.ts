@@ -661,6 +661,7 @@ export type Task = {
   completed_at: string | null
   can_edit: boolean
   can_delete: boolean
+  can_manage: boolean
 }
 export type TaskChecklistItem = { id: number; text: string; done: boolean }
 export type TaskComment = { id: number; author_id: string; author_name: string; body: string; created_at: string; mine: boolean }
