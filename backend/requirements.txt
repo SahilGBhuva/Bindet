@@ -1,10 +1,12 @@
-fastapi
-uvicorn[standard]
-eval_type_backport
-sqlalchemy>=2.0,<3.0
-psycopg[binary]>=3.2,<4.0
-python-dotenv>=1.0,<2.0
-httpx[http2]>=0.27,<1.0
-python-multipart>=0.0.9,<1.0
-pypdf>=5.0,<7.0
-python-docx>=1.1,<2.0
+# Exact versions of the direct dependencies, matching the tested environment.
+# Upgrade deliberately (and keep pypdf>=6.18, python-multipart>=0.0.22 for their security fixes).
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+eval_type_backport==0.4.0
+sqlalchemy==2.0.52
+psycopg[binary]==3.3.5
+python-dotenv==1.2.3
+httpx[http2]==0.28.1
+python-multipart==0.0.32
+pypdf==6.18.1
+python-docx==1.2.0
