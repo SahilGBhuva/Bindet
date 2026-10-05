@@ -154,8 +154,8 @@ function AppShell() {
           })}
         </nav>
         <div className="app-bar__panels">
-          <button type="button" className="app-bar__merge" onClick={() => setRailCollapsed(true)} title="Merge the sidebar into the icon strip">Merge</button>
-          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
+          <button type="button" className="app-bar__merge" aria-pressed={railCollapsed} onClick={() => setRailCollapsed(true)} title="Merge the sidebar into the icon strip">Merge</button>
+          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" aria-pressed={!railCollapsed} title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11M5 5.5 2.5 8 5 10.5M11 5.5 13.5 8 11 10.5" /></svg>
           </button>
         </div>
