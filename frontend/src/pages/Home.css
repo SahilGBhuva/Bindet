@@ -491,6 +491,16 @@
   .home-row__time { font-size: var(--text-xs); }
 }
 
+@container home (max-width: 780px) {
+  /* Touch: rows and small icons get 40px targets without changing the drawing. */
+  .home-notice__row,
+  .home-stats a { min-height: 40px; }
+  .home-team__icon { width: 40px; height: 40px; }
+  .home-carousel__all { display: inline-flex; align-items: center; min-height: 40px; padding-left: 8px; }
+  .home-banner__theme::after { content: ""; position: absolute; inset: -8px -6px; }
+  .home-row { min-height: 44px; }
+}
+
 @container home (max-width: 420px) {
   .home-row { grid-template-columns: 70px minmax(0, 1fr); row-gap: 0; padding: 4px 0; }
   .home-row__time { grid-column: 2; }

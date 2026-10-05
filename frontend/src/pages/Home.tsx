@@ -114,6 +114,17 @@ function firstWord(name: string) {
   return name.trim().split(/\s+/)[0] ?? name
 }
 
+/* First names, as drawn; two people who share one get a last initial ("Reilly K.", "Reilly U."). */
+function shortNames(names: string[]) {
+  const counts = new Map<string, number>()
+  for (const name of names) counts.set(firstWord(name), (counts.get(firstWord(name)) ?? 0) + 1)
+  return names.map((name) => {
+    const first = firstWord(name)
+    const last = name.trim().split(/\s+/).slice(1).at(-1)
+    return (counts.get(first) ?? 0) > 1 && last ? `${first} ${last[0]}.` : first
+  })
+}
+
 /* ---------- Drawings ---------- */
 
 /* The line landscape: long hill on the left, double ground line, grass, and a hatched field on the right. */
@@ -215,6 +226,9 @@ export function Home({ session }: { session: AuthSession | null }) {
   const [filter, setFilter] = useState<Filter>('none')
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [compact, setCompact] = useState(false)
+  // Set when the task refresh fails, so an empty list can say so instead of "Nothing due".
+  const [tasksFailed, setTasksFailed] = useState(false)
+  const [reload, setReload] = useState(0)
   const frame = useRef<HTMLDivElement>(null)
   const cardLinks = useRef(new Map<string, HTMLAnchorElement>())
   const focusAfterOpen = useRef(false)
@@ -226,9 +240,23 @@ export function Home({ session }: { session: AuthSession | null }) {
     void data.getAccountProfile(token).then((value) => { if (active) setProfile(value) }).catch(() => undefined)
     void data.getFriends(token).then((value) => { if (active) setSocial(value) }).catch(() => undefined)
     void data.getStudyGroups(token).then((value) => { if (active) setGroups(value) }).catch(() => { if (active) setGroups((current) => current ?? []) })
-    void data.getTasks(token, true).then((value) => { if (active) setTasks(value) }).catch(() => { if (active) setTasks((current) => current ?? []) })
+    void data.getTasks(token, true).then((value) => {
+      if (!active) return
+      setTasks(value)
+      setTasksFailed(false)
+    }).catch(() => {
+      if (!active) return
+      setTasksFailed(true)
+      setTasks((current) => current ?? [])
+    })
     return () => { active = false }
-  }, [data, token])
+  }, [data, token, reload])
+
+  function retryTasks() {
+    setTasksFailed(false)
+    setTasks(null)
+    setReload((value) => value + 1)
+  }
 
   // The clock ticks on the minute. The demo keeps its pinned time.
   useEffect(() => {
@@ -367,6 +395,9 @@ export function Home({ session }: { session: AuthSession | null }) {
     { label: 'Budget', value: '—' },
     { label: 'Major milestones', value: milestones.size ? String(milestones.size) : '—' },
   ] : []
+
+  const teamMembers = group?.members.slice(0, 6) ?? []
+  const teamNames = shortNames(teamMembers.map((member) => member.display_name))
 
   function currentlyOn(studentId: string) {
     const mine = groupOpenTasks.filter((task) => task.assignees.some((person) => person.student_id === studentId))
@@ -536,6 +567,8 @@ export function Home({ session }: { session: AuthSession | null }) {
                 <div className="home-rows" aria-busy="true" aria-label="Loading deadlines">
                   <span className="ui-skeleton home-rows__skeleton" /><span className="ui-skeleton home-rows__skeleton" /><span className="ui-skeleton home-rows__skeleton" />
                 </div>
+              ) : tasksFailed && !deadlines.length ? (
+                <p className="home-rows__empty" role="alert">Deadlines couldn’t load. <button type="button" className="ui-link" onClick={retryTasks}>Try again</button></p>
               ) : deadlines.length ? (
                 <ul className="home-rows">
                   {deadlines.map((task) => {
@@ -576,11 +609,12 @@ export function Home({ session }: { session: AuthSession | null }) {
                     <tr><th scope="col">Team member</th><th scope="col">Currently on</th></tr>
                   </thead>
                   <tbody>
-                    {group.members.slice(0, 6).map((member) => {
+                    {teamMembers.map((member, index) => {
                       const focus = currentlyOn(member.student_id)
+                      const name = teamNames[index]
                       return (
                         <tr key={member.student_id}>
-                          <th scope="row"><Icon name="person" /><span>{firstWord(member.display_name)}</span></th>
+                          <th scope="row" title={member.display_name}><Icon name="person" /><span>{name}</span></th>
                           <td title={focus?.title}>{focus ? focus.title : '—'}</td>
                         </tr>
                       )
