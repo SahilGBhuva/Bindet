@@ -11,19 +11,38 @@ alter table public.study_group_messages
 alter table public.study_group_messages
   drop constraint if exists study_group_messages_body_check;
 
-alter table public.study_group_messages
-  add constraint study_group_messages_content_check check (
-    char_length(trim(coalesce(body, ''))) between 1 and 2000
-    or attachment_path is not null
-  ),
-  add constraint study_group_messages_attachment_check check (
-    attachment_path is null
-    or (
-      attachment_name is not null
-      and attachment_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
-      and attachment_size between 1 and 10485760
-    )
-  );
+-- Each constraint is added only when missing, so re-running this file is safe.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.study_group_messages'::regclass
+      and conname = 'study_group_messages_content_check'
+  ) then
+    alter table public.study_group_messages
+      add constraint study_group_messages_content_check check (
+        char_length(trim(coalesce(body, ''))) between 1 and 2000
+        or attachment_path is not null
+      );
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid = 'public.study_group_messages'::regclass
+      and conname = 'study_group_messages_attachment_check'
+  ) then
+    alter table public.study_group_messages
+      add constraint study_group_messages_attachment_check check (
+        attachment_path is null
+        or (
+          attachment_name is not null
+          and attachment_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
+          and attachment_size between 1 and 10485760
+        )
+      );
+  end if;
+end
+$$;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (

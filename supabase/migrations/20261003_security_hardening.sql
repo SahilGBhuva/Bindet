@@ -220,7 +220,7 @@ begin
     )
     and not exists (
       select 1 from pg_constraint
-      where conrelid = 'public.study_group_messages'::regclass
+      where conrelid = to_regclass('public.study_group_messages')
         and conname = 'study_group_messages_attachment_path_owner_check'
     )
   then
