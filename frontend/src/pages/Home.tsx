@@ -228,6 +228,7 @@ export function Home({ session }: { session: AuthSession | null }) {
   const [compact, setCompact] = useState(false)
   // Set when the task refresh fails, so an empty list can say so instead of "Nothing due".
   const [tasksFailed, setTasksFailed] = useState(false)
+  const [groupsFailed, setGroupsFailed] = useState(false)
   const [reload, setReload] = useState(0)
   const frame = useRef<HTMLDivElement>(null)
   const cardLinks = useRef(new Map<string, HTMLAnchorElement>())
@@ -239,7 +240,15 @@ export function Home({ session }: { session: AuthSession | null }) {
     let active = true
     void data.getAccountProfile(token).then((value) => { if (active) setProfile(value) }).catch(() => undefined)
     void data.getFriends(token).then((value) => { if (active) setSocial(value) }).catch(() => undefined)
-    void data.getStudyGroups(token).then((value) => { if (active) setGroups(value) }).catch(() => { if (active) setGroups((current) => current ?? []) })
+    void data.getStudyGroups(token).then((value) => {
+      if (!active) return
+      setGroups(value)
+      setGroupsFailed(false)
+    }).catch(() => {
+      if (!active) return
+      setGroupsFailed(true)
+      setGroups((current) => current ?? [])
+    })
     void data.getTasks(token, true).then((value) => {
       if (!active) return
       setTasks(value)
@@ -255,6 +264,12 @@ export function Home({ session }: { session: AuthSession | null }) {
   function retryTasks() {
     setTasksFailed(false)
     setTasks(null)
+    setReload((value) => value + 1)
+  }
+
+  function retryGroups() {
+    setGroupsFailed(false)
+    setGroups(null)
     setReload((value) => value + 1)
   }
 
@@ -452,7 +467,7 @@ export function Home({ session }: { session: AuthSession | null }) {
                 <span className="home-notice__time">{relative(now - parseServerTime(unread.created_at))}<span className="sr-only"> ago</span></span>
               </a>
             ) : (
-              <p className="home-notice__quiet">All caught up.</p>
+              <p className="home-notice__quiet">{tasksFailed ? 'Couldn’t check right now.' : 'All caught up.'}</p>
             )}
           </section>
         </header>
@@ -631,6 +646,12 @@ export function Home({ session }: { session: AuthSession | null }) {
                   ))}
                 </ul>
               </>
+            ) : groupsFailed ? (
+              <div className="home-team__empty" role="alert">
+                <h2 className="home-team__name" id="home-team-title">Your group</h2>
+                <p>Your groups couldn’t load.</p>
+                <button type="button" className="ui-link" onClick={retryGroups}>Try again</button>
+              </div>
             ) : (
               <div className="home-team__empty">
                 <h2 className="home-team__name" id="home-team-title">No group yet</h2>

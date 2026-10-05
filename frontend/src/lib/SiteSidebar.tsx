@@ -412,7 +412,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join a study group</a>),
     },
     groups: {
-      count: groups?.length,
+      count: failed.groups && !groups?.length ? undefined : groups?.length,
       body: groupsLoading ? skeletonRows(3) : groups?.length ? (
         <ul className="bindit-rail__entries">
           {nestGroups(groups).map(({ group, child }) => {
@@ -437,7 +437,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join or start a study group</a>),
     },
     tasks: {
-      count: tasks ? openTasks.length : undefined,
+      count: tasks && !(failed.tasks && !tasks.length) ? openTasks.length : undefined,
       hatch: true,
       body: tasksLoading ? skeletonRows(2)
         : nextTasks.length ? (
