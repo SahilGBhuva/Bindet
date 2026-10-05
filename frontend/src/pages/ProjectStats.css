@@ -623,5 +623,7 @@
   .pst-textbtn,
   .pst-reports-toggle { min-height: 40px; }
   .pst-group__select,
-  .pst-view { min-height: 40px; padding-inline: 10px; font-size: var(--text-sm); }
+  .pst-view { min-height: 40px; font-size: var(--text-sm); }
+  .pst-group__select { padding-inline: 10px; }
+  .pst-view select { align-self: stretch; }
 }
