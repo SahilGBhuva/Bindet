@@ -25,6 +25,9 @@ def blank_pdf(pages: int) -> bytes:
     return output.getvalue()
 
 
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+
 def text_pdf(lines: list[str]) -> bytes:
     """A real PDF with one page of Helvetica text per entry in lines."""
     from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -114,15 +117,36 @@ class NoteIngestionTests(unittest.TestCase):
         self.assertEqual(note_store.list_notes("student-b", "Biology", "Cells"), [])
 
     def test_image_upload_uses_vision_and_persists_text(self):
-        upload = UploadFile(filename="cells.png", file=BytesIO(b"image"), headers={"content-type": "image/png"})
+        upload = UploadFile(filename="cells.png", file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
         with patch.object(main.auth, "authenticated_user", return_value={"id": "vision-student"}), patch.object(
             main.ai_tutor, "extract_image_notes", return_value="Cell membranes regulate transport."
         ) as vision:
             result = asyncio.run(main.upload_note("Biology", "Cells", upload, "Bearer test"))
         self.assertEqual(result.status, "ready")
-        vision.assert_called_once_with(image_bytes=b"image", content_type="image/png")
+        vision.assert_called_once_with(image_bytes=PNG_BYTES, content_type="image/png")
         _, context = note_store.context_for("vision-student", "Biology", "Cells")
         self.assertIn("Cell membranes regulate transport", context)
+
+    def test_image_notes_must_really_be_the_claimed_image_type(self):
+        disguised = {
+            "notes.png": (b"<svg onload=alert(1)>", "image/png"),
+            "notes.jpg": (PNG_BYTES, "image/jpeg"),  # a real image, but not what the name says
+            "notes.webp": (b"%PDF-1.7", "image/webp"),
+            "notes.jpeg": (b"GIF89a" + b"0" * 32, "image/jpeg"),
+        }
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sniff-student"}), \
+                patch.object(main.ai_tutor, "extract_image_notes", return_value="text") as vision, \
+                patch.object(main, "limit_action") as limits:
+            for name, (raw, claimed) in disguised.items():
+                upload = UploadFile(filename=name, file=BytesIO(raw), headers={"content-type": claimed})
+                with self.assertRaises(HTTPException) as caught:
+                    asyncio.run(main.upload_note("Biology", "Cells", upload, "Bearer test"))
+                self.assertEqual(caught.exception.status_code, 415, name)
+            vision.assert_not_called()
+            # Refused before any OCR quota is spent (only the upload limit was checked).
+            self.assertEqual({call.args[1] for call in limits.call_args_list}, {"note_upload"})
+            jpeg = UploadFile(filename="notes.jpg", file=BytesIO(b"\xff\xd8\xff\xe0" + b"0" * 32), headers={"content-type": "text/html"})
+            self.assertEqual(asyncio.run(main.upload_note("Biology", "Cells", jpeg, "Bearer test")).content_type, "image/jpeg")
 
     def test_slow_ocr_does_not_block_the_event_loop(self):
         import time
@@ -141,7 +165,7 @@ class NoteIngestionTests(unittest.TestCase):
                     ticks += 1
 
             task = asyncio.create_task(ticker())
-            upload = UploadFile(filename="slow.png", file=BytesIO(b"image"), headers={"content-type": "image/png"})
+            upload = UploadFile(filename="slow.png", file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
             await main.upload_note("Biology", "Cells", upload, "Bearer test")
             task.cancel()
             return ticks
@@ -155,7 +179,7 @@ class NoteIngestionTests(unittest.TestCase):
 
     def test_ocr_failures_are_friendly_and_retryable(self):
         def upload(name="cells.png"):
-            return UploadFile(filename=name, file=BytesIO(b"image"), headers={"content-type": "image/png"})
+            return UploadFile(filename=name, file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
 
         with patch.object(main.auth, "authenticated_user", return_value={"id": "ocr-fail"}):
             with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("OpenRouter request failed")):

@@ -1051,6 +1051,11 @@ NOTE_CONTENT_TYPES = {
 }
 
 
+# What an image note's bytes must be, by extension (checked with sniff_image_type).
+NOTE_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+NOTE_IMAGE_MISMATCH = "That image couldn’t be read. Upload a real PNG, JPG or WebP photo of your notes."
+
+
 def note_content_type(suffix: str, claimed: str | None) -> str:
     """The browser's content type if it fits the extension, else the extension's default."""
     allowed = NOTE_CONTENT_TYPES.get(suffix)
@@ -1086,6 +1091,12 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
+            # The bytes must really be the image type the extension claims; the
+            # browser's label and the file name are never trusted on their own.
+            actual_type = sniff_image_type(content)
+            if actual_type is None or actual_type != NOTE_IMAGE_TYPES.get(suffix):
+                raise HTTPException(status_code=415, detail=NOTE_IMAGE_MISMATCH)
+            content_type = actual_type
             limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
             ai_tutor.warm_connection()
             # The image goes to the vision model only; it is never stored.
