@@ -498,13 +498,38 @@ def _target_group(connection, task: dict, student_id: str, data: dict) -> str | 
     target = data["group_id"] or None
     if target == task["group_id"]:
         return target
-    if target is not None:
-        if _group_role(connection, target, student_id) is None:
-            raise ValueError("group_not_found")
-        # The creator keeps owning the task, so they must be able to see it afterwards.
-        if task["owner_id"] != student_id and _group_role(connection, target, task["owner_id"]) is None:
+    if target is None:
+        # A personal task is visible to its creator only. Only the creator may make one,
+        # or a group owner could hand a group's task (and its work) to a creator who left.
+        if task["owner_id"] != student_id:
+            raise ValueError("task_manage_forbidden")
+        return None
+    if _group_role(connection, target, student_id) is None:
+        raise ValueError("group_not_found")
+    if task["owner_id"] != student_id:
+        # The creator keeps owning the task, so they must be able to see it afterwards,
+        # and a creator who already left the task's group must not get it back this way.
+        if _group_role(connection, target, task["owner_id"]) is None:
+            raise ValueError("task_owner_not_in_group")
+        if task["group_id"] is not None and _group_role(connection, task["group_id"], task["owner_id"]) is None:
             raise ValueError("task_owner_not_in_group")
     return target
+
+
+def _clear_for_move(connection, task_id: str, mover_id: str) -> None:
+    """Strip what the old group's members contributed before a task changes groups.
+
+    Comments and attachments written by anyone but the mover are deleted, and the
+    task's activity history is dropped rather than carried into the new group (its
+    details name the old group's members). The new group starts from a clean history.
+    """
+    connection.execute(delete(task_comments).where(
+        task_comments.c.task_id == task_id, task_comments.c.author_id != mover_id,
+    ))
+    connection.execute(delete(task_attachments).where(
+        task_attachments.c.task_id == task_id, task_attachments.c.added_by != mover_id,
+    ))
+    connection.execute(delete(task_activity).where(task_activity.c.task_id == task_id))
 
 
 def update_task(student_id: str, task_id: str, data: dict) -> dict:
@@ -522,8 +547,9 @@ def update_task(student_id: str, task_id: str, data: dict) -> dict:
             values["group_id"] = group_id
             # Milestones belong to one group; keep one only if it was chosen for the new group.
             values["milestone_id"] = _validated_milestone(connection, group_id, data.get("milestone_id"))
-            # Activity follows the task so the old group's analytics no longer list it.
-            connection.execute(update(task_activity).where(task_activity.c.task_id == task_id).values(group_id=group_id))
+            # Nothing other people wrote in the old group travels with the task, and the
+            # old group's analytics no longer list it.
+            _clear_for_move(connection, task_id, student_id)
             task = {**task, "group_id": group_id}
             if group_id:
                 group_name = connection.execute(select(database.study_groups.c.name).where(

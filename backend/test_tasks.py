@@ -276,6 +276,47 @@ class TaskTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "task_owner_not_in_group"):
             tasks.update_task("alex-id", task["id"], {"group_id": other["id"]})
 
+    def test_moving_drops_other_peoples_comments_attachments_and_history(self):
+        database.join_study_group("eve-id", self.group["invite_code"])
+        other = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("eve-id", other["invite_code"])
+        task = self.group_task(assignee_ids=["sam-id"])
+        tasks.add_comment("sam-id", task["id"], "Sam's private thoughts")
+        tasks.add_comment("alex-id", task["id"], "Alex's note")
+        tasks.add_attachment("sam-id", task["id"], "link", "Sam's doc", "https://example.com/sam")
+        tasks.add_attachment("alex-id", task["id"], "link", "Alex's doc", "https://example.com/alex")
+        tasks.update_task("sam-id", task["id"], {"status": "in_progress"})
+        tasks.update_task("alex-id", task["id"], {"group_id": other["id"]})
+        seen = tasks.get_task("eve-id", task["id"])
+        self.assertEqual([c["body"] for c in seen["comments"]], ["Alex's note"])
+        self.assertEqual([a["label"] for a in seen["attachments"]], ["Alex's doc"])
+        # Only what the move itself did: the move, and Sam dropped as a non-member.
+        self.assertEqual(sorted(a["kind"] for a in seen["activity"]), ["assignees", "moved"])
+        # The old group's analytics keep nothing about the task.
+        self.assertEqual(tasks.group_analytics("alex-id", self.group["id"])["activity"], [])
+
+    def test_only_the_creator_can_make_a_group_task_personal(self):
+        task = tasks.create_task("sam-id", {"title": "Slides", "group_id": self.group["id"]})
+        with self.assertRaisesRegex(ValueError, "task_manage_forbidden"):
+            tasks.update_task("alex-id", task["id"], {"group_id": None})
+        tasks.add_comment("alex-id", task["id"], "Owner feedback")
+        personal = tasks.update_task("sam-id", task["id"], {"group_id": None})
+        self.assertIsNone(personal["group_id"])
+        self.assertEqual(tasks.get_task("sam-id", task["id"])["comments"], [])
+
+    def test_a_creator_who_left_cannot_get_the_task_back(self):
+        other = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("sam-id", other["invite_code"])
+        task = tasks.create_task("sam-id", {"title": "Slides", "group_id": self.group["id"]})
+        database.leave_study_group("sam-id", self.group["id"])
+        with self.assertRaisesRegex(ValueError, "task_manage_forbidden"):
+            tasks.update_task("alex-id", task["id"], {"group_id": None})
+        with self.assertRaisesRegex(ValueError, "task_owner_not_in_group"):
+            tasks.update_task("alex-id", task["id"], {"group_id": other["id"]})
+        with self.assertRaisesRegex(ValueError, "task_not_found"):
+            tasks.get_task("sam-id", task["id"])
+        self.assertEqual(tasks.list_tasks("sam-id"), [])
+
     def test_analytics_is_members_only_and_shares_no_practice_details(self):
         self.group_task(assignee_ids=["sam-id"])
         database.update_progress("sam-id", "addition", True, 10)
