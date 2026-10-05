@@ -225,6 +225,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const [important, setImportant] = useState<string[]>(() => data.sandboxed ? [] : readImportant())
   const [editing, setEditing] = useState(false)
   const [now, setNow] = useState(() => data.now())
+  // A failed refresh with nothing cached says so (the rail retries every 30 seconds) instead of looking empty.
+  const [failed, setFailed] = useState({ tasks: false, groups: false })
 
   // Courses can change on other pages, so reread the local notebook whenever the page changes.
   if (seenActive !== active) {
@@ -261,6 +263,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         else setTasks((current) => current ?? [])
         if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
         else setGroups((current) => current ?? [])
+        setFailed({ tasks: nextTasks.status === 'rejected', groups: nextGroups.status === 'rejected' })
         setNow(data.now())
       })
     }
@@ -351,6 +354,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   )
 
   const empty = (content: ReactNode) => <p className="bindit-rail__empty">{content}</p>
+  const offline = empty('Couldn’t load. Retrying shortly.')
 
   const groupLink = (group: StudyGroup, glyph: ReactNode, extra = '') => {
     const current = active === 'stats' && groupParam === group.id
@@ -376,7 +380,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
               </li>
             ))}
           </ul>
-        ) : empty('Nothing pressing right now.'),
+        ) : failed.tasks ? offline : empty('Nothing pressing right now.'),
     },
     directory: {
       body: (
@@ -405,7 +409,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         <ul className="bindit-rail__entries">
           {importantGroups.map((group) => <li key={group.id}>{groupLink(group, glyphs.triangle)}</li>)}
         </ul>
-      ) : empty(<a className="ui-link" href="#profile">Join a study group</a>),
+      ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join a study group</a>),
     },
     groups: {
       count: groups?.length,
@@ -430,7 +434,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             )
           })}
         </ul>
-      ) : empty(<a className="ui-link" href="#profile">Join or start a study group</a>),
+      ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join or start a study group</a>),
     },
     tasks: {
       count: tasks ? openTasks.length : undefined,
@@ -447,7 +451,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
               </li>
             ))}
           </ul>
-        ) : empty(openTasks.length ? 'The rest are highlighted above.' : <>All clear. <a className="ui-link" href="#goals">Add a task</a></>),
+        ) : failed.tasks && !openTasks.length ? offline : empty(openTasks.length ? 'The rest are highlighted above.' : <>All clear. <a className="ui-link" href="#goals">Add a task</a></>),
     },
   }
 
