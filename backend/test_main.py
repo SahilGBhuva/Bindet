@@ -250,5 +250,27 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(main.database.get_progress(main.guest_student_id('victim-account'))['total_xp'], 10)
 
 
+class HealthTests(unittest.TestCase):
+    def setUp(self):
+        main._health_db_probe.update(at=float("-inf"), result=None)
+
+    def test_plain_health_does_no_database_work(self):
+        with patch.object(main.database, "engine", side_effect=AssertionError("no db")):
+            self.assertEqual(main.health(), {"status": "healthy"})
+
+    def test_db_probe_reports_and_caches(self):
+        body = main.health(db=True)
+        self.assertEqual(body["status"], "healthy")
+        self.assertTrue(body["database"]["ok"])
+        with patch.object(main.database, "engine", side_effect=AssertionError("cached")):
+            self.assertTrue(main.health(db=True)["database"]["ok"])
+
+    def test_db_probe_failure_is_503_without_details(self):
+        with patch.object(main.database, "engine", side_effect=RuntimeError("postgresql://user:secret@host")):
+            response = main.health(db=True)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(b"secret", response.body)
+
+
 if __name__ == '__main__':
     unittest.main()
