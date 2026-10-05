@@ -1,4 +1,4 @@
-import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, type AuthSession } from './auth'
+import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, subscribeToAuthSession, type AuthSession } from './auth'
 
 export type ChatMessage = {
   id: string
@@ -140,6 +140,31 @@ function storagePath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/')
 }
 
+// Chat images live at <group id>/<sender id>/<file name>. A message row is data
+// another member wrote, so its attachment path is checked before anything is
+// signed, fetched or deleted with it: it must sit in the sender's own folder of
+// that group and the file name must be a single plain segment.
+const ATTACHMENT_PATH_PATTERN = /^[^/]+\/[^/]+\/[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export type AttachmentOwner = { group_id: string; sender_id: string }
+
+export function isSafeAttachmentPath(path: string | null | undefined, owner: AttachmentOwner): path is string {
+  if (!path || !owner.group_id || !owner.sender_id) return false
+  if (!path.startsWith(`${owner.group_id}/${owner.sender_id}/`)) return false
+  if (!ATTACHMENT_PATH_PATTERN.test(path)) return false
+  return path.split('/').every((segment) => segment !== '.' && segment !== '..' && segment !== '')
+}
+
+/** A file name part that keeps the stored path inside ATTACHMENT_PATH_PATTERN. */
+function safeAttachmentName(name: string) {
+  const cleaned = name
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
+    .slice(0, 80)
+  return cleaned || 'image'
+}
+
 export function uploadGroupImage(
   groupId: string,
   file: File,
@@ -147,8 +172,11 @@ export function uploadGroupImage(
   onProgress: (progress: number) => void,
 ): Promise<ChatAttachment> {
   return getConfig().then((config) => new Promise((resolve, reject) => {
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'image'
-    const path = `${groupId}/${session.user.id}/${crypto.randomUUID()}-${safeName}`
+    const path = `${groupId}/${session.user.id}/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`
+    if (!isSafeAttachmentPath(path, { group_id: groupId, sender_id: session.user.id })) {
+      reject(new Error('The image could not be uploaded.'))
+      return
+    }
     const request = new XMLHttpRequest()
     request.open('POST', `${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`)
     request.setRequestHeader('apikey', config.supabase_anon_key)
@@ -178,7 +206,8 @@ export function uploadGroupImage(
   }))
 }
 
-export async function getGroupImageUrl(path: string, session: AuthSession) {
+export async function getGroupImageUrl(path: string, owner: AttachmentOwner, session: AuthSession) {
+  if (!isSafeAttachmentPath(path, owner)) throw new Error('Image unavailable')
   const config = await getConfig()
   const response = await fetch(`${config.supabase_url}/storage/v1/object/sign/${CHAT_BUCKET}/${storagePath(path)}`, {
     method: 'POST',
@@ -196,7 +225,8 @@ export async function getGroupImageUrl(path: string, session: AuthSession) {
   return signedPath.startsWith('http') ? signedPath : `${config.supabase_url}/storage/v1${signedPath}`
 }
 
-export async function deleteGroupImage(path: string, session: AuthSession) {
+export async function deleteGroupImage(path: string, owner: AttachmentOwner, session: AuthSession) {
+  if (!isSafeAttachmentPath(path, owner)) return
   const config = await getConfig()
   await fetch(`${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`, {
     method: 'DELETE',
@@ -287,10 +317,23 @@ const RECONNECT_MAX_MS = 30_000
 
 type RealtimeChange = { event: 'INSERT'; schema: 'public'; table: string; filter?: string }
 
+type RealtimePacket = {
+  topic?: string
+  event?: string
+  ref?: string | null
+  payload?: {
+    status?: string
+    message?: string
+    data?: { record?: ChatMessage }
+  }
+}
+
 /**
  * Opens a realtime channel and keeps it open. Reconnects back off from 1.2s
- * up to 30s (reset after a successful connection) and always join with the
- * account's current access token, which may have been refreshed since.
+ * up to 30s (reset after a successful join) and always join with the
+ * account's current access token. When the token is refreshed, the new one is
+ * sent on the open channel; a rejected join, a closed or errored channel, or a
+ * token-expiry notice closes the socket and reconnects with the fresh token.
  */
 function openRealtimeChannel(
   config: SupabaseConfig,
@@ -304,10 +347,30 @@ function openRealtimeChannel(
   let heartbeat: number | null = null
   let retryTimer: number | null = null
   let retryDelay = RECONNECT_MIN_MS
+  let joined = false
+  let sentToken = ''
+  let ref = 1
+
+  const nextRef = () => String((ref += 1))
 
   const currentToken = () => {
     const stored = loadAuthSession()
     return stored && stored.user.id === session.user.id ? stored.access_token : session.access_token
+  }
+
+  const reconnect = (current: WebSocket) => {
+    if (socket !== current) return
+    // The close handler schedules the next attempt with the current backoff.
+    current.close()
+  }
+
+  const pushToken = () => {
+    const current = socket
+    if (!current || !joined || current.readyState !== WebSocket.OPEN) return
+    const token = currentToken()
+    if (!token || token === sentToken) return
+    sentToken = token
+    current.send(JSON.stringify({ topic, event: 'access_token', payload: { access_token: token }, ref: nextRef() }))
   }
 
   const open = () => {
@@ -316,9 +379,11 @@ function openRealtimeChannel(
     const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
     const current = new WebSocket(wsUrl)
     socket = current
+    joined = false
+    const joinRef = nextRef()
 
     current.addEventListener('open', () => {
-      retryDelay = RECONNECT_MIN_MS
+      sentToken = currentToken()
       current.send(JSON.stringify({
         topic,
         event: 'phx_join',
@@ -328,40 +393,64 @@ function openRealtimeChannel(
             presence: { key: '' },
             postgres_changes: [change],
           },
-          access_token: currentToken(),
+          access_token: sentToken,
         },
-        ref: '1',
+        ref: joinRef,
       }))
       heartbeat = window.setInterval(() => {
-        current.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(Date.now()) }))
+        current.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: nextRef() }))
       }, 25_000)
     })
 
     current.addEventListener('message', (event) => {
+      let packet: RealtimePacket
       try {
-        const packet = JSON.parse(String(event.data)) as {
-          event?: string
-          payload?: { data?: { record?: ChatMessage } }
-        }
-        const record = packet.payload?.data?.record
-        if (packet.event === 'postgres_changes' && record) onRecord(record)
+        packet = JSON.parse(String(event.data)) as RealtimePacket
       } catch {
-        // Ignore malformed realtime frames.
+        return // Ignore malformed realtime frames.
       }
+      if (packet.topic !== topic) return
+      const status = packet.payload?.status
+      if (packet.event === 'phx_reply') {
+        if (status !== 'ok') {
+          reconnect(current)
+          return
+        }
+        if (packet.ref === joinRef) {
+          joined = true
+          retryDelay = RECONNECT_MIN_MS
+          // The token may have been refreshed while the join was in flight.
+          pushToken()
+        }
+        return
+      }
+      if (packet.event === 'phx_close' || packet.event === 'phx_error') {
+        reconnect(current)
+        return
+      }
+      if (packet.event === 'system' && (status === 'error' || (status !== 'ok' && /token|expired|jwt/i.test(packet.payload?.message ?? '')))) {
+        reconnect(current)
+        return
+      }
+      const record = packet.payload?.data?.record
+      if (packet.event === 'postgres_changes' && record) onRecord(record)
     })
 
     current.addEventListener('close', () => {
       if (heartbeat) window.clearInterval(heartbeat)
       heartbeat = null
+      joined = false
       if (closed || socket !== current) return
       retryTimer = window.setTimeout(open, retryDelay)
       retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
     })
   }
 
+  const unsubscribeAuth = subscribeToAuthSession(pushToken)
   open()
   return () => {
     closed = true
+    unsubscribeAuth()
     if (heartbeat) window.clearInterval(heartbeat)
     if (retryTimer) window.clearTimeout(retryTimer)
     socket?.close()

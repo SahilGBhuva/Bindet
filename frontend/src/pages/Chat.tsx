@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { getCachedStudyGroups, getStudyGroups, type StudyGroup } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import {
-  deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, listChatUnreads, listGroupMessages,
+  deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, isSafeAttachmentPath, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
   isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
@@ -116,9 +116,12 @@ const Icon = {
 
 /* Signs and loads a shared image only when it comes near the screen, and remembers the link. */
 function MessageImage({ message, session }: { message: ChatMessage; session: AuthSession }) {
-  const path = message.attachment_path ?? ''
+  // A path outside the sender's folder is never signed or fetched.
+  const { group_id: groupId, sender_id: senderId } = message
+  const safe = isSafeAttachmentPath(message.attachment_path, { group_id: groupId, sender_id: senderId })
+  const path = safe ? message.attachment_path ?? '' : ''
   const name = message.attachment_name || 'Shared image'
-  const [url, setUrl] = useState(() => cachedImageUrl(path))
+  const [url, setUrl] = useState(() => path ? cachedImageUrl(path) : '')
   const [failed, setFailed] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [near, setNear] = useState(() => Boolean(cachedImageUrl(path)))
@@ -139,15 +142,23 @@ function MessageImage({ message, session }: { message: ChatMessage; session: Aut
   useEffect(() => {
     if (!near || url || !path) return
     let live = true
-    void getGroupImageUrl(path, session)
+    void getGroupImageUrl(path, { group_id: groupId, sender_id: senderId }, session)
       .then((next) => {
         signedUrls.set(path, { url: next, expires: Date.now() + 3_600_000 })
         if (live) setUrl(next)
       })
       .catch(() => { if (live) setFailed(true) })
     return () => { live = false }
-  }, [near, url, path, session, attempt])
+  }, [near, url, path, groupId, senderId, session, attempt])
 
+  if (!safe) {
+    return (
+      <div className="chat-image is-failed">
+        {Icon.image}
+        <span>Image unavailable</span>
+      </div>
+    )
+  }
   if (failed) {
     return (
       <div className="chat-image is-failed">
@@ -445,7 +456,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
       setPending((current) => current.filter((entry) => entry.key !== item.key))
     } catch (error) {
       // An upload whose message could not be saved is removed again, as before.
-      if (uploadedPath) void deleteGroupImage(uploadedPath, session).catch(() => undefined)
+      if (uploadedPath) void deleteGroupImage(uploadedPath, { group_id: item.groupId, sender_id: session.user.id }, session).catch(() => undefined)
       updatePending(item.key, { status: 'failed', progress: undefined, uploadedPath: undefined, error: error instanceof Error ? error.message : 'Not sent.' })
     }
   }

@@ -20,9 +20,10 @@ const LEGACY_SESSION_KEY = 'numi-auth-session'
 // The account whose study data is currently kept in this browser's storage.
 const DATA_OWNER_KEY = 'bindit-data-owner'
 // Every key bindit (and its earlier names) has written to localStorage.
-const LOCAL_DATA_PREFIXES = ['bindit-', 'bindet-', 'numi-', 'cac-']
-// Purely cosmetic preferences that are safe to keep across accounts. None exist yet.
-const COSMETIC_KEYS = new Set<string>()
+const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
+// Purely cosmetic preferences that are safe to keep across accounts. Anything
+// that reflects account data (important items, task tabs/notices) is cleared.
+const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2'])
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
@@ -94,6 +95,8 @@ function claimLocalData(userId: string) {
   localStorage.setItem(DATA_OWNER_KEY, userId)
 }
 
+const sessionListeners = new Set<() => void>()
+
 export function saveAuthSession(session: AuthSession | null) {
   if (session) {
     claimLocalData(session.user.id)
@@ -102,6 +105,23 @@ export function saveAuthSession(session: AuthSession | null) {
   } else {
     localStorage.removeItem(SESSION_KEY)
     localStorage.removeItem(LEGACY_SESSION_KEY)
+  }
+  sessionListeners.forEach((listener) => listener())
+}
+
+/**
+ * Calls back whenever the stored session changes: a refresh or sign-in in this
+ * tab, or in another tab (storage event). Read the new one with loadAuthSession.
+ */
+export function subscribeToAuthSession(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.storageArea === localStorage && (event.key === null || event.key === SESSION_KEY)) listener()
+  }
+  sessionListeners.add(listener)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    sessionListeners.delete(listener)
+    window.removeEventListener('storage', onStorage)
   }
 }
 
@@ -181,6 +201,8 @@ export type RefreshResult = {
   session: AuthSession | null
   /** The refresh could not reach the auth server (or it errored); the session was kept. */
   failed: boolean
+  /** The auth server rejected the refresh token; all local account data was cleared. */
+  rejected?: boolean
 }
 
 let refreshInFlight: Promise<RefreshResult> | null = null
@@ -212,8 +234,9 @@ export function refreshSessionIfDue(session: AuthSession): Promise<RefreshResult
       return { session: refreshed, failed: false }
     } catch (error) {
       if (error instanceof AuthRequestError && (error.status === 400 || error.status === 401)) {
-        saveAuthSession(null)
-        return { session: null, failed: false }
+        // Same as signing out: nothing from the account stays in this browser.
+        clearLocalAccountData()
+        return { session: null, failed: false, rejected: true }
       }
       return { session: latest, failed: true }
     }
@@ -223,9 +246,12 @@ export function refreshSessionIfDue(session: AuthSession): Promise<RefreshResult
   return refreshInFlight
 }
 
-export async function refreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
+/** Like refreshSessionIfDue, but only returns the session. Reloads the page when the refresh is rejected. */
+export async function refreshAuthSession(session: AuthSession, options: { reloadOnReject?: boolean } = {}): Promise<AuthSession | null> {
   if (!sessionNeedsRefresh(session)) return session
-  return (await refreshSessionIfDue(session)).session
+  const result = await refreshSessionIfDue(session)
+  if (result.rejected && options.reloadOnReject !== false) reloadSignedOut()
+  return result.session
 }
 
 export async function signUp(email: string, password: string) {
@@ -264,8 +290,28 @@ export async function signIn(email: string, password: string) {
   return session
 }
 
+// Set in sessionStorage when this browser tab asks for a reset link, so a
+// recovery link that arrives without it gets an extra confirmation first.
+const RESET_REQUESTED_KEY = 'bindit:reset-requested'
+
 export async function requestPasswordReset(email: string) {
   await authRequest('recover', { email }, appReturnUrl())
+  try {
+    sessionStorage.setItem(RESET_REQUESTED_KEY, String(Date.now()))
+  } catch {
+    // Without storage the recovery link just asks for confirmation first.
+  }
+}
+
+/** True (once) when this browser tab requested a password reset. */
+export function takeResetRequested() {
+  try {
+    const requested = sessionStorage.getItem(RESET_REQUESTED_KEY)
+    sessionStorage.removeItem(RESET_REQUESTED_KEY)
+    return Boolean(requested)
+  } catch {
+    return false
+  }
 }
 
 export type AuthRedirect =
@@ -274,6 +320,34 @@ export type AuthRedirect =
   | { kind: 'tokens'; accessToken: string; refreshToken: string; expiresIn: number; type: string }
 
 let authRedirect: AuthRedirect | null = null
+
+const LINK_EXPIRED_MESSAGE = 'That link is invalid or has expired. Request a new one and try again.'
+const REDIRECT_ERROR_MESSAGES: Record<string, string> = {
+  otp_expired: LINK_EXPIRED_MESSAGE,
+  flow_state_expired: LINK_EXPIRED_MESSAGE,
+  flow_state_not_found: LINK_EXPIRED_MESSAGE,
+  bad_jwt: LINK_EXPIRED_MESSAGE,
+  bad_code_verifier: LINK_EXPIRED_MESSAGE,
+  invalid_request: LINK_EXPIRED_MESSAGE,
+  unauthorized_client: LINK_EXPIRED_MESSAGE,
+  access_denied: 'That link was not accepted. Request a new one and try again.',
+  otp_disabled: 'Email links are turned off right now. Log in with your password instead.',
+  email_address_not_authorized: 'We can’t send email to that address. Try another one.',
+  over_email_send_rate_limit: 'Too many emails were sent. Wait a few minutes, then request a new link.',
+  over_request_rate_limit: 'Too many attempts. Wait a few minutes and try again.',
+  user_banned: 'This account can’t sign in right now.',
+  signup_disabled: 'New accounts can’t be created right now.',
+  server_error: 'Something went wrong on our side. Request a new link and try again.',
+  temporarily_unavailable: 'Accounts are briefly unavailable. Try again in a few minutes.',
+  unexpected_failure: 'Something went wrong on our side. Request a new link and try again.',
+}
+
+/** A fixed, friendly message for a known error code from an email link; never the URL's own text. */
+function redirectErrorMessage(errorCode: string | null, errorName: string | null) {
+  return (errorCode && REDIRECT_ERROR_MESSAGES[errorCode])
+    || (errorName && REDIRECT_ERROR_MESSAGES[errorName])
+    || 'That link did not work. Request a new one and try again.'
+}
 
 /**
  * Reads what the auth server put in the URL fragment after an email link
@@ -285,14 +359,15 @@ export function takeAuthRedirect(): AuthRedirect {
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const accessToken = params.get('access_token')
   const refreshToken = params.get('refresh_token')
-  const errorCode = params.get('error') ?? params.get('error_code')
-  const errorDescription = params.get('error_description')
-  if (accessToken || refreshToken || errorCode || errorDescription) {
+  const errorCode = params.get('error_code')
+  const errorName = params.get('error')
+  const hasError = Boolean(errorCode || errorName || params.get('error_description'))
+  if (accessToken || refreshToken || hasError) {
     window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${window.location.search}`)
   }
-  if (errorCode || errorDescription) {
-    const message = (errorDescription || 'That link did not work.').replace(/\s+/g, ' ').trim().slice(0, 240)
-    authRedirect = { kind: 'error', message: /expired|invalid/i.test(message) ? `${message}. Request a new link and try again.` : message }
+  if (hasError) {
+    // Anyone can craft this URL, so its free-text error_description is never shown.
+    authRedirect = { kind: 'error', message: redirectErrorMessage(errorCode, errorName) }
   } else if (accessToken && refreshToken) {
     const expiresIn = Number(params.get('expires_in'))
     authRedirect = { kind: 'tokens', accessToken, refreshToken, expiresIn, type: params.get('type') ?? '' }
@@ -341,7 +416,22 @@ export async function updatePassword(session: AuthSession, password: string): Pr
     body: JSON.stringify({ password }),
   })
   const user = await readAuthResponse(response, 'Could not update your password.') as AuthUser
+  revokeOtherSessions(session)
   return { ...session, user: { ...session.user, ...user } }
+}
+
+/**
+ * After a password change, signs the account out everywhere else (scope=others
+ * keeps this session). Best-effort: it never blocks or fails the change.
+ */
+function revokeOtherSessions(session: AuthSession) {
+  void config()
+    .then((settings) => fetch(`${settings.supabase_url}/auth/v1/logout?scope=others`, {
+      method: 'POST',
+      headers: { apikey: settings.supabase_anon_key, Authorization: `Bearer ${session.access_token}` },
+      keepalive: true,
+    }))
+    .catch(() => undefined)
 }
 
 export async function updateUsername(session: AuthSession, username: string): Promise<AuthSession> {
@@ -387,7 +477,12 @@ export async function signOut() {
   }
 }
 
+/** Reloads the page without the URL fragment, so no in-memory state from a signed-out account survives. */
+export function reloadSignedOut() {
+  window.location.replace(`${window.location.pathname}${window.location.search}`)
+}
+
 /** Signs out and reloads, so nothing from the account stays in memory. */
 export function signOutAndReload() {
-  void signOut().finally(() => window.location.replace(`${window.location.pathname}${window.location.search}`))
+  void signOut().finally(reloadSignedOut)
 }

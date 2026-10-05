@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import {
-  addTaskChecklistItem, addTaskComment, addTaskLink, createTask, deleteTask, deleteTaskAttachment, deleteTaskChecklistItem,
+  ApiError, addTaskChecklistItem, addTaskComment, addTaskLink, createTask, deleteTask, deleteTaskAttachment, deleteTaskChecklistItem,
   getCachedFriends, getCachedStudyGroups, getCachedTasks, getFriends, getStudyGroups, getTask, getTasks, parseServerTime,
   setCachedTasks, updateTask, updateTaskChecklistItem,
   type SocialNotification, type StudyGroup, type Task, type TaskDetail, type TaskInput, type TaskPriority, type TaskStatus,
@@ -331,7 +331,11 @@ export function Goals({ session }: { session: AuthSession | null }) {
       }
     } catch (error) {
       replaceTask(taskId, previous)
-      setToast({ text: errorText(error), error: true })
+      const movingToPersonal = Boolean(previous.group_id) && changes.group_id === null
+      const text = movingToPersonal && error instanceof ApiError && error.code === 'task_manage_forbidden'
+        ? 'Only the creator can move this task out of the group.'
+        : errorText(error)
+      setToast({ text, error: true })
     }
   }, [tasks, token, groups, replaceTask, details, loadDetail])
 

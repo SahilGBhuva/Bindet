@@ -6,6 +6,7 @@ import {
   msUntilRefresh,
   refreshAuthSession,
   refreshSessionIfDue,
+  reloadSignedOut,
   requestPasswordReset,
   resendSignupConfirmation,
   saveAuthSession,
@@ -13,6 +14,7 @@ import {
   signOutAndReload,
   signUp,
   takeAuthRedirect,
+  takeResetRequested,
   updatePassword,
   verifyRedirectTokens,
   verifySignupCode,
@@ -27,7 +29,8 @@ type GateView = 'landing' | 'auth' | 'confirm'
 // An email link that needs the person's attention before the app opens.
 type LinkGate =
   | { kind: 'continue'; session: AuthSession }
-  | { kind: 'recovery'; session: AuthSession }
+  // confirmed is false when this browser did not ask for the reset link.
+  | { kind: 'recovery'; session: AuthSession; confirmed: boolean }
   | { kind: 'other-account'; linkedEmail: string }
 const MAX_REFRESH_RETRY_MS = 60_000
 const RESEND_SECS = 60
@@ -116,7 +119,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     let cancelled = false
     async function start() {
       const stored = sessionRef.current
-      const current = stored ? await refreshAuthSession(stored) : null
+      // A rejected refresh has already cleared local data. Reload to the signed-out
+      // page, unless an email link is waiting to be checked (reloading would lose it).
+      const current = stored ? await refreshAuthSession(stored, { reloadOnReject: redirect.kind !== 'tokens' }) : null
       let gate: LinkGate | null = null
       let next = current
       let linkError = ''
@@ -128,7 +133,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             discardSession(linked)
             gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account' }
           } else if (redirect.type === 'recovery') {
-            gate = { kind: 'recovery', session: linked }
+            gate = { kind: 'recovery', session: linked, confirmed: takeResetRequested() }
           } else if (current) {
             saveAuthSession(linked)
             next = linked
@@ -174,6 +179,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
         return
       }
       failures = 0
+      if (result.rejected) {
+        reloadSignedOut()
+        return
+      }
       if (!result.session || result.session.access_token !== session.access_token) {
         setSession(result.session)
         return
@@ -335,6 +344,36 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (linkGate?.kind === 'recovery') {
     const recovering = linkGate.session
+    const recoveringEmail = recovering.user.email ?? 'this account'
+    // Revokes only the link's own session; a signed-in session is untouched.
+    const declineRecovery = () => {
+      discardSession(recovering)
+      setLinkGate(null)
+      setPassword('')
+      setPasswordAgain('')
+      setError('')
+    }
+    if (!linkGate.confirmed) {
+      return (
+        <main className="auth">
+          <section className="auth-card" aria-labelledby="auth-title">
+            <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+            <AuthBrand />
+            <p className="auth-eyebrow">Reset password</p>
+            <h1 className="auth-title" id="auth-title">Reset the password for {recoveringEmail}?</h1>
+            <p className="auth-lead">You opened a password reset link for this account. Continue only if it’s yours and you asked for it.</p>
+            <button className="auth-submit" type="button" onClick={() => setLinkGate({ ...linkGate, confirmed: true })}>
+              Continue
+            </button>
+            <div className="auth-links">
+              <button className="auth-text-btn" type="button" onClick={declineRecovery}>
+                Not me
+              </button>
+            </div>
+          </section>
+        </main>
+      )
+    }
     async function submitNewPassword(event: FormEvent) {
       event.preventDefault()
       setError('')
@@ -367,7 +406,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <AuthBrand />
           <p className="auth-eyebrow">Reset password</p>
           <h1 className="auth-title" id="auth-title">Set a new password</h1>
-          <p className="auth-lead">For {recovering.user.email ?? 'your account'}. Use at least 8 characters.</p>
+          <p className="auth-reason" role="status">
+            <strong>This link is for {recoveringEmail}.</strong> Not you?{' '}
+            <button className="auth-text-btn" type="button" disabled={busy} onClick={declineRecovery}>
+              Not me
+            </button>
+          </p>
+          <p className="auth-lead">Use at least 8 characters.</p>
           <form className="auth-form" onSubmit={submitNewPassword}>
             <label className="auth-field">
               <span>New password</span>
@@ -410,13 +455,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               className="auth-text-btn"
               type="button"
               disabled={busy}
-              onClick={() => {
-                if (!session) discardSession(recovering)
-                setLinkGate(null)
-                setPassword('')
-                setPasswordAgain('')
-                setError('')
-              }}
+              onClick={declineRecovery}
             >
               Cancel
             </button>

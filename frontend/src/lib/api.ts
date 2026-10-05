@@ -165,6 +165,54 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+export const RATE_LIMITED_MESSAGE = 'You’re doing that too fast. Try again in a minute.'
+export const AI_BREAK_MESSAGE = 'The AI is taking a short break. Try again later.'
+
+// Fixed text for error codes the backend can send (as `code`, `error`, or a bare `detail`).
+const API_ERROR_MESSAGES: Record<string, string> = {
+  rate_limited: RATE_LIMITED_MESSAGE,
+  task_assign_rate_limited: RATE_LIMITED_MESSAGE,
+  ai_daily_limit: AI_BREAK_MESSAGE,
+  ai_unavailable: AI_BREAK_MESSAGE,
+  tutor_busy: 'Finish your other tutor reply first.',
+}
+
+/** An error response from the bindit API, with its HTTP status and machine code (when it sent one). */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+  constructor(message: string, status: number, code = '') {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+const CODE_LIKE = /^[a-z][a-z0-9_]*$/
+
+/**
+ * Turns an API error body into a friendly ApiError. Known codes get fixed text;
+ * a readable `detail` string is kept; a bare 429 says to slow down.
+ */
+export function apiError(status: number, data: unknown, fallback: string): ApiError {
+  const body = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const detail = body.detail
+  const nested = detail && typeof detail === 'object' && !Array.isArray(detail) ? detail as Record<string, unknown> : {}
+  const text = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : ''
+  const code = [body.code, body.error, nested.code, nested.error, detail]
+    .map(text)
+    .find((value) => CODE_LIKE.test(value)) ?? ''
+  const readable = [detail, nested.message, body.message]
+    .map(text)
+    .find((value) => value && !CODE_LIKE.test(value)) ?? ''
+  const message = API_ERROR_MESSAGES[code]
+    || readable
+    || (status === 429 ? RATE_LIMITED_MESSAGE : '')
+    || fallback
+  return new ApiError(message, status, code)
+}
+
 /* True when a request was cancelled on purpose (navigation, a newer request). */
 export function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
@@ -194,8 +242,8 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
     callerSignal?.removeEventListener('abort', abortFromCaller)
   }
   if (!response.ok) {
-    const data = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(data?.detail ?? `bindit could not complete that request (${response.status}).`)
+    const data = await response.json().catch(() => null)
+    throw apiError(response.status, data, `bindit could not complete that request (${response.status}).`)
   }
   return response.json() as Promise<T>
 }
@@ -319,8 +367,8 @@ export async function getProgress(studentId: string, accessToken?: string, force
   const response = await fetch(`${API_URL}/api/progress/${encodeURIComponent(studentId)}?tz_offset=${new Date().getTimezoneOffset()}`, { headers })
   if (response.status === 404) return null
   if (!response.ok) {
-    const data = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(data?.detail ?? `bindit could not load progress (${response.status}).`)
+    const data = await response.json().catch(() => null)
+    throw apiError(response.status, data, `bindit could not load progress (${response.status}).`)
   }
   const data = await response.json() as Progress
   progressCache.set(studentId, { savedAt: Date.now(), data })
@@ -587,7 +635,7 @@ export function streamTutorMessage(
       finished = true
       window.clearTimeout(idleTimer)
       handlers.onDone?.(payload)
-    } else if (name === 'error') fail(payload.message)
+    } else if (name === 'error') fail(apiError(0, payload, 'The tutor could not answer. Try again.').message)
   }
   const drain = () => {
     const text = xhr.responseText
@@ -611,9 +659,9 @@ export function streamTutorMessage(
   }
   xhr.onload = () => {
     if (xhr.status !== 200) {
-      let detail = ''
-      try { detail = (JSON.parse(xhr.responseText) as { detail?: string }).detail ?? '' } catch { /* not JSON */ }
-      fail(detail || `The tutor could not answer (${xhr.status}).`)
+      let data: unknown = null
+      try { data = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      fail(apiError(xhr.status, data, `The tutor could not answer (${xhr.status}).`).message)
       return
     }
     drain()
