@@ -25,6 +25,27 @@ def blank_pdf(pages: int) -> bytes:
     return output.getvalue()
 
 
+def text_pdf(lines: list[str]) -> bytes:
+    """A real PDF with one page of Helvetica text per entry in lines."""
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+    writer = PdfWriter()
+    for line in lines:
+        page = writer.add_blank_page(width=612, height=792)
+        font = DictionaryObject({
+            NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        })
+        page[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)}),
+        })
+        stream = DecodedStreamObject()
+        stream.set_data(f"BT /F1 12 Tf 72 720 Td ({line}) Tj ET".encode("latin-1"))
+        page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
 class NoteIngestionTests(unittest.TestCase):
     def setUp(self):
         database.engine.cache_clear()
@@ -44,8 +65,47 @@ class NoteIngestionTests(unittest.TestCase):
     def test_pdf_uses_text_extraction(self):
         page = MagicMock()
         page.extract_text.return_value = "Newton's first law"
-        with patch.object(note_ingestion, "PdfReader", return_value=MagicMock(pages=[page], is_encrypted=False)):
+        with patch.object(note_ingestion, "PDF_IN_SUBPROCESS", False), \
+                patch.object(note_ingestion, "PdfReader", return_value=MagicMock(pages=[page], is_encrypted=False)):
             self.assertEqual(note_ingestion.extract_text("physics.pdf", b"fake-pdf"), "Newton's first law")
+
+    def test_real_pdf_is_read_in_a_child_process(self):
+        content = text_pdf(["Inertia keeps objects moving", "Force equals mass times acceleration"])
+        with patch.object(note_ingestion, "extract_pdf_in_process", side_effect=AssertionError("ran in-process")):
+            text = note_ingestion.extract_text("physics.pdf", content)
+        self.assertIn("Inertia keeps objects moving", text)
+        self.assertIn("Force equals mass times acceleration", text)
+        with self.assertRaisesRegex(note_ingestion.NoteIngestionError, "Could not read"):
+            note_ingestion.extract_text("broken.pdf", b"%PDF-1.7 garbage")
+
+    def test_slow_pdf_extraction_is_stopped_with_a_friendly_error(self):
+        import subprocess
+        with patch.object(note_ingestion.subprocess, "run", side_effect=subprocess.TimeoutExpired("python", 10)):
+            with self.assertRaisesRegex(note_ingestion.NoteIngestionError, "took too long"):
+                note_ingestion.extract_text("slow.pdf", b"%PDF-1.7")
+        # The real child is killed at the limit.
+        with patch.object(note_ingestion, "PDF_TIME_LIMIT_SECONDS", 0.001):
+            with self.assertRaises(note_ingestion.PdfTimeout):
+                note_ingestion.extract_pdf_text(text_pdf(["slow"]))
+        # In-process (no child processes on the host), the deadline is checked between pages.
+        pages = [MagicMock() for _ in range(3)]
+        with self.assertRaises(note_ingestion.PdfTimeout):
+            note_ingestion.collect_page_text(pages, deadline=0.0)
+        pages[0].extract_text.assert_not_called()
+
+    def test_pdf_extraction_stops_after_enough_text(self):
+        pages = [MagicMock() for _ in range(10)]
+        for page in pages:
+            page.extract_text.return_value = "x" * 50
+        text = note_ingestion.collect_page_text(pages, deadline=float("inf"), max_chars=120)
+        self.assertEqual(text.count("x"), 150)
+        pages[3].extract_text.assert_not_called()
+
+    def test_pypdf_limits_are_lowered(self):
+        from pypdf import get_configuration
+        with note_ingestion.pdf_limits():
+            self.assertEqual(get_configuration().zlib_maximum_output_length, 25_000_000)
+        self.assertEqual(get_configuration().zlib_maximum_output_length, 75_000_000)
 
     def test_note_ownership_isolated(self):
         saved = note_store.save_note("student-a", "Biology", "Cells", "cells.txt", "text/plain", "Nuclei contain DNA", 18)
