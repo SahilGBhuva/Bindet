@@ -6,6 +6,7 @@ import {
   msUntilRefresh,
   refreshAuthSession,
   refreshSessionIfDue,
+  reloadSignedOut,
   requestPasswordReset,
   resendSignupConfirmation,
   saveAuthSession,
@@ -118,7 +119,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     let cancelled = false
     async function start() {
       const stored = sessionRef.current
-      const current = stored ? await refreshAuthSession(stored) : null
+      // A rejected refresh has already cleared local data. Reload to the signed-out
+      // page, unless an email link is waiting to be checked (reloading would lose it).
+      const current = stored ? await refreshAuthSession(stored, { reloadOnReject: redirect.kind !== 'tokens' }) : null
       let gate: LinkGate | null = null
       let next = current
       let linkError = ''
@@ -176,6 +179,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
         return
       }
       failures = 0
+      if (result.rejected) {
+        reloadSignedOut()
+        return
+      }
       if (!result.session || result.session.access_token !== session.access_token) {
         setSession(result.session)
         return

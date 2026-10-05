@@ -20,9 +20,10 @@ const LEGACY_SESSION_KEY = 'numi-auth-session'
 // The account whose study data is currently kept in this browser's storage.
 const DATA_OWNER_KEY = 'bindit-data-owner'
 // Every key bindit (and its earlier names) has written to localStorage.
-const LOCAL_DATA_PREFIXES = ['bindit-', 'bindet-', 'numi-', 'cac-']
-// Purely cosmetic preferences that are safe to keep across accounts. None exist yet.
-const COSMETIC_KEYS = new Set<string>()
+const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
+// Purely cosmetic preferences that are safe to keep across accounts. Anything
+// that reflects account data (important items, task tabs/notices) is cleared.
+const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2'])
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
@@ -181,6 +182,8 @@ export type RefreshResult = {
   session: AuthSession | null
   /** The refresh could not reach the auth server (or it errored); the session was kept. */
   failed: boolean
+  /** The auth server rejected the refresh token; all local account data was cleared. */
+  rejected?: boolean
 }
 
 let refreshInFlight: Promise<RefreshResult> | null = null
@@ -212,8 +215,9 @@ export function refreshSessionIfDue(session: AuthSession): Promise<RefreshResult
       return { session: refreshed, failed: false }
     } catch (error) {
       if (error instanceof AuthRequestError && (error.status === 400 || error.status === 401)) {
-        saveAuthSession(null)
-        return { session: null, failed: false }
+        // Same as signing out: nothing from the account stays in this browser.
+        clearLocalAccountData()
+        return { session: null, failed: false, rejected: true }
       }
       return { session: latest, failed: true }
     }
@@ -223,9 +227,12 @@ export function refreshSessionIfDue(session: AuthSession): Promise<RefreshResult
   return refreshInFlight
 }
 
-export async function refreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
+/** Like refreshSessionIfDue, but only returns the session. Reloads the page when the refresh is rejected. */
+export async function refreshAuthSession(session: AuthSession, options: { reloadOnReject?: boolean } = {}): Promise<AuthSession | null> {
   if (!sessionNeedsRefresh(session)) return session
-  return (await refreshSessionIfDue(session)).session
+  const result = await refreshSessionIfDue(session)
+  if (result.rejected && options.reloadOnReject !== false) reloadSignedOut()
+  return result.session
 }
 
 export async function signUp(email: string, password: string) {
@@ -451,7 +458,12 @@ export async function signOut() {
   }
 }
 
+/** Reloads the page without the URL fragment, so no in-memory state from a signed-out account survives. */
+export function reloadSignedOut() {
+  window.location.replace(`${window.location.pathname}${window.location.search}`)
+}
+
 /** Signs out and reloads, so nothing from the account stays in memory. */
 export function signOutAndReload() {
-  void signOut().finally(() => window.location.replace(`${window.location.pathname}${window.location.search}`))
+  void signOut().finally(reloadSignedOut)
 }
