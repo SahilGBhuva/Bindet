@@ -30,6 +30,9 @@ MAX_LIST = 500
 MAX_CHECKLIST = 50
 MAX_ATTACHMENTS = 20
 MAX_ASSIGNEES = 10
+# Only the task creator or the group owner may change these. Assignees can
+# still move status, edit the description, checklist, priority and notes.
+MANAGER_FIELDS = ("title", "assignee_ids", "due_date", "due_time", "group_id", "milestone_id")
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 task_metadata = MetaData()
@@ -197,12 +200,18 @@ def _assignee_ids(connection, task_id: str) -> set[str]:
     )).scalars().all())
 
 
+def _can_manage(task: dict, student_id: str, role: str | None) -> bool:
+    """Creator or group owner: may rename, reschedule, reassign, move or delete."""
+    return task["owner_id"] == student_id or role == "owner"
+
+
 def _can_edit(task: dict, student_id: str, role: str | None, assignees: set[str]) -> bool:
-    return task["owner_id"] == student_id or role == "owner" or student_id in assignees
+    """Managers plus assignees: may change status, description, checklist and attachments."""
+    return _can_manage(task, student_id, role) or student_id in assignees
 
 
 def _can_delete(task: dict, student_id: str, role: str | None) -> bool:
-    return task["owner_id"] == student_id or role == "owner"
+    return _can_manage(task, student_id, role)
 
 
 def _require_edit(connection, task_id: str, student_id: str) -> tuple[dict, str | None, set[str]]:
@@ -220,8 +229,12 @@ def _log(connection, task: dict, actor_id: str, kind: str, detail: str = "") -> 
     ))
 
 
-def _notify(connection, recipients: set[str], actor_id: str, kind: str, message: str) -> None:
+def _notify(connection, recipients: set[str], actor_id: str, kind: str, message: str, group_id: str | None = None) -> None:
+    """Notify recipients other than the actor. For group tasks only current members are
+    notified, so students who left a group stop hearing about its tasks."""
     recipients = {recipient for recipient in recipients if recipient != actor_id}
+    if recipients and group_id is not None:
+        recipients &= _group_member_ids(connection, group_id)
     if not recipients:
         return
     now = _now()
@@ -296,16 +309,21 @@ def _validated_fields(data: dict) -> dict:
     return values
 
 
-def _validated_assignees(connection, group_id: str | None, owner_id: str, assignee_ids) -> set[str]:
+def _validated_assignees(connection, group_id: str | None, owner_id: str, assignee_ids,
+                         droppable: set[str] | frozenset = frozenset()) -> set[str]:
+    """Assignees must be current members of the task's group (or the owner, for a personal task).
+
+    IDs in droppable (assignees already on the task) that are no longer members are
+    dropped silently instead of rejected, so a stale assignee never blocks a save.
+    """
     chosen = {str(item) for item in (assignee_ids or []) if item}
+    allowed = {owner_id} if group_id is None else _group_member_ids(connection, group_id)
+    invalid = chosen - allowed
+    if invalid - set(droppable):
+        raise ValueError("invalid_assignee")
+    chosen -= invalid
     if len(chosen) > MAX_ASSIGNEES:
         raise ValueError("too_many_assignees")
-    if group_id is None:
-        if chosen - {owner_id}:
-            raise ValueError("invalid_assignee")
-        return chosen
-    if chosen - _group_member_ids(connection, group_id):
-        raise ValueError("invalid_assignee")
     return chosen
 
 
@@ -366,6 +384,7 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
             "attachment_count": int(attachments.get(row["id"], 0)),
             "created_at": _utc(row["created_at"]), "updated_at": _utc(row["updated_at"]), "completed_at": _utc(row["completed_at"]),
             "can_edit": _can_edit(row, student_id, role, set(task_assigned)),
+            "can_manage": _can_manage(row, student_id, role),
             "can_delete": _can_delete(row, student_id, role),
         })
     return results
@@ -426,7 +445,7 @@ def create_task(student_id: str, data: dict) -> dict:
         _log(connection, row, student_id, "created", row["title"])
         if group_id:
             actor = _names(connection, {student_id}).get(student_id, "A group member")
-            _notify(connection, assignees, student_id, "task_assigned", f"{actor} assigned you “{row['title']}”.")
+            _notify(connection, assignees, student_id, "task_assigned", f"{actor} assigned you “{row['title']}”.", group_id)
         return _summary(connection, task_id, student_id)
 
 
@@ -468,29 +487,67 @@ def get_task(student_id: str, task_id: str) -> dict:
     return summary
 
 
+def _target_group(connection, task: dict, student_id: str, data: dict) -> str | None:
+    """Validate a move to another group (or to personal). Returns the task's group afterwards."""
+    if "group_id" not in data:
+        return task["group_id"]
+    target = data["group_id"] or None
+    if target == task["group_id"]:
+        return target
+    if target is not None:
+        if _group_role(connection, target, student_id) is None:
+            raise ValueError("group_not_found")
+        # The creator keeps owning the task, so they must be able to see it afterwards.
+        if task["owner_id"] != student_id and _group_role(connection, target, task["owner_id"]) is None:
+            raise ValueError("task_owner_not_in_group")
+    return target
+
+
 def update_task(student_id: str, task_id: str, data: dict) -> dict:
     init_tasks()
     values = _validated_fields(data)
     with database.engine().begin() as connection:
         task, role, current_assignees = _require_edit(connection, task_id, student_id)
+        if any(field in data for field in MANAGER_FIELDS) and not _can_manage(task, student_id, role):
+            raise ValueError("task_manage_forbidden")
         now = _now()
         actor = _names(connection, {student_id}).get(student_id, "A group member")
-        if "milestone_id" in data:
-            values["milestone_id"] = _validated_milestone(connection, task["group_id"], data["milestone_id"])
+        group_id = _target_group(connection, task, student_id, data)
+        moved = group_id != task["group_id"]
+        if moved:
+            values["group_id"] = group_id
+            # Milestones belong to one group; keep one only if it was chosen for the new group.
+            values["milestone_id"] = _validated_milestone(connection, group_id, data.get("milestone_id"))
+            # Activity follows the task so the old group's analytics no longer list it.
+            connection.execute(update(task_activity).where(task_activity.c.task_id == task_id).values(group_id=group_id))
+            task = {**task, "group_id": group_id}
+            if group_id:
+                group_name = connection.execute(select(database.study_groups.c.name).where(
+                    database.study_groups.c.id == group_id)).scalar_one()
+                _log(connection, task, student_id, "moved", f"Moved to {group_name}")
+            else:
+                _log(connection, task, student_id, "moved", "Moved to personal tasks")
+        elif "milestone_id" in data:
+            values["milestone_id"] = _validated_milestone(connection, group_id, data["milestone_id"])
+        title = values.get("title", task["title"])
         if "status" in values and values["status"] != task["status"]:
             values["completed_at"] = now if values["status"] == "done" else None
             _log(connection, task, student_id, "status", f"Moved to {STATUS_LABELS[values['status']]}")
-            if task["group_id"] and values["status"] == "done":
+            if group_id and values["status"] == "done":
                 _notify(connection, current_assignees | {task["owner_id"]}, student_id, "task_completed",
-                        f"{actor} completed “{task['title']}”.")
+                        f"{actor} completed “{title}”.", group_id)
         if "due_date" in values and values["due_date"] != task["due_date"]:
             _log(connection, task, student_id, "due", f"Due {values['due_date'].isoformat()}" if values["due_date"] else "Due date cleared")
         if "priority" in values and values["priority"] != task["priority"]:
             _log(connection, task, student_id, "priority", f"Priority set to {values['priority']}")
         if "title" in values and values["title"] != task["title"]:
             _log(connection, task, student_id, "renamed", values["title"])
-        if "assignee_ids" in data:
-            assignees = _validated_assignees(connection, task["group_id"], task["owner_id"], data["assignee_ids"])
+        if "assignee_ids" in data or moved:
+            # Without an explicit list (a plain move) the current assignees carry over. Either way,
+            # current assignees who are not members of the task's group are dropped, never rejected;
+            # anyone newly named must be a current member.
+            requested = data["assignee_ids"] if "assignee_ids" in data else current_assignees
+            assignees = _validated_assignees(connection, group_id, task["owner_id"], requested, current_assignees)
             added, removed = assignees - current_assignees, current_assignees - assignees
             if removed:
                 connection.execute(delete(task_assignees).where(
@@ -505,8 +562,8 @@ def update_task(student_id: str, task_id: str, data: dict) -> dict:
                 parts = [f"Assigned {', '.join(names.get(p, 'Student') for p in sorted(added))}"] if added else []
                 parts += [f"Unassigned {', '.join(names.get(p, 'Student') for p in sorted(removed))}"] if removed else []
                 _log(connection, task, student_id, "assignees", "; ".join(parts))
-                if task["group_id"]:
-                    _notify(connection, added, student_id, "task_assigned", f"{actor} assigned you “{task['title']}”.")
+                if group_id:
+                    _notify(connection, added, student_id, "task_assigned", f"{actor} assigned you “{title}”.", group_id)
         if values:
             connection.execute(update(tasks).where(tasks.c.id == task_id).values(**values, updated_at=now))
         elif "assignee_ids" in data:
@@ -598,7 +655,7 @@ def add_comment(student_id: str, task_id: str, body: str) -> dict:
         name = _names(connection, {student_id}).get(student_id, "Student")
         if task["group_id"]:
             _notify(connection, _assignee_ids(connection, task_id) | {task["owner_id"]}, student_id, "task_comment",
-                    f"{name} commented on “{task['title']}”.")
+                    f"{name} commented on “{task['title']}”.", task["group_id"])
         _touch(connection, task_id)
     return {"id": comment_id, "author_id": student_id, "author_name": name, "body": clean, "created_at": now, "mine": True}
 
@@ -899,6 +956,41 @@ def notify_members(student_id: str, group_id: str, message: str) -> int:
         group_name = connection.execute(select(database.study_groups.c.name).where(database.study_groups.c.id == group_id)).scalar_one()
         _notify(connection, recipients, student_id, "group_notice", f"{group_name}: {clean}")
     return len(recipients)
+
+
+def drop_member_assignments(connection, student_id: str, group_id: str) -> int:
+    """Unassign a student who left a group from that group's unfinished tasks.
+
+    Runs inside the leave transaction. Completed tasks keep the assignment so the
+    record of who did the work stays intact; the former member can no longer see
+    any of them either way.
+    """
+    open_ids = connection.execute(select(tasks.c.id, tasks.c.title, tasks.c.group_id).join(
+        task_assignees, task_assignees.c.task_id == tasks.c.id,
+    ).where(
+        tasks.c.group_id == group_id, tasks.c.status != "done", task_assignees.c.student_id == student_id,
+    )).mappings().all()
+    if not open_ids:
+        return 0
+    connection.execute(delete(task_assignees).where(
+        task_assignees.c.student_id == student_id,
+        task_assignees.c.task_id.in_([row["id"] for row in open_ids]),
+    ))
+    name = _names(connection, {student_id}).get(student_id, "Student")
+    now = _now()
+    connection.execute(task_activity.insert(), [{
+        "task_id": row["id"], "group_id": group_id, "actor_id": student_id, "kind": "assignees",
+        "detail": f"Unassigned {name} (left the group)"[:240], "created_at": now,
+    } for row in open_ids])
+    return len(open_ids)
+
+
+def leave_group(student_id: str, group_id: str) -> bool:
+    """Leave a study group and drop the student from its open tasks in one transaction."""
+    init_tasks()
+    return database.leave_study_group(
+        student_id, group_id, on_leave=lambda connection: drop_member_assignments(connection, student_id, group_id),
+    )
 
 
 def reset_tasks() -> None:

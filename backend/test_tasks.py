@@ -9,6 +9,7 @@ TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import database
 import main
@@ -203,6 +204,91 @@ class TaskTests(unittest.TestCase):
         self.assertEqual({m["student_id"]: m["active"] for m in report["members"]}, {"alex-id": True, "sam-id": True})
         self.assertIsNotNone(quiet)
 
+    def join(self, student_id, name):
+        database.onboard_account(student_id, name.lower(), name, None)
+        database.join_study_group(student_id, self.group["invite_code"])
+
+    def test_assignees_cannot_rename_reschedule_or_reassign(self):
+        task = self.group_task(assignee_ids=["sam-id"], due_date="2026-10-20")
+        self.assertTrue(task["can_manage"])
+        mine = tasks.get_task("sam-id", task["id"])
+        self.assertTrue(mine["can_edit"])
+        self.assertFalse(mine["can_manage"])
+        for change in ({"title": "Mine now"}, {"assignee_ids": ["sam-id"]}, {"due_date": None},
+                       {"due_time": "09:00"}, {"group_id": None}, {"milestone_id": None}):
+            with self.assertRaisesRegex(ValueError, "task_manage_forbidden"):
+                tasks.update_task("sam-id", task["id"], change)
+        updated = tasks.update_task("sam-id", task["id"], {"status": "in_progress", "description": "Drafted intro"})
+        self.assertEqual((updated["status"], updated["description"]), ("in_progress", "Drafted intro"))
+        tasks.add_checklist_item("sam-id", task["id"], "Graphs")
+        self.assertEqual(tasks.get_task("sam-id", task["id"])["title"], "Lab report")
+
+    def test_leaving_unassigns_open_tasks_and_stops_notifications(self):
+        open_task = self.group_task(assignee_ids=["alex-id", "sam-id"])
+        done_task = self.group_task(assignee_ids=["sam-id"])
+        tasks.update_task("alex-id", done_task["id"], {"status": "done"})
+        tasks.leave_group("sam-id", self.group["id"])
+        self.assertEqual([p["student_id"] for p in tasks.get_task("alex-id", open_task["id"])["assignees"]], ["alex-id"])
+        self.assertEqual([p["student_id"] for p in tasks.get_task("alex-id", done_task["id"])["assignees"]], ["sam-id"])
+        before = len(database.notifications_for("sam-id"))
+        # Completing, commenting on or reopening the former member's old task notifies no one outside the group.
+        tasks.update_task("alex-id", done_task["id"], {"status": "todo"})
+        tasks.update_task("alex-id", done_task["id"], {"status": "done"})
+        tasks.add_comment("alex-id", done_task["id"], "Wrapping up")
+        self.assertEqual(len(database.notifications_for("sam-id")), before)
+
+    def test_stale_assignees_do_not_block_saving(self):
+        self.join("kim-id", "Kim")
+        task = self.group_task(assignee_ids=["sam-id", "kim-id"])
+        # Simulate an older leave that kept the assignment.
+        database.leave_study_group("kim-id", self.group["id"])
+        saved = tasks.update_task("alex-id", task["id"], {"assignee_ids": ["sam-id", "kim-id", "alex-id"]})
+        self.assertEqual({p["student_id"] for p in saved["assignees"]}, {"sam-id", "alex-id"})
+        with self.assertRaisesRegex(ValueError, "invalid_assignee"):
+            tasks.update_task("alex-id", task["id"], {"assignee_ids": ["eve-id"]})
+        # The stale assignee is never notified about the task again.
+        tasks.update_task("alex-id", task["id"], {"status": "done"})
+        self.assertNotIn("task_completed", {item["kind"] for item in database.notifications_for("kim-id")})
+
+    def test_moving_a_task_between_groups(self):
+        other = database.create_study_group("alex-id", "Chem crew")
+        task = self.group_task(assignee_ids=["alex-id", "sam-id"])
+        milestone = tasks.create_milestone("alex-id", self.group["id"], "Draft")
+        tasks.update_task("alex-id", task["id"], {"milestone_id": milestone["id"], "status": "in_progress"})
+        moved = tasks.update_task("alex-id", task["id"], {"group_id": other["id"], "assignee_ids": ["alex-id"]})
+        self.assertEqual((moved["group_id"], moved["group_name"], moved["milestone_id"]), (other["id"], "Chem crew", None))
+        self.assertEqual([p["student_id"] for p in moved["assignees"]], ["alex-id"])
+        self.assertEqual(tasks.list_tasks("sam-id"), [])
+        self.assertEqual(tasks.group_analytics("alex-id", self.group["id"])["activity"], [])
+        # Without an explicit list, assignees who are not in the new group are dropped.
+        back = tasks.update_task("alex-id", task["id"], {"group_id": self.group["id"]})
+        tasks.update_task("alex-id", task["id"], {"assignee_ids": ["alex-id", "sam-id"]})
+        personal = tasks.update_task("alex-id", task["id"], {"group_id": None})
+        self.assertIsNone(personal["group_id"])
+        self.assertEqual([p["student_id"] for p in personal["assignees"]], ["alex-id"])
+        self.assertEqual(back["group_id"], self.group["id"])
+        with self.assertRaisesRegex(ValueError, "group_not_found"):
+            tasks.update_task("alex-id", task["id"], {"group_id": "0" * 32})
+
+    def test_group_owner_cannot_move_a_task_where_its_creator_is_not_a_member(self):
+        other = database.create_study_group("alex-id", "Chem crew")
+        task = tasks.create_task("sam-id", {"title": "Slides", "group_id": self.group["id"]})
+        with self.assertRaisesRegex(ValueError, "task_owner_not_in_group"):
+            tasks.update_task("alex-id", task["id"], {"group_id": other["id"]})
+
+    def test_analytics_is_members_only_and_shares_no_practice_details(self):
+        self.group_task(assignee_ids=["sam-id"])
+        database.update_progress("sam-id", "addition", True, 10)
+        with self.assertRaisesRegex(ValueError, "group_not_found"):
+            tasks.group_analytics("eve-id", self.group["id"])
+        database.leave_study_group("sam-id", self.group["id"])
+        with self.assertRaisesRegex(ValueError, "group_not_found"):
+            tasks.group_analytics("sam-id", self.group["id"])
+        report = tasks.group_analytics("alex-id", self.group["id"])
+        member_keys = {key for member in report["members"] for key in member}
+        self.assertEqual(member_keys, {"student_id", "display_name", "username", "role", "assigned", "completed", "active"})
+        self.assertNotIn("xp", repr(report).lower())
+
     def test_only_the_group_owner_can_notify_members(self):
         with self.assertRaisesRegex(ValueError, "group_owner_required"):
             tasks.notify_members("sam-id", self.group["id"], "Please finish your slides")
@@ -251,6 +337,29 @@ class TaskRouteTests(unittest.TestCase):
             cleared = main.update_task_route(created["id"], main.TaskUpdate(due_date=None), "Bearer test")
         self.assertEqual((updated["due_date"], updated["priority"]), ("2026-10-10", "high"))
         self.assertIsNone(cleared["due_date"])
+
+    def test_patch_can_move_a_task_to_another_group(self):
+        group = database.create_study_group("alex-id", "Bio crew")
+        other = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("sam-id", group["invite_code"])
+        task = tasks.create_task("alex-id", {"title": "Lab", "group_id": group["id"], "assignee_ids": ["sam-id"]})
+        client = TestClient(main.app)
+        with self.as_user("alex-id"):
+            response = client.patch(f"/api/tasks/{task['id']}", json={"group_id": other["id"], "assignee_ids": ["alex-id"]},
+                                    headers={"Authorization": "Bearer test"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["group_id"], other["id"])
+        with self.as_user("sam-id"):
+            response = client.get(f"/api/study-groups/{other['id']}/analytics", headers={"Authorization": "Bearer test"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_leave_route_unassigns_open_tasks(self):
+        group = database.create_study_group("alex-id", "Bio crew")
+        database.join_study_group("sam-id", group["invite_code"])
+        task = tasks.create_task("alex-id", {"title": "Lab", "group_id": group["id"], "assignee_ids": ["sam-id"]})
+        with self.as_user("sam-id"):
+            self.assertEqual(main.leave_study_group(group["id"], "Bearer test"), {"left": True})
+        self.assertEqual(tasks.get_task("alex-id", task["id"])["assignees"], [])
 
 
 if __name__ == "__main__":

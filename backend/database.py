@@ -1279,7 +1279,9 @@ def list_study_groups(student_id: str) -> list[dict]:
         return [_study_group_result(connection, student_id, group) for group in groups]
 
 
-def leave_study_group(student_id: str, group_id: str) -> bool:
+def leave_study_group(student_id: str, group_id: str, on_leave=None) -> bool:
+    """Remove the student from the group. on_leave(connection) runs in the same
+    transaction (tasks.leave_group uses it to unassign the student's open tasks)."""
     init_db()
     with engine().begin() as connection:
         membership = connection.execute(select(study_group_members).where(
@@ -1290,6 +1292,8 @@ def leave_study_group(student_id: str, group_id: str) -> bool:
         if membership["role"] == "owner":
             raise ValueError("group_owner_cannot_leave")
         result = connection.execute(delete(study_group_members).where(study_group_members.c.id == membership["id"]))
+        if on_leave is not None:
+            on_leave(connection)
     return bool(result.rowcount)
 
 

@@ -227,6 +227,7 @@ class TaskUpdate(BaseModel):
     due_date: str | None = Field(default=None, max_length=10)
     due_time: str | None = Field(default=None, max_length=5)
     assignee_ids: list[str] | None = Field(default=None, max_length=10)
+    group_id: str | None = Field(default=None, max_length=32)
     milestone_id: int | None = None
     sort_order: int | None = None
     kind: Literal["task", "event"] | None = None
@@ -618,6 +619,8 @@ def social_error(error: ValueError) -> HTTPException:
         "group_owner_cannot_leave": (409, "Group owners cannot leave their group"),
         "task_not_found": (404, "That task could not be found"),
         "task_forbidden": (403, "Only the task creator, its assignees, or the group owner can change this task"),
+        "task_manage_forbidden": (403, "Only the task creator or the group owner can change the title, due date, assignees, milestone or group"),
+        "task_owner_not_in_group": (409, "The task creator isn’t a member of that group"),
         "invalid_task_title": (400, "Give the task a title"),
         "invalid_task_status": (400, "Choose a valid task status"),
         "invalid_task_priority": (400, "Choose a valid priority"),
@@ -855,7 +858,7 @@ def leave_study_group(group_id: str, authorization: Annotated[str | None, Header
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "group_leave", 20, 1440)
-        database.leave_study_group(user["id"], group_id)
+        tasks.leave_group(user["id"], group_id)
     except ValueError as error:
         raise social_error(error) from error
     return {"left": True}
