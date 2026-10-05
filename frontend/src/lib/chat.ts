@@ -140,6 +140,31 @@ function storagePath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/')
 }
 
+// Chat images live at <group id>/<sender id>/<file name>. A message row is data
+// another member wrote, so its attachment path is checked before anything is
+// signed, fetched or deleted with it: it must sit in the sender's own folder of
+// that group and the file name must be a single plain segment.
+const ATTACHMENT_PATH_PATTERN = /^[^/]+\/[^/]+\/[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export type AttachmentOwner = { group_id: string; sender_id: string }
+
+export function isSafeAttachmentPath(path: string | null | undefined, owner: AttachmentOwner): path is string {
+  if (!path || !owner.group_id || !owner.sender_id) return false
+  if (!path.startsWith(`${owner.group_id}/${owner.sender_id}/`)) return false
+  if (!ATTACHMENT_PATH_PATTERN.test(path)) return false
+  return path.split('/').every((segment) => segment !== '.' && segment !== '..' && segment !== '')
+}
+
+/** A file name part that keeps the stored path inside ATTACHMENT_PATH_PATTERN. */
+function safeAttachmentName(name: string) {
+  const cleaned = name
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
+    .slice(0, 80)
+  return cleaned || 'image'
+}
+
 export function uploadGroupImage(
   groupId: string,
   file: File,
@@ -147,8 +172,11 @@ export function uploadGroupImage(
   onProgress: (progress: number) => void,
 ): Promise<ChatAttachment> {
   return getConfig().then((config) => new Promise((resolve, reject) => {
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'image'
-    const path = `${groupId}/${session.user.id}/${crypto.randomUUID()}-${safeName}`
+    const path = `${groupId}/${session.user.id}/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`
+    if (!isSafeAttachmentPath(path, { group_id: groupId, sender_id: session.user.id })) {
+      reject(new Error('The image could not be uploaded.'))
+      return
+    }
     const request = new XMLHttpRequest()
     request.open('POST', `${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`)
     request.setRequestHeader('apikey', config.supabase_anon_key)
@@ -178,7 +206,8 @@ export function uploadGroupImage(
   }))
 }
 
-export async function getGroupImageUrl(path: string, session: AuthSession) {
+export async function getGroupImageUrl(path: string, owner: AttachmentOwner, session: AuthSession) {
+  if (!isSafeAttachmentPath(path, owner)) throw new Error('Image unavailable')
   const config = await getConfig()
   const response = await fetch(`${config.supabase_url}/storage/v1/object/sign/${CHAT_BUCKET}/${storagePath(path)}`, {
     method: 'POST',
@@ -196,7 +225,8 @@ export async function getGroupImageUrl(path: string, session: AuthSession) {
   return signedPath.startsWith('http') ? signedPath : `${config.supabase_url}/storage/v1${signedPath}`
 }
 
-export async function deleteGroupImage(path: string, session: AuthSession) {
+export async function deleteGroupImage(path: string, owner: AttachmentOwner, session: AuthSession) {
+  if (!isSafeAttachmentPath(path, owner)) return
   const config = await getConfig()
   await fetch(`${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`, {
     method: 'DELETE',
