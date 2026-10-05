@@ -341,7 +341,22 @@ export async function updatePassword(session: AuthSession, password: string): Pr
     body: JSON.stringify({ password }),
   })
   const user = await readAuthResponse(response, 'Could not update your password.') as AuthUser
+  revokeOtherSessions(session)
   return { ...session, user: { ...session.user, ...user } }
+}
+
+/**
+ * After a password change, signs the account out everywhere else (scope=others
+ * keeps this session). Best-effort: it never blocks or fails the change.
+ */
+function revokeOtherSessions(session: AuthSession) {
+  void config()
+    .then((settings) => fetch(`${settings.supabase_url}/auth/v1/logout?scope=others`, {
+      method: 'POST',
+      headers: { apikey: settings.supabase_anon_key, Authorization: `Bearer ${session.access_token}` },
+      keepalive: true,
+    }))
+    .catch(() => undefined)
 }
 
 export async function updateUsername(session: AuthSession, username: string): Promise<AuthSession> {
