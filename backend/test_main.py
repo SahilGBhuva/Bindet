@@ -104,7 +104,7 @@ class BinditBackendTests(unittest.TestCase):
         }
         with patch.object(main.auth, 'authenticated_user', return_value={'id': 'guest-1'}), patch.object(main.ai_tutor, 'grade_answer', return_value=ai_result):
             result = main.analyze_answer(
-                main.AnswerRequest(question_id=question_id, student_answer='5', student_id='guest-1'), 'Bearer test'
+                main.AnswerRequest(question_id=question_id, student_answer='two plus two is five', student_id='guest-1'), 'Bearer test'
             )
         self.assertFalse(result.correct)
         self.assertEqual(result.score, 50)
@@ -113,16 +113,69 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(result.misconception, 'Added one too many.')
 
     def test_ai_failure_falls_back_safely(self):
-        question_id = self.save_math_question(main.guest_student_id('guest-1'))
+        question_id = main.questions.save_question(main.guest_student_id('guest-1'), 'Which organelle makes ATP?', 'Mitochondria', 'Cells', 1)
         with patch.object(main.ai_tutor, 'grade_answer', side_effect=main.ai_tutor.AITutorError('offline')):
             result = main.analyze_answer(
-                main.AnswerRequest(question_id=question_id, student_answer='5', student_id='guest-1')
+                main.AnswerRequest(question_id=question_id, student_answer='the nucleus', student_id='guest-1')
             )
         self.assertFalse(result.correct)
         self.assertEqual(result.score, 0)
         self.assertEqual(result.grading_source, 'fallback')
+        self.assertEqual(result.mistake_type, 'concept_or_format_error')
+        self.assertTrue(result.hint)
+
+    def test_wrong_arithmetic_is_graded_without_ai(self):
+        question_id = self.save_math_question('student-ai')
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+                patch.object(main.ai_tutor, 'grade_answer') as grader, \
+                patch.object(main.database, 'check_social_rate_limit') as limit:
+            result = main.analyze_answer(main.AnswerRequest(question_id=question_id, student_answer='5'), 'Bearer test')
+        grader.assert_not_called()
+        limit.assert_not_called()  # no AI call, so no AI grading quota is spent
+        self.assertFalse(result.correct)
+        self.assertEqual(result.grading_source, 'deterministic')
         self.assertEqual(result.mistake_type, 'off_by_one')
         self.assertTrue(result.hint)
+
+    def test_equivalent_answers_are_correct_without_ai(self):
+        cases = [
+            ('Mitochondria', 'the mitochondria.'),
+            ('Mitochondria', '  MITOCHONDRIA '),
+            ('0.5', '1/2'),
+            ('1/3', '0.33'),
+            ('3.14159', '3.14'),
+            ('40%', '0.4'),
+            ('40%', '40'),
+            ('12 cm', '12'),
+            ('12 cm', '12cm'),
+            ('1,000', '1000'),
+            ('7', 'seven'),
+            ('−3', '-3'),
+            ('true', 'Yes'),
+        ]
+        for reference, answer in cases:
+            with self.subTest(reference=reference, answer=answer):
+                self.assertIs(main.deterministic_verdict(answer, reference, 'Cells'), True)
+
+    def test_uncertain_answers_still_go_to_the_ai_grader(self):
+        cases = [
+            ('Two pyruvate molecules', '2 pyruvates'),
+            ('3.14159', '3.1'),       # one decimal place is too coarse to accept automatically
+            ('1789', '1798'),         # a wrong number on a notes question still earns an explanation
+            ('100 cm', '1 m'),        # different units need judgement
+            ('f(-x)', '-f(x)'),       # symbols matter
+            ('true', 'false'),
+        ]
+        for reference, answer in cases:
+            with self.subTest(reference=reference, answer=answer):
+                self.assertIsNone(main.deterministic_verdict(answer, reference, 'Cells'))
+        self.assertIs(main.deterministic_verdict('   ', 'Mitochondria', 'Cells'), False)
+        self.assertIs(main.deterministic_verdict('5', '4', 'addition'), False)
+
+    def test_numbers_never_match_a_longer_answer_by_file_stem(self):
+        self.assertFalse(main.answers_match('3', '3.7 cm'))
+        self.assertFalse(main.answers_match('3', '3.5'))
+        self.assertTrue(main.answers_match('mendel', 'mendel.pdf'))
 
     def test_authenticated_identity_overrides_spoofed_student_id(self):
         question_id = self.save_math_question('account-1')

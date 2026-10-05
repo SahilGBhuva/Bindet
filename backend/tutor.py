@@ -123,8 +123,18 @@ def list_messages(owner_id: str, conversation_id: str, before_id: int | None = N
     return [_message(row) for row in reversed(rows)]
 
 
-def history_for_model(owner_id: str, conversation_id: str) -> list[dict]:
-    return [{"role": item["role"], "content": item["content"]} for item in list_messages(owner_id, conversation_id, limit=MAX_HISTORY)]
+def conversation_with_history(owner_id: str, conversation_id: str) -> tuple[dict, list[dict]]:
+    """The owned conversation and its most recent messages (oldest first), on one connection.
+
+    Raises ValueError("conversation_not_found") when the conversation is missing or
+    belongs to someone else, exactly like get_conversation.
+    """
+    init_tutor()
+    with database.engine().connect() as connection:
+        conversation = _conversation(_owned(connection, owner_id, conversation_id))
+        rows = connection.execute(select(messages).where(messages.c.conversation_id == conversation_id)
+                                  .order_by(messages.c.id.desc()).limit(MAX_HISTORY)).mappings().all()
+    return conversation, [_message(row) for row in reversed(rows)]
 
 
 def add_message(owner_id: str, conversation_id: str, role: str, content: str, attachments: list[str] | None = None, model_tier: str = "") -> dict:

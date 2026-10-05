@@ -133,6 +133,34 @@ class TutorTests(unittest.TestCase):
         self.assertTrue(events[-1][1]["partial"])
         self.assertIn("Half an", tutor.list_messages("alex", events[0][1]["conversation"]["id"])[-1]["content"])
 
+    def test_meta_arrives_before_the_saved_turn_and_the_reply(self):
+        events, _ = self.send("alex")
+        names = [name for name, _ in events]
+        self.assertEqual(names[:3], ["meta", "user", "delta"])
+        self.assertEqual(events[1][1]["user_message"]["content"], "What is photosynthesis?")
+        self.assertTrue(events[1][1]["user_message"]["id"])
+
+    def test_retrying_after_a_failed_reply_does_not_duplicate_the_turn(self):
+        def failing(**_):
+            raise ai_tutor.AITutorError("down")
+            yield ""  # pragma: no cover
+
+        with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=failing):
+            first = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="hello"), "Bearer t"))
+        conversation_id = first[0][1]["conversation"]["id"]
+        self.assertEqual(first[-1][0], "error")
+        events, captured = self.send("alex", content="hello", conversation_id=conversation_id)
+        stored = tutor.list_messages("alex", conversation_id)
+        self.assertEqual([item["role"] for item in stored], ["user", "assistant"])
+        self.assertEqual([message["role"] for message in captured["messages"]], ["system", "user"])
+        self.assertEqual(events[1][1]["user_message"]["id"], stored[0]["id"])
+
+    def test_a_turn_that_cannot_be_saved_asks_to_resend(self):
+        with patch.object(tutor, "add_message", side_effect=RuntimeError("database down")):
+            events, _ = self.send("alex")
+        self.assertEqual(events[-1][0], "error")
+        self.assertNotIn("delta", [name for name, _ in events])
+
     def test_tutor_messages_are_rate_limited(self):
         with patch.object(main, "TUTOR_HOURLY_LIMIT", 1):
             self.send("alex")

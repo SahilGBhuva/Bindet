@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import random
+import re
 import time
+import unicodedata
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from sqlalchemy import text
@@ -40,6 +43,19 @@ app = FastAPI(
 )
 
 social_reads = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bindit-social")
+# Runs the independent database steps that precede an AI call side by side, so a
+# request pays for the slowest of them instead of their sum.
+ai_prep = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bindit-ai-prep")
+
+
+def gather(*calls):
+    """Run (function, *args) calls concurrently and return their results in order.
+
+    The first failure (in call order) is re-raised once every call has been
+    started, so a failed limit check still raises the same error it always did.
+    """
+    futures = [ai_prep.submit(function, *args) for function, *args in calls]
+    return [future.result() for future in futures]
 
 app.add_middleware(
     CORSMiddleware,
@@ -500,9 +516,121 @@ def truthy_alias(value: str) -> str:
     return aliases.get(normalize_text(value), normalize_text(value))
 
 
+_FILE_NAME = re.compile(r"^[^\s/\\]+\.[a-z]{2,4}$")
+
+
 def file_stem(value: str) -> str:
+    """A note's file name without its extension, so "mendel" matches "mendel.pdf".
+
+    Only a single word ending in a short alphabetic extension counts as a file
+    name; "3.7 cm" or "3.5" keep their full text so "3" can never match them.
+    """
     text = normalize_text(value)
-    return text.rsplit(".", 1)[0] if "." in text else text
+    return text.rsplit(".", 1)[0] if _FILE_NAME.match(text) else text
+
+
+# --- Deterministic grading ----------------------------------------------------------
+# Answers that can be judged exactly are graded here, instantly and for free; only
+# genuinely open answers go to the AI grader.
+
+_NUMBER_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+}
+_QUANTITY = re.compile(
+    r"^(?P<number>[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:e[-+]?\d+)?)"
+    r"(?:\s*/\s*(?P<denominator>\d+))?"
+    r"\s*(?P<unit>%|[a-zµ°][a-zµ°²³/^0-9]{0,11})?$"
+)
+_ARTICLE = re.compile(r"^(?:the|a|an)\s+")
+MATH_TOPICS = {"addition", "subtraction", "multiplication", "division"}
+
+
+def canonical_answer(value: str) -> str:
+    """Case, width, spacing, surrounding quotes, a leading article and a final full stop
+    never change what an answer means. Inner symbols are kept: "-f(x)" and "f(-x)" differ."""
+    text = unicodedata.normalize("NFKC", value).replace("\u2212", "-").casefold()
+    text = " ".join(text.split()).strip("\"'`“”‘’ ")
+    text = text.rstrip(".!? ").strip()
+    return _ARTICLE.sub("", text)
+
+
+def parse_quantity(value: str) -> tuple[Decimal, str, int] | None:
+    """(value, unit, decimal places) for answers like "12", "3.5 cm", "1/2", "40%", "seven"."""
+    text = canonical_answer(value)
+    if text in _NUMBER_WORDS:
+        return Decimal(_NUMBER_WORDS[text]), "", 0
+    match = _QUANTITY.match(text)
+    if not match or not any(char.isdigit() for char in match["number"]):
+        return None
+    try:
+        number = Decimal(match["number"].replace(",", ""))
+        if match["denominator"]:
+            denominator = Decimal(match["denominator"])
+            if denominator == 0:
+                return None
+            # A fraction is exact, so it may match a rounded decimal at any precision.
+            return number / denominator, match["unit"] or "", 28
+    except InvalidOperation:
+        return None
+    if not number.is_finite():
+        return None
+    places = max(0, -number.as_tuple().exponent) if "e" not in match["number"] else 0
+    return number, match["unit"] or "", places
+
+
+def _rounds_to(exact: Decimal, rounded: Decimal, places: int) -> bool:
+    """True when `rounded`, given to `places` (2 or more) decimals, is `exact` correctly rounded."""
+    if places < 2 or places > 12:
+        return False
+    try:
+        return exact.quantize(Decimal(1).scaleb(-places)) == rounded
+    except InvalidOperation:
+        return False
+
+
+def quantities_match(student: tuple[Decimal, str, int], reference: tuple[Decimal, str, int]) -> bool:
+    student_value, _, student_places = student
+    reference_value, reference_unit, reference_places = reference
+    # A missing % sign is forgiven, and "0.4" also answers "40%".
+    candidates = [student_value]
+    if reference_unit == "%" and student[1] != "%":
+        candidates.append(student_value * 100)
+    for value in candidates:
+        if value == reference_value:
+            return True
+        if abs(value - reference_value) <= Decimal("1e-9") * max(Decimal(1), abs(reference_value)):
+            return True
+        # Correct rounding either way: 3.14 for 3.14159, or 0.333 written for an exact 1/3.
+        if _rounds_to(reference_value, value, student_places) or _rounds_to(value, reference_value, reference_places):
+            return True
+    return False
+
+
+def deterministic_verdict(student_answer: str, correct_answer: str, topic: str = "") -> bool | None:
+    """True or False when the answer can be judged exactly, None when it needs the AI grader.
+
+    Correct answers are recognised for every question. An answer is only judged
+    wrong here when that is certain and an AI explanation would add nothing: a
+    blank answer, or a wrong number on a generated arithmetic exercise.
+    """
+    if not canonical_answer(student_answer):
+        return False
+    if answers_match(student_answer, correct_answer):
+        return True
+    student = parse_quantity(student_answer)
+    reference = parse_quantity(correct_answer)
+    if student and reference:
+        units_agree = not student[1] or not reference[1] or student[1] == reference[1] or "%" in (student[1], reference[1])
+        if units_agree and quantities_match(student, reference):
+            return True
+        if topic in MATH_TOPICS and not student[1] and not reference[1]:
+            return False
+        return None
+    if canonical_answer(student_answer) == canonical_answer(correct_answer):
+        return True
+    return None
 
 
 def answers_match(student_answer: str, correct_answer: str) -> bool:
@@ -778,6 +906,17 @@ def health(db: bool = False):
     return body if probe["ok"] else JSONResponse(status_code=503, content=body)
 
 
+@app.post("/api/ai/warm")
+def warm_ai():
+    """Called when a student is about to use an AI feature (focusing the tutor, opening a quiz).
+
+    It wakes this instance and opens the pooled OpenRouter connection ahead of the
+    real request. It needs no sign-in because it touches no student data and sends
+    nothing to the model; it runs at most once every few minutes per instance.
+    """
+    return {"warming": ai_tutor.warm_connection()}
+
+
 @app.get("/api/auth/config", response_model=AuthConfigResponse)
 def auth_config():
     url, key = auth.public_settings()
@@ -828,20 +967,28 @@ async def upload_note(
     file: Annotated[UploadFile, File()],
     authorization: Annotated[str | None, Header()] = None,
 ):
-    user = auth.authenticated_user(authorization)
-    limit_action(user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
-    filename = file.filename or "notes"
+    # Sign-in checks, parsing, OCR and the database are all blocking calls. They run in
+    # the thread pool so a slow OCR request never stalls the event loop, and with it
+    # every other request (including streaming tutor replies) on this instance.
+    user = await run_in_threadpool(auth.authenticated_user, authorization)
+    await run_in_threadpool(limit_action, user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
+    return await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
+
+
+def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type: str | None, content: bytes) -> NoteResponse:
     suffix = Path(filename).suffix.lower()
-    content_type = note_content_type(suffix, file.content_type)
+    content_type = note_content_type(suffix, claimed_type)
     pages_skipped = 0
     try:
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
-            limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
+            limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+            ai_tutor.warm_connection()
+            # The image goes to the vision model only; it is never stored.
             text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
                 image_bytes=content, content_type=content_type
             ))
@@ -850,16 +997,21 @@ async def upload_note(
                 text = note_ingestion.extract_text(filename, content)
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
-                    limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
+                    limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+                    ai_tutor.warm_connection()
                     ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
                     text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                 else:
                     raise
-    except (note_ingestion.NoteIngestionError, ai_tutor.AITutorError) as exc:
+    except ai_tutor.AITutorError as exc:
+        if str(exc).startswith("No readable notes"):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=OCR_UNAVAILABLE) from exc
+    except note_ingestion.NoteIngestionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
-    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
+    row = note_store.save_note(owner, course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
     return note_response(row, pages_skipped)
 
 
@@ -1033,8 +1185,19 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
     return parts
 
 
+# Streamed replies must reach the browser token by token: no caching, no proxy
+# buffering (nginx-style X-Accel-Buffering) and no transforms such as compression.
+SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+
+
 def sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, default=str, ensure_ascii=False)}\n\n"
+
+
+OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable. Try again in a moment, or upload a text PDF, DOCX or TXT instead."
+TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
+TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
+TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
 
 
 @app.post("/api/tutor/messages")
@@ -1044,21 +1207,40 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     content = data.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
-    try:
-        database.check_social_rate_limit(owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
-    except ValueError as error:
-        raise HTTPException(status_code=429, detail="You’ve sent a lot of messages this hour. Take a short break and try again soon.", headers={"Retry-After": "300"}) from error
     image_parts = tutor_image_parts(data.images)
+    ai_tutor.warm_connection()  # the TLS/HTTP2 setup overlaps the database work below
+
+    # Independent preparation runs side by side: the hourly limit, the conversation
+    # with its recent turns, and the student's notes when the request names them.
+    requested_course, requested_unit = data.course.strip(), data.unit.strip()
+    limit = ai_prep.submit(database.check_social_rate_limit, owner, "tutor_message", TUTOR_HOURLY_LIMIT, 60)
+    existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id) if data.conversation_id else None
+    # Only this student's own notes are ever used for grounding.
+    early_context = ai_prep.submit(note_store.context_for, owner, requested_course, requested_unit, 12_000) if requested_course and requested_unit else None
     try:
-        conversation = tutor.get_conversation(owner, data.conversation_id) if data.conversation_id else tutor.start_conversation(owner, content, data.course.strip(), data.unit.strip())
+        limit.result()
+    except ValueError as error:
+        raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
+    try:
+        conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
-    course = data.course.strip() or conversation["course"]
-    unit = data.unit.strip() or conversation["unit"]
-    history = tutor.history_for_model(owner, conversation["id"])
-    user_message = tutor.add_message(owner, conversation["id"], "user", content, [image.name for image in data.images])
-    # Only this student's own notes are ever used for grounding.
-    labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+    # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
+    retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
+    history = [{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)]
+    course = requested_course or conversation["course"]
+    unit = requested_unit or conversation["unit"]
+    if early_context:
+        labels, source_text = early_context.result()
+    else:
+        labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+    # History was read above, so saving the new turn now cannot duplicate it. The write
+    # overlaps the model's time to first token instead of delaying the request.
+    if retry_of:
+        saving: Future = Future()
+        saving.set_result(retry_of)
+    else:
+        saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
     route = ai_tutor.tutor_route(content, bool(image_parts))
     model_messages = [
         {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
@@ -1066,30 +1248,51 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
         {"role": "user", "content": [{"type": "text", "text": content}, *image_parts] if image_parts else content},
     ]
 
+    def saved_user() -> bool:
+        try:
+            saving.result()
+            return True
+        except Exception:  # the database write failed; the student is told to resend
+            return False
+
     def events():
         chunks: list[str] = []
         saved = False
-        yield sse("meta", {"conversation": conversation, "user_message": user_message, "tier": route["tier"], "grounded_in": labels[:10]})
+        user_sent = False
+        yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
         try:
             for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
+                if not user_sent:
+                    user_sent = True
+                    if not saved_user():
+                        yield sse("error", {"message": TUTOR_NOT_SAVED, "retry": True})
+                        return
+                    yield sse("user", {"user_message": saving.result()})
                 chunks.append(chunk)
                 yield sse("delta", {"text": chunk})
             reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
             saved = True
             yield sse("done", {"message": reply})
         except ai_tutor.AITutorError:
+            if not user_sent:
+                user_sent = True
+                if not saved_user():
+                    yield sse("error", {"message": TUTOR_NOT_SAVED, "retry": True})
+                    return
+                yield sse("user", {"user_message": saving.result()})
             if chunks:
                 reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks) + "\n\n(The reply was cut off.)", model_tier=route["tier"])
                 saved = True
                 yield sse("done", {"message": reply, "partial": True})
             else:
-                yield sse("error", {"message": "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."})
+                yield sse("error", {"message": TUTOR_UNAVAILABLE, "retry": True})
         finally:
-            # The student stopped the reply or left: keep what was already written.
-            if chunks and not saved:
+            # The student stopped the reply or left: keep what was already written,
+            # after the question it answers.
+            if chunks and not saved and saved_user():
                 tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+    return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.get("/api/friends/search")
@@ -1386,37 +1589,42 @@ def group_analytics_route(group_id: str, authorization: Annotated[str | None, He
         raise social_error(error) from error
 
 
-@app.post("/api/generate-question", response_model=QuestionResponse)
-def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None):
-    has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
-    if has_school_context:
-        student_id = auth.authenticated_user(authorization)["id"]
-        try:
-            database.check_social_rate_limit(student_id, "question_request", 80, 1440)
-        except ValueError as error:
-            raise social_error(error) from error
-    else:
-        student_id = verified_student_id(data.student_id, authorization)
-        if authorization:
-            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
-        else:
-            # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
-            limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
+QUIZ_UNAVAILABLE = "AI quiz generation is temporarily unavailable. Try again in a moment."
+FLASHCARDS_UNAVAILABLE = "AI flashcard generation is temporarily unavailable. Try again in a moment."
 
+
+def _rate_limited(student_id: str, action: str, limit: int, window_minutes: int) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        raise social_error(error) from error
+
+
+@app.post("/api/generate-question", response_model=QuestionResponse)
+def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None, background: BackgroundTasks = None):  # type: ignore[assignment]
+    has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
     if has_school_context and data.notes:
-        target_topic = data.notes.unit.strip() or data.notes.course.strip()
-        difficulty, personalization = quiz_personalization(student_id, data.difficulty, target_topic)
-        source_labels, source_text = note_store.context_for(student_id, data.notes.course.strip(), data.notes.unit.strip())
+        student_id = auth.authenticated_user(authorization)["id"]
+        ai_tutor.warm_connection()
+        course, unit = data.notes.course.strip(), data.notes.unit.strip()
+        target_topic = unit or course
+        # The daily limit, the student's record and their notes are independent reads; fetch them together.
+        _, (difficulty, personalization), (source_labels, source_text) = gather(
+            (_rate_limited, student_id, "question_request", 80, 1440),
+            (quiz_personalization, student_id, data.difficulty, target_topic),
+            (note_store.context_for, student_id, course, unit),
+        )
         cache_key = question_cache_key(student_id, data.notes.course, data.notes.unit, data.topic, difficulty, source_text)
+        # A banked question costs no AI call and no AI quota.
         cached = questions.cached_question(cache_key, student_id)
         if cached:
             ai_question = cached
         else:
+            _rate_limited(student_id, "ai_question", 40, 1440)
             try:
-                database.check_social_rate_limit(student_id, "ai_question", 40, 1440)
                 ai_question = ai_tutor.generate_question(
-                    course=data.notes.course.strip(),
-                    unit=data.notes.unit.strip(),
+                    course=course,
+                    unit=unit,
                     source_labels=source_labels,
                     focus=data.topic,
                     difficulty=difficulty,
@@ -1425,12 +1633,16 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                     session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
                 )
             except ai_tutor.AITutorError as exc:
-                raise HTTPException(status_code=503, detail="AI quiz generation is temporarily unavailable. Try again in a moment.") from exc
+                raise HTTPException(status_code=503, detail=QUIZ_UNAVAILABLE) from exc
         question_text, correct_answer, topic = questions.clip_question(
             ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
         )
         if not cached:
-            questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
+            # Banking the new question for reuse does not need to delay this response.
+            if background is not None:
+                background.add_task(questions.save_to_bank, cache_key, question_text, correct_answer, topic, difficulty)
+            else:
+                questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
         generated = GeneratedQuestion(
             question=question_text,
             correct_answer=correct_answer,
@@ -1438,6 +1650,12 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             difficulty=difficulty,
         )
     else:
+        student_id = verified_student_id(data.student_id, authorization)
+        if authorization:
+            limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
+        else:
+            # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
+            limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
         generated = generate_math_question(data.topic, data.difficulty)
 
     question_id = questions.save_question(
@@ -1458,18 +1676,19 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)
 def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | None, Header()] = None):
     student_id = auth.authenticated_user(authorization)["id"]
-    try:
-        database.check_social_rate_limit(student_id, "ai_flashcards", 20, 1440)
-    except ValueError as error:
-        raise social_error(error) from error
     course = data.course.strip()
     unit = data.unit.strip()
     if not course and not unit:
         raise HTTPException(status_code=400, detail="Choose a course or unit before generating flashcards")
+    ai_tutor.warm_connection()
 
     target_topic = unit or course
-    _, personalization = quiz_personalization(student_id, 2, target_topic)
-    source_labels, source_text = note_store.context_for(student_id, course, unit)
+    _, (_, personalization), (source_labels, source_text) = gather(
+        (_rate_limited, student_id, "ai_flashcards", 20, 1440),
+        (quiz_personalization, student_id, 2, target_topic),
+        # The model only ever sees the first 12,000 characters, so read no more than that.
+        (note_store.context_for, student_id, course, unit, 12_000),
+    )
     try:
         cards = ai_tutor.generate_flashcards(
             course=course,
@@ -1481,7 +1700,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             session_id=ai_session_id(student_id, course, unit, "flashcards"),
         )
     except ai_tutor.AITutorError as exc:
-        raise HTTPException(status_code=503, detail="AI flashcard generation is temporarily unavailable. Try again in a moment.") from exc
+        raise HTTPException(status_code=503, detail=FLASHCARDS_UNAVAILABLE) from exc
 
     personalized = bool(personalization.get("overall_attempts", 0))
     return FlashcardResponse(
@@ -1501,15 +1720,22 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
     if question["completed"] == questions.COMPLETED:
         raise HTTPException(status_code=409, detail="Question already completed")
 
-    exact_match = answers_match(data.student_answer, question["correct_answer"])
-    if exact_match:
+    verdict = deterministic_verdict(data.student_answer, question["correct_answer"], question["topic"])
+    grading_source: Literal["deterministic", "ai", "fallback"] = "deterministic"
+    if verdict is True:
         correct = True
         score = 100
         mistake_type = None
         misconception = None
         explanation = "Correct! Great work."
         hint = None
-        grading_source: Literal["deterministic", "ai", "fallback"] = "deterministic"
+    elif verdict is False:
+        correct = False
+        score = 0
+        mistake_type = classify_mistake(data.student_answer, question["correct_answer"])
+        misconception = None
+        explanation = "Not quite yet. Use the hint and try again."
+        hint = make_hint(question["question"], mistake_type)
     else:
         if authorization:
             try:
@@ -1550,9 +1776,13 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
             raise HTTPException(status_code=409, detail="Question already completed")
         # Full credit on the first try; retrying after a wrong answer earns less, so guessing doesn't pay.
         xp = FIRST_TRY_XP if prior == questions.OPEN else RETRY_XP
+        record = database.update_progress(student_id, question["topic"], correct, xp)
     else:
-        questions.mark_missed(student_id, data.question_id)
-    record = database.update_progress(student_id, question["topic"], correct, xp)
+        # Marking the miss and recording the attempt are independent writes.
+        _, record = gather(
+            (questions.mark_missed, student_id, data.question_id),
+            (database.update_progress, student_id, question["topic"], correct, xp),
+        )
     return AnswerResponse(
         correct=correct,
         score=score,

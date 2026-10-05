@@ -151,12 +151,48 @@ async function resolvedToken(explicit?: string): Promise<string | undefined> {
   return session?.access_token
 }
 
-async function request<T>(path: string, options?: RequestInit, accessToken?: string): Promise<T> {
-  const headers = new Headers(options?.headers)
-  if (!(options?.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+/*
+ * AI requests fail fast with a clear message instead of hanging. The budgets sit
+ * above the server's own model timeouts, so a slow but working answer still lands.
+ */
+export const AI_TIMEOUTS = { question: 25_000, grade: 25_000, flashcards: 40_000, upload: 60_000 } as const
+export const AI_TIMEOUT_MESSAGE = 'This is taking longer than usual. Try again in a moment.'
+
+export class RequestTimeoutError extends Error {
+  constructor() {
+    super(AI_TIMEOUT_MESSAGE)
+    this.name = 'RequestTimeoutError'
+  }
+}
+
+/* True when a request was cancelled on purpose (navigation, a newer request). */
+export function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
+  const { timeoutMs, signal: callerSignal, ...init } = options ?? {}
+  const headers = new Headers(init.headers)
+  if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   const token = await resolvedToken(accessToken)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers })
+  callerSignal?.throwIfAborted()
+  // One controller carries both the caller's cancellation and the time budget.
+  const controller = new AbortController()
+  let timedOut = false
+  const abortFromCaller = () => controller.abort(callerSignal?.reason)
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  const timer = timeoutMs ? window.setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs) : 0
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal })
+  } catch (error) {
+    if (timedOut) throw new RequestTimeoutError()
+    throw error
+  } finally {
+    window.clearTimeout(timer)
+    callerSignal?.removeEventListener('abort', abortFromCaller)
+  }
   if (!response.ok) {
     const data = (await response.json().catch(() => null)) as { detail?: string } | null
     throw new Error(data?.detail ?? `Bindit could not complete that request (${response.status}).`)
@@ -202,14 +238,14 @@ export async function uploadNote(file: File, course: string, unit: string, acces
   form.set('file', preparedFile)
   form.set('course', course)
   form.set('unit', unit)
-  return request<UploadedNote>('/api/notes', { method: 'POST', body: form }, accessToken)
+  return request<UploadedNote>('/api/notes', { method: 'POST', body: form, timeoutMs: AI_TIMEOUTS.upload }, accessToken)
 }
 
 export function deleteNote(noteId: string, accessToken?: string) {
   return request<{ deleted: boolean }>(`/api/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' }, accessToken)
 }
 
-export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string) {
+export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string, signal?: AbortSignal) {
   return request<GeneratedQuestion>('/api/generate-question', {
     method: 'POST',
     body: JSON.stringify({
@@ -218,12 +254,15 @@ export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQ
       student_id: getStudentId(),
       notes: notes ?? undefined,
     }),
+    signal,
+    timeoutMs: AI_TIMEOUTS.question,
   }, accessToken)
 }
 
 export function generateFlashcards(
   context: { course: string; unit: string; files?: string[]; count?: number },
   accessToken?: string,
+  signal?: AbortSignal,
 ) {
   return request<FlashcardDeck>('/api/generate-flashcards', {
     method: 'POST',
@@ -234,6 +273,8 @@ export function generateFlashcards(
       files: context.files ?? [],
       count: context.count ?? 10,
     }),
+    signal,
+    timeoutMs: AI_TIMEOUTS.flashcards,
   }, accessToken)
 }
 
@@ -241,7 +282,20 @@ export function analyzeAnswer(question: GeneratedQuestion, studentAnswer: string
   return request<AnswerResult>('/api/analyze-answer', {
     method: 'POST',
     body: JSON.stringify({ question_id: question.question_id, student_answer: studentAnswer, student_id: studentId }),
+    timeoutMs: AI_TIMEOUTS.grade,
   }, accessToken)
+}
+
+/*
+ * Wakes the API and its connection to the AI provider just before an AI feature is
+ * used (focusing the tutor, opening a quiz). Costs no AI quota and carries no data.
+ */
+let lastWarm = 0
+export function warmAI() {
+  const now = Date.now()
+  if (now - lastWarm < 120_000) return
+  lastWarm = now
+  void fetch(`${API_URL}/api/ai/warm`, { method: 'POST', keepalive: true }).catch(() => { lastWarm = 0 })
 }
 
 const progressCache = new Map<string, { savedAt: number; data: Progress | null }>()
@@ -410,7 +464,10 @@ export type TutorConversation = { id: string; title: string; course: string; uni
 export type TutorMessage = { id: number; role: 'user' | 'assistant'; content: string; attachments: string[]; model_tier: string; created_at: string }
 export type TutorStreamHandlers = {
   onUploadProgress?: (fraction: number) => void
-  onMeta?: (meta: { conversation: TutorConversation; user_message: TutorMessage; tier: string; grounded_in: string[] }) => void
+  onMeta?: (meta: { conversation: TutorConversation; tier: string; grounded_in: string[] }) => void
+  /* The student's message as saved by the server. Arrives just before the first words of the reply. */
+  onSaved?: (message: TutorMessage) => void
+  /* Text that arrived since the last call. Batched to at most one call per frame. */
   onDelta?: (text: string) => void
   onDone?: (result: { message: TutorMessage; partial?: boolean }) => void
   onError?: (message: string) => void
@@ -467,10 +524,16 @@ export async function prepareTutorImage(file: File): Promise<{ name: string; dat
   return { name: file.name || 'image', dataUrl, size: prepared.size }
 }
 
+/* The longest silence allowed on a tutor stream before it is treated as lost. The
+   server gives up on the model after its own idle limit (25 s by default) and says so. */
+export const TUTOR_IDLE_TIMEOUT_MS = 45_000
+
 /*
  * Sends a tutor message and streams the reply. XHR is used (not fetch) because it
  * reports real upload progress for attached images and exposes the response as
- * it arrives. Returns a function that stops the reply.
+ * it arrives. Tokens are handed to the page at most once per animation frame, so
+ * a fast stream never re-renders the conversation more often than it can paint.
+ * Returns a function that stops the reply.
  */
 export function streamTutorMessage(
   accessToken: string,
@@ -480,15 +543,51 @@ export function streamTutorMessage(
   const xhr = new XMLHttpRequest()
   let seen = 0
   let finished = false
+  let pending = ''
+  let frame = 0
+  let idleTimer = 0
+
+  let fallback = 0
+  const flush = () => {
+    if (frame) cancelAnimationFrame(frame)
+    window.clearTimeout(fallback)
+    frame = 0
+    if (!pending) return
+    const text = pending
+    pending = ''
+    handlers.onDelta?.(text)
+  }
+  const fail = (message: string) => {
+    if (finished) return
+    finished = true
+    window.clearTimeout(idleTimer)
+    flush()
+    handlers.onError?.(message)
+  }
+  const resetIdle = () => {
+    window.clearTimeout(idleTimer)
+    if (!finished) idleTimer = window.setTimeout(() => { xhr.abort(); fail('The tutor stopped responding. Try again.') }, TUTOR_IDLE_TIMEOUT_MS)
+  }
   const handleBlock = (block: string) => {
     const name = /^event: (.+)$/m.exec(block)?.[1]
     const raw = /^data: (.+)$/m.exec(block)?.[1]
-    if (!name || !raw) return
+    if (!name || !raw || finished) return
     const payload = JSON.parse(raw)
     if (name === 'meta') handlers.onMeta?.(payload)
-    else if (name === 'delta') handlers.onDelta?.(payload.text)
-    else if (name === 'done') { finished = true; handlers.onDone?.(payload) }
-    else if (name === 'error') { finished = true; handlers.onError?.(payload.message) }
+    else if (name === 'user') handlers.onSaved?.(payload.user_message)
+    else if (name === 'delta') {
+      pending += payload.text
+      if (!frame) {
+        frame = requestAnimationFrame(flush)
+        // Frames pause in background tabs; text still lands, just less often.
+        fallback = window.setTimeout(flush, 120)
+      }
+    } else if (name === 'done') {
+      flush()
+      finished = true
+      window.clearTimeout(idleTimer)
+      handlers.onDone?.(payload)
+    } else if (name === 'error') fail(payload.message)
   }
   const drain = () => {
     const text = xhr.responseText
@@ -502,21 +601,34 @@ export function streamTutorMessage(
   xhr.open('POST', `${API_URL}/api/tutor/messages`)
   xhr.setRequestHeader('Content-Type', 'application/json')
   xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
-  if (body.images?.length) xhr.upload.onprogress = (event) => { if (event.lengthComputable) handlers.onUploadProgress?.(event.loaded / event.total) }
-  xhr.onprogress = () => { if (xhr.status === 200) drain() }
+  xhr.upload.onprogress = (event) => {
+    resetIdle()
+    if (body.images?.length && event.lengthComputable) handlers.onUploadProgress?.(event.loaded / event.total)
+  }
+  xhr.onprogress = () => {
+    resetIdle()
+    if (xhr.status === 200) drain()
+  }
   xhr.onload = () => {
     if (xhr.status !== 200) {
       let detail = ''
       try { detail = (JSON.parse(xhr.responseText) as { detail?: string }).detail ?? '' } catch { /* not JSON */ }
-      handlers.onError?.(detail || `The tutor could not answer (${xhr.status}).`)
+      fail(detail || `The tutor could not answer (${xhr.status}).`)
       return
     }
     drain()
-    if (!finished) handlers.onError?.('The reply ended unexpectedly. Try again.')
+    fail('The reply ended unexpectedly. Try again.')
   }
-  xhr.onerror = () => handlers.onError?.('bindit couldn’t be reached. Check your connection and try again.')
+  xhr.onerror = () => fail('bindit couldn’t be reached. Check your connection and try again.')
   xhr.send(JSON.stringify(body))
-  return () => { finished = true; xhr.abort() }
+  resetIdle()
+  return () => {
+    finished = true
+    window.clearTimeout(idleTimer)
+    if (frame) cancelAnimationFrame(frame)
+    window.clearTimeout(fallback)
+    xhr.abort()
+  }
 }
 
 export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'done'

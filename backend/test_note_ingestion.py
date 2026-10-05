@@ -64,6 +64,50 @@ class NoteIngestionTests(unittest.TestCase):
         _, context = note_store.context_for("vision-student", "Biology", "Cells")
         self.assertIn("Cell membranes regulate transport", context)
 
+    def test_slow_ocr_does_not_block_the_event_loop(self):
+        import time
+
+        def slow_vision(**_):
+            time.sleep(0.3)
+            return "Slow OCR text"
+
+        async def scenario():
+            ticks = 0
+
+            async def ticker():
+                nonlocal ticks
+                while True:
+                    await asyncio.sleep(0.02)
+                    ticks += 1
+
+            task = asyncio.create_task(ticker())
+            upload = UploadFile(filename="slow.png", file=BytesIO(b"image"), headers={"content-type": "image/png"})
+            await main.upload_note("Biology", "Cells", upload, "Bearer test")
+            task.cancel()
+            return ticks
+
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "loop-student"}), patch.object(
+            main.ai_tutor, "extract_image_notes", side_effect=slow_vision
+        ):
+            ticks = asyncio.run(scenario())
+        # Other requests keep being served while the OCR call waits.
+        self.assertGreaterEqual(ticks, 5)
+
+    def test_ocr_failures_are_friendly_and_retryable(self):
+        def upload(name="cells.png"):
+            return UploadFile(filename=name, file=BytesIO(b"image"), headers={"content-type": "image/png"})
+
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "ocr-fail"}):
+            with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("OpenRouter request failed")):
+                with self.assertRaises(HTTPException) as caught:
+                    asyncio.run(main.upload_note("Biology", "Cells", upload(), "Bearer test"))
+            self.assertEqual(caught.exception.status_code, 503)
+            self.assertNotIn("OpenRouter", caught.exception.detail)
+            with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("No readable notes were found in that image")):
+                with self.assertRaises(HTTPException) as caught:
+                    asyncio.run(main.upload_note("Biology", "Cells", upload(), "Bearer test"))
+            self.assertEqual(caught.exception.status_code, 400)
+
     def test_image_vision_uses_fast_model_and_routing(self):
         response = {"choices": [{"message": {"content": "Fast OCR"}}]}
         with patch.object(main.ai_tutor, "_post", return_value=response) as post:

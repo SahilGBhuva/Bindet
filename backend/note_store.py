@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, delete, select
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, Text, delete, func, select
 
 import database
 
@@ -46,9 +46,12 @@ def save_note(student_id: str, course: str, unit: str, file_name: str, content_t
 
 def context_for(student_id: str, course: str, unit: str, limit_chars: int = 18_000) -> tuple[list[str], str]:
     init_notes()
-    with database.engine().begin() as connection:
+    # Only the owner's notes, and only as much of each as could fit in the excerpt:
+    # a unit can hold many 120,000-character notes, and the model sees at most limit_chars.
+    excerpt = func.substr(notes.c.text, 1, max(0, limit_chars)).label('text')
+    with database.engine().connect() as connection:
         rows = connection.execute(
-            select(notes).where(notes.c.student_id == student_id, notes.c.course == course, notes.c.unit == unit)
+            select(notes.c.file_name, excerpt).where(notes.c.student_id == student_id, notes.c.course == course, notes.c.unit == unit)
             .order_by(notes.c.created_at.desc())
         ).mappings().all()
     labels: list[str] = []

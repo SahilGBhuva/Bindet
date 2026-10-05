@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { isAbortError, RequestTimeoutError } from '../lib/api'
 import type { AnswerResult, Flashcard, GeneratedQuestion, Topic } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
@@ -202,7 +203,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const latestDeckKey = useRef('')
   const loadedQuizKey = useRef('')
   const quizSequence = useRef(0)
-  const prefetchedQuestions = useRef(new Map<string, Promise<GeneratedQuestion>>())
+  // At most one question is fetched ahead per quiz setting; leaving that setting cancels it.
+  const prefetchedQuestions = useRef(new Map<string, { promise: Promise<GeneratedQuestion>; controller: AbortController }>())
+  const intentTimer = useRef(0)
 
   const courses = notebook.courses
   const activeCourse = notebook.activeCourse
@@ -258,8 +261,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     }
   }, [menuCourse])
 
-  useEffect(() => {
-    if (panelFn !== 'cards' || !activeCourse || !activeUnit || unitNotes.length === 0) return
+  // Writes the unit's deck once per set of notes. Called when the Flashcards view opens,
+  // and a moment earlier when the pointer rests on (or focus reaches) its tab.
+  function startDeck() {
+    if (!activeCourse || !activeUnit || unitNotes.length === 0) return
     const key = deckKey
     if (deck?.key === key || pendingDeckKey.current === key) return
     pendingDeckKey.current = key
@@ -272,15 +277,21 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         setCardIndex(0)
         setCardFlipped(false)
       })
-      .catch(() => {
-        if (latestDeckKey.current === key) setCardsError('Couldn’t generate flashcards. Try again in a moment.')
+      .catch((error: unknown) => {
+        if (latestDeckKey.current === key) setCardsError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t generate flashcards. Try again in a moment.')
       })
       .finally(() => {
         if (pendingDeckKey.current !== key) return
         pendingDeckKey.current = ''
         setCardsBusy(false)
       })
-  }, [accessToken, activeCourse, activeUnit, cardsRequest, data, deck, deckKey, panelFn, unitNotes.length])
+  }
+
+  const startDeckForView = useEffectEvent(() => startDeck())
+
+  useEffect(() => {
+    if (panelFn === 'cards') startDeckForView()
+  }, [panelFn, deckKey, cardsRequest])
 
   // Reads the latest quiz inputs without making them reasons to request a new question.
   const loadQuizForKey = useEffectEvent(() => {
@@ -292,6 +303,26 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     loadedQuizKey.current = quizKey
     loadQuizForKey()
   }, [panelFn, quizKey])
+
+  // A question fetched ahead for another course, unit or level is no longer wanted.
+  useEffect(() => {
+    const prefetched = prefetchedQuestions.current
+    for (const [key, entry] of prefetched) {
+      if (key === quizKey) continue
+      entry.controller.abort()
+      prefetched.delete(key)
+    }
+  }, [quizKey])
+
+  // Leaving the page cancels anything still being fetched ahead.
+  useEffect(() => {
+    const prefetched = prefetchedQuestions.current
+    return () => {
+      window.clearTimeout(intentTimer.current)
+      prefetched.forEach((entry) => entry.controller.abort())
+      prefetched.clear()
+    }
+  }, [])
 
   function addCourse(event: FormEvent) {
     event.preventDefault()
@@ -547,14 +578,15 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setQuizResult(null)
     setQuizAnswer('')
     try {
-      const next = await (prefetched ?? requestQuizQuestion())
-      prefetchedQuestions.current.delete(quizKey)
-      if (sequence === quizSequence.current) setQuizQuestion(next)
+      if (prefetched) prefetchedQuestions.current.delete(quizKey)
+      const next = await (prefetched?.promise ?? requestQuizQuestion())
+      if (sequence !== quizSequence.current) return
+      setQuizQuestion(next)
+      // While the student works on this one, the next is fetched in the background.
       primeNextQuestion()
-    } catch {
-      prefetchedQuestions.current.delete(quizKey)
-      if (sequence === quizSequence.current) {
-        setQuizError('Couldn’t load a question. Try again in a moment.')
+    } catch (error) {
+      if (sequence === quizSequence.current && !isAbortError(error)) {
+        setQuizError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t load a question. Try again in a moment.')
         setQuizFailed('load')
       }
     } finally {
@@ -562,7 +594,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     }
   }
 
-  function requestQuizQuestion() {
+  function requestQuizQuestion(signal?: AbortSignal) {
     return data.generateQuestion(
       quizTopic,
       quizDifficulty,
@@ -576,14 +608,32 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           }
         : undefined,
       accessToken,
+      signal,
     )
   }
 
   function primeNextQuestion() {
-    if (prefetchedQuestions.current.has(quizKey)) return
-    const pending = requestQuizQuestion()
-    prefetchedQuestions.current.set(quizKey, pending)
-    void pending.catch(() => prefetchedQuestions.current.delete(quizKey))
+    const key = quizKey
+    if (prefetchedQuestions.current.has(key)) return
+    const controller = new AbortController()
+    const entry = { promise: requestQuizQuestion(controller.signal), controller }
+    prefetchedQuestions.current.set(key, entry)
+    // A failed prefetch is simply dropped; the next question is then fetched on demand.
+    void entry.promise.catch(() => { if (prefetchedQuestions.current.get(key) === entry) prefetchedQuestions.current.delete(key) })
+  }
+
+  // Resting on (or tabbing to) the Flashcards or Quiz tab starts its AI work early,
+  // so it is usually ready by the time the view opens. One deck or one question at most.
+  function showIntent(view: ToolView) {
+    window.clearTimeout(intentTimer.current)
+    if (view === panelFn || !activeCourse || !activeUnit) return
+    if (view === 'cards') startDeck()
+    else if (view === 'quiz' && loadedQuizKey.current !== quizKey) primeNextQuestion()
+  }
+
+  function hoverIntent(view: ToolView) {
+    window.clearTimeout(intentTimer.current)
+    intentTimer.current = window.setTimeout(() => showIntent(view), 120)
   }
 
   function checkQuizAnswer(event: FormEvent) {
@@ -605,8 +655,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         unit: activeUnit || quizQuestion.topic,
         correct: result.correct,
       })
-    } catch {
-      setQuizError('Couldn’t check that answer. Try again in a moment.')
+    } catch (error) {
+      setQuizError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t check that answer. Try again in a moment.')
       setQuizFailed('check')
     } finally {
       setQuizBusy(false)
@@ -955,6 +1005,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       role="tab"
                       aria-selected={panelFn === view.id}
                       onClick={() => setPanelFn(view.id)}
+                      onPointerEnter={view.id === 'scan' ? undefined : () => hoverIntent(view.id)}
+                      onPointerLeave={() => window.clearTimeout(intentTimer.current)}
+                      onFocus={view.id === 'scan' ? undefined : () => showIntent(view.id)}
                     >
                       {view.label}
                       {view.id === 'scan' ? <span className="ui-count">{unitNotes.length}</span> : null}

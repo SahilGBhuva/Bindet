@@ -3,12 +3,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
+import time
 from functools import lru_cache
 from typing import Any
 
 import httpx
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _configured_text_model = os.getenv("OPENROUTER_MODEL", "").strip()
 OPENROUTER_MODEL = "google/gemini-3.5-flash-lite" if _configured_text_model in {"", "openrouter/auto"} else _configured_text_model
 OPENROUTER_VISION_MODEL = os.getenv("OPENROUTER_VISION_MODEL", "google/gemini-3.1-flash-lite")
@@ -25,6 +28,47 @@ def _client() -> httpx.Client:
         limits=httpx.Limits(max_keepalive_connections=30, max_connections=60, keepalive_expiry=300.0),
         http2=True,
     )
+
+
+def _timeout(read_seconds: float) -> httpx.Timeout:
+    # A bare float would also stretch the connect and pool budgets; keep those failing fast.
+    return httpx.Timeout(read_seconds, connect=3.0, pool=1.0)
+
+
+WARM_INTERVAL_SECONDS = 240  # below the client's 300 s keep-alive, so a warm connection is reused
+_warm_lock = threading.Lock()
+_last_warm = 0.0
+
+
+def warm_connection(*, wait: bool = False) -> bool:
+    """Open (or refresh) the pooled HTTP/2 connection to OpenRouter ahead of the first AI call.
+
+    The TLS handshake and HTTP/2 setup cost one or two round trips on a cold
+    instance; doing them while the student is still typing takes them off the
+    critical path. Sends no key and no student data, and runs at most once per
+    WARM_INTERVAL_SECONDS per process. Returns True when a warm-up was started.
+    """
+    global _last_warm
+    if not os.getenv("OPENROUTER_API_KEY"):
+        return False
+    with _warm_lock:
+        now = time.monotonic()
+        if _last_warm and now - _last_warm < WARM_INTERVAL_SECONDS:
+            return False
+        _last_warm = now
+
+    def run() -> None:
+        try:
+            _client().head(OPENROUTER_MODELS_URL, timeout=_timeout(3.0))
+        except httpx.HTTPError:
+            pass  # best effort: the real request simply connects as before
+
+    if wait:
+        run()
+    else:
+        threading.Thread(target=run, name="openrouter-warm", daemon=True).start()
+    return True
+
 
 def _headers() -> dict[str, str]:
     key = os.getenv("OPENROUTER_API_KEY")
@@ -48,7 +92,7 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def _post(payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
     try:
-        response = _client().post(OPENROUTER_URL, headers=_headers(), json=payload, timeout=timeout or OPENROUTER_TIMEOUT)
+        response = _client().post(OPENROUTER_URL, headers=_headers(), json=payload, timeout=_timeout(timeout or OPENROUTER_TIMEOUT))
         response.raise_for_status()
         return response.json()
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
@@ -190,7 +234,7 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
         payload["session_id"] = session_id[:256]
     produced = False
     try:
-        with _client().stream("POST", OPENROUTER_URL, headers=_headers(), json=payload, timeout=httpx.Timeout(TUTOR_STREAM_IDLE_SECONDS, connect=3.0, pool=1.0)) as response:
+        with _client().stream("POST", OPENROUTER_URL, headers=_headers(), json=payload, timeout=_timeout(TUTOR_STREAM_IDLE_SECONDS)) as response:
             if response.status_code >= 400:
                 raise AITutorError(f"OpenRouter returned {response.status_code}")
             for line in response.iter_lines():
