@@ -532,7 +532,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
         {panel || !phone ? (
           <>
             {drawerOpen ? <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} /> : null}
-            <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
+            <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} role={drawerOpen ? 'dialog' : undefined} aria-modal={drawerOpen || undefined} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
               {panel ?? <p className="tasks-panel__empty">{tasks.length ? 'Pick a task to see its details.' : 'No tasks yet. Use ⊞ to add one.'}</p>}
             </aside>
           </>

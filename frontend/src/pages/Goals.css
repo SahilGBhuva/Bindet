@@ -662,6 +662,21 @@
   .tasks-title { align-self: start; }
   .tasks-notice { justify-self: stretch; width: auto; margin: var(--space-4) 0 0 8px; }
 
+  /* Touch: 40px targets for the tiny tools, tabs and task bars. */
+  .tasks-icon-button,
+  .tasks-icon-button.is-tiny,
+  .tasks-box__head .tasks-icon-button { width: 40px; height: 40px; }
+  .tasks-box__head .tasks-icon-button { margin-block: -6px; }
+  .tasks-switch { height: 40px; }
+  .tasks-tab { min-height: 40px; }
+  .task-card__main { min-height: 44px; padding: 10px 12px; }
+  /* The drawn pills stay small; an invisible margin makes them easy to tap. */
+  .task-pill { position: relative; }
+  .task-pill::after { content: ""; position: absolute; inset: -9px -4px; }
+  .task-title-input,
+  .task-location__input,
+  .task-details { font-size: 16px; }
+
   .tasks-boxes { flex-direction: column; align-items: stretch; }
   .tasks-box,
   .tasks-box.is-todo,
