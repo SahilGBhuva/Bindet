@@ -338,6 +338,24 @@ class TaskTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "group_not_found"):
             tasks.notify_members("eve-id", self.group["id"], "hi")
 
+    def test_repeated_notifications_are_coalesced_until_read(self):
+        task = self.group_task(assignee_ids=["alex-id"])
+        for _ in range(5):
+            tasks.update_task("alex-id", task["id"], {"assignee_ids": ["alex-id", "sam-id"]})
+            tasks.update_task("alex-id", task["id"], {"assignee_ids": ["alex-id"]})
+        for _ in range(3):
+            tasks.add_comment("alex-id", task["id"], "ping")
+        tasks.add_comment("sam-id", task["id"], "pong")
+        kinds = [item["kind"] for item in database.notifications_for("sam-id")]
+        self.assertEqual(kinds.count("task_assigned"), 1)
+        self.assertEqual(kinds.count("task_comment"), 0)  # sam is no longer assigned
+        self.assertEqual([item["kind"] for item in database.notifications_for("alex-id")].count("task_comment"), 1)
+        # Once read, the next one arrives again.
+        database.mark_notifications_read("sam-id")
+        tasks.update_task("alex-id", task["id"], {"assignee_ids": ["alex-id", "sam-id"]})
+        unread = [item for item in database.notifications_for("sam-id") if not item["is_read"]]
+        self.assertEqual([item["kind"] for item in unread], ["task_assigned"])
+
 
 class TaskRouteTests(unittest.TestCase):
     def setUp(self):
@@ -370,6 +388,21 @@ class TaskRouteTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 main.create_task_route(main.TaskCreate(title="Three"), "Bearer test")
         self.assertEqual(caught.exception.status_code, 429)
+
+    def test_assignee_changes_have_their_own_hourly_cap(self):
+        group = database.create_study_group("alex-id", "Bio crew")
+        database.join_study_group("sam-id", group["invite_code"])
+        task = tasks.create_task("alex-id", {"title": "Lab", "group_id": group["id"]})
+        with self.as_user("alex-id"), patch.object(main, "TASK_ASSIGN_LIMIT", 2):
+            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
+            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["alex-id"]), "Bearer test")
+            with self.assertRaises(HTTPException) as caught:
+                main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
+            self.assertEqual(caught.exception.status_code, 429)
+            # Other edits still go through.
+            main.update_task_route(task["id"], main.TaskUpdate(status="in_progress"), "Bearer test")
+            with self.assertRaises(HTTPException):
+                main.create_task_route(main.TaskCreate(title="More", group_id=group["id"], assignee_ids=["sam-id"]), "Bearer test")
 
     def test_update_only_applies_fields_that_were_sent(self):
         with self.as_user("alex-id"):

@@ -324,6 +324,8 @@ TaskPriority = Literal["low", "medium", "high", "urgent"]
 TASK_CREATE_LIMIT = 200
 TASK_WRITE_LIMIT = 900
 TASK_COMMENT_LIMIT = 120
+# Changing who is assigned notifies people, so it has its own, tighter hourly cap.
+TASK_ASSIGN_LIMIT = 60
 
 
 class TaskCreate(BaseModel):
@@ -1479,6 +1481,8 @@ def create_task_route(data: TaskCreate, authorization: Annotated[str | None, Hea
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "task_create", TASK_CREATE_LIMIT, 1440)
+        if data.group_id and any(person != user["id"] for person in data.assignee_ids or []):
+            database.check_social_rate_limit(user["id"], "task_assign", TASK_ASSIGN_LIMIT, 60)
         return tasks.create_task(user["id"], data.model_dump())
     except ValueError as error:
         raise social_error(error) from error
@@ -1498,7 +1502,10 @@ def update_task_route(task_id: str, data: TaskUpdate, authorization: Annotated[s
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
-        return tasks.update_task(user["id"], task_id, data.model_dump(exclude_unset=True))
+        changes = data.model_dump(exclude_unset=True)
+        if "assignee_ids" in changes:
+            database.check_social_rate_limit(user["id"], "task_assign", TASK_ASSIGN_LIMIT, 60)
+        return tasks.update_task(user["id"], task_id, changes)
     except ValueError as error:
         raise social_error(error) from error
 
