@@ -1,5 +1,6 @@
 -- bindit schema for Supabase Postgres.
--- Apply supabase/migrations in order for existing databases.
+-- Reference only: the backend creates these tables on first start, then
+-- supabase/migrations are applied in filename order (see supabase/README.md).
 
 create table if not exists student_progress (
   student_id text primary key,
