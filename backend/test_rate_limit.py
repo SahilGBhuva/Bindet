@@ -57,9 +57,49 @@ class RequestGuardTests(unittest.TestCase):
 
     def test_address_prefers_the_platform_header(self):
         headers = {"x-vercel-forwarded-for": "9.9.9.9", "x-forwarded-for": "7.7.7.7, 8.8.8.8"}
-        self.assertEqual(rate_limit.address_of(headers, "127.0.0.1"), "9.9.9.9")
-        self.assertEqual(rate_limit.address_of({"x-forwarded-for": "7.7.7.7, 8.8.8.8"}, None), "7.7.7.7")
-        self.assertEqual(rate_limit.address_of({}, "127.0.0.1"), "127.0.0.1")
+        with patch.dict(os.environ, {"VERCEL": "1"}):
+            self.assertEqual(rate_limit.address_of(headers, "127.0.0.1"), "9.9.9.9")
+            self.assertEqual(rate_limit.address_of({"x-forwarded-for": "7.7.7.7, 8.8.8.8"}, None), "7.7.7.7")
+            self.assertEqual(rate_limit.address_of({}, "127.0.0.1"), "127.0.0.1")
+
+    def test_forwarding_headers_are_ignored_off_vercel(self):
+        headers = {"x-real-ip": "6.6.6.6", "x-forwarded-for": "7.7.7.7", "x-vercel-forwarded-for": "9.9.9.9"}
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VERCEL", None)
+            self.assertEqual(rate_limit.address_of(headers, "10.0.0.5"), "10.0.0.5")
+            self.assertEqual(rate_limit.address_of(headers, None), "unknown")
+
+    def test_unverified_tokens_share_the_anonymous_budget(self):
+        import auth
+        auth.reset_cache()
+        try:
+            with patch.object(rate_limit, "UNVERIFIED_PER_MINUTE", 3), patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 3):
+                # Each made-up token would otherwise get its own fresh budget.
+                waits = [rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", f"Bearer fake-{n}") for n in range(4)]
+                self.assertEqual(waits[:3], [0.0, 0.0, 0.0])
+                self.assertGreater(waits[3], 0)
+                # A token auth has verified uses its own per-student budget instead.
+                auth._remember(auth._cache_key("Bearer real"), {"id": "real-id"}, "", auth.time.monotonic())
+                self.assertEqual(rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", "Bearer real"), 0.0)
+                # A token cached as bad is not "verified".
+                auth._remember(auth._cache_key("Bearer bad"), None, "nope", auth.time.monotonic())
+                self.assertGreater(rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", "Bearer bad"), 0)
+        finally:
+            auth.reset_cache()
+
+    def test_routes_without_sign_in_always_use_the_anonymous_budget(self):
+        import auth
+        auth.reset_cache()
+        auth._remember(auth._cache_key("Bearer real"), {"id": "real-id"}, "", auth.time.monotonic())
+        try:
+            with patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 2):
+                for path in ("/api/ai/warm", "/api/auth/config"):
+                    rate_limit.limiter.reset()
+                    self.assertEqual(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0.0)
+                    self.assertEqual(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0.0)
+                    self.assertGreater(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0)
+        finally:
+            auth.reset_cache()
 
     def test_middleware_answers_429_with_retry_after_before_route_work(self):
         client = TestClient(main.app)

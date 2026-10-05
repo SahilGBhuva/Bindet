@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import threading
 import time
 from collections import deque
@@ -27,10 +28,18 @@ WINDOW_SECONDS = 60
 SIGNED_IN_PER_MINUTE = 240      # one student's token
 ADDRESS_PER_MINUTE = 1500       # one network address; a school can put hundreds of students behind one
 ANONYMOUS_PER_MINUTE = 60       # requests without a sign-in, per address
+# Requests carrying a token this instance has not verified yet also count against the
+# address's anonymous budget, so made-up tokens can't each mint a fresh per-user budget.
+# Real students land here once per token per minute per instance (until the token is
+# verified and cached), and a school can put hundreds behind one address, so this
+# ceiling sits above the anonymous one.
+UNVERIFIED_PER_MINUTE = 300
 AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation, grading, note uploads, per student
 
 AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes")
 EXEMPT_PATHS = ("/api/health",)
+# Routes that never verify a token: whatever the caller sends, they use the anonymous budget.
+NO_AUTH_PATHS = ("/api/ai/warm", "/api/auth/config")
 MAX_KEYS = 50_000
 
 # The caller's network address, for routes that apply per-address limits of their own.
@@ -84,11 +93,29 @@ class SlidingWindow:
 limiter = SlidingWindow()
 
 
+def behind_trusted_proxy() -> bool:
+    """Vercel sets VERCEL on every deployment, and its edge overwrites the forwarding headers."""
+    return bool(os.getenv("VERCEL"))
+
+
 def address_of(headers, fallback: str | None) -> str:
-    """The client address. Vercel overwrites these headers at its edge, so they can't be spoofed there."""
+    """The client address.
+
+    Forwarding headers are only trusted on Vercel, whose edge overwrites them so they
+    can't be spoofed. Anywhere else a caller could send any value and pick a fresh
+    budget per request, so the socket address is used.
+    """
+    if not behind_trusted_proxy():
+        return fallback or "unknown"
     forwarded = headers.get("x-vercel-forwarded-for") or headers.get("x-real-ip") or headers.get("x-forwarded-for") or ""
     first = forwarded.split(",")[0].strip()
     return first or fallback or "unknown"
+
+
+def token_is_verified(authorization: str) -> bool:
+    """True when auth has already verified this exact token and still has it cached."""
+    import auth  # auth imports this module, so import it lazily
+    return auth.is_verified(authorization)
 
 
 def token_key(authorization: str | None) -> str | None:
@@ -102,8 +129,10 @@ def check_request(path: str, method: str, address: str, authorization: str | Non
     if method == "OPTIONS" or not path.startswith("/api/") or path in EXEMPT_PATHS:
         return 0.0
     checks: list[tuple[str, int]] = [(f"ip:{address}", ADDRESS_PER_MINUTE)]
-    token = token_key(authorization)
+    token = None if path in NO_AUTH_PATHS else token_key(authorization)
     if token:
+        if not token_is_verified(authorization or ""):
+            checks.append((f"anon:{address}", UNVERIFIED_PER_MINUTE))
         checks.append((f"user:{token}", SIGNED_IN_PER_MINUTE))
         if method == "POST" and path.startswith(AI_PATHS):
             checks.append((f"ai:{token}", AI_PER_MINUTE))

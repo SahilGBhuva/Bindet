@@ -57,6 +57,20 @@ def _remember(key: str, user: dict | None, detail: str, now: float) -> None:
         _verify_cache[key] = (now + VERIFY_CACHE_SECONDS, copy.deepcopy(user), detail)
 
 
+def is_verified(authorization: str | None) -> bool:
+    """True when this token was verified as a real account and the result is still cached.
+
+    Read-only: the rate limiter uses it to tell verified tokens from unknown ones.
+    """
+    if not authorization:
+        return False
+    key = _cache_key(authorization)
+    now = time.monotonic()
+    with _verify_lock:
+        entry = _verify_cache.get(key)
+        return entry is not None and entry[0] > now and entry[1] is not None
+
+
 def reset_cache() -> None:
     with _verify_lock:
         _verify_cache.clear()
