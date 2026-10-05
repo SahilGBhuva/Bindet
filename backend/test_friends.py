@@ -26,6 +26,19 @@ class FriendsTests(unittest.TestCase):
         request = database.send_friend_request("alex-id", self.sam["friend_code"])
         database.respond_to_friend_request(request["request_id"], "sam-id", True)
 
+    def test_missing_profile_is_a_clean_error_not_a_500(self):
+        group = database.create_study_group("alex-id", "Bio crew")
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "no-profile-id"}):
+            with self.assertRaises(main.HTTPException) as caught:
+                main.join_study_group(main.StudyGroupJoin(invite_code=group["invite_code"]), "Bearer t")
+            self.assertEqual(caught.exception.status_code, 400)
+            database.update_progress("alex-id", "addition", True, 10)
+            event_id = database.activity_feed("alex-id")[0]["id"]
+            with self.assertRaises(main.HTTPException) as caught:
+                main.react_to_social_activity(event_id, "Bearer t")
+            self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual([member["student_id"] for member in database.get_study_group("alex-id", group["id"])["members"]], ["alex-id"])
+
     def test_friend_request_acceptance_and_leaderboard(self):
         self.become_friends()
         database.update_progress("alex-id", "Biology", True, 30)

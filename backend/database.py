@@ -1220,6 +1220,9 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
         group = connection.execute(select(study_groups).where(study_groups.c.invite_code == code)).mappings().first()
         if not group:
             raise ValueError("group_not_found")
+        display_name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
+        if display_name is None:
+            raise ValueError("profile_not_found")
         # Always group first, then student, so concurrent joins and creates can't deadlock.
         _advisory_lock(connection, f"groups:group:{group['id']}")
         _advisory_lock(connection, f"groups:student:{student_id}")
@@ -1241,7 +1244,6 @@ def join_study_group(student_id: str, invite_code: str) -> dict:
         connection.execute(study_group_members.insert().values(
             group_id=group["id"], student_id=student_id, role="member", joined_at=now,
         ))
-        display_name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one()
         member_ids = connection.execute(select(study_group_members.c.student_id).where(
             study_group_members.c.group_id == group["id"], study_group_members.c.student_id != student_id,
         )).scalars().all()
@@ -1543,6 +1545,9 @@ def activity_feed(student_id: str) -> list[dict]:
 def react_to_activity(student_id: str, event_id: int) -> dict:
     init_db()
     with engine().begin() as connection:
+        name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
+        if name is None:
+            raise ValueError("profile_not_found")
         visible = {student_id, *_friend_ids(connection, student_id)}
         event = connection.execute(select(xp_events).where(xp_events.c.id == event_id, xp_events.c.student_id.in_(visible))).mappings().first()
         if not event:
@@ -1553,7 +1558,6 @@ def react_to_activity(student_id: str, event_id: int) -> dict:
             return {"reacted": False}
         connection.execute(social_reactions.insert().values(event_id=event_id, reactor_id=student_id, reaction="high_five", created_at=datetime.now(timezone.utc)))
         if event["student_id"] != student_id:
-            name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one()
             connection.execute(social_notifications.insert().values(
                 recipient_id=event["student_id"], actor_id=student_id, kind="high_five",
                 message=f"{name} celebrated your study session.", is_read=False, created_at=datetime.now(timezone.utc),
