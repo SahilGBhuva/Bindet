@@ -1,7 +1,7 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
   deleteTutorConversation, getCachedTutorConversations, getCachedTutorMessages, getTutorConversations, getTutorMessages,
-  parseServerTime, prepareTutorImage, setCachedTutorConversations, setCachedTutorMessages, streamTutorMessage,
+  parseServerTime, prepareTutorImage, setCachedTutorConversations, setCachedTutorMessages, streamTutorMessage, warmAI,
   type TutorConversation, type TutorMessage,
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
@@ -20,7 +20,10 @@ type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streamin
 
 const NEW = 'new'
 const MAX_IMAGES = 3
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+// The server accepts 4 MB per image and 12 MB per request; base64 adds a third, so
+// all images together must stay under about 8.5 MB. Photos are downscaled first.
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024
+const MAX_TOTAL_IMAGE_BYTES = 8.5 * 1024 * 1024
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
@@ -40,7 +43,8 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
   })
 }
 
-function Rich({ text }: { text: string }) {
+/* Memoised: while a reply streams, only the message that is growing is parsed again. */
+const Rich = memo(function Rich({ text }: { text: string }) {
   const blocks: ReactNode[] = []
   const lines = text.replace(/\r\n/g, '\n').split('\n')
   let index = 0
@@ -73,7 +77,7 @@ function Rich({ text }: { text: string }) {
     blocks.push(<p key={`b${blocks.length}`}>{paragraph.map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? <br /> : null}{inline(part, `p${blocks.length}-${partIndex}`)}</Fragment>)}</p>)
   }
   return <>{blocks}</>
-}
+})
 
 function readLastConversation(): string {
   try { return sessionStorage.getItem('bindit:tutor:active') || NEW } catch { return NEW }
@@ -164,6 +168,9 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   useEffect(() => () => stopRef.current?.(), [])
 
+  // Opening the tutor wakes the API and its AI connection, so the first answer starts sooner.
+  useEffect(() => { if (token) warmAI() }, [token])
+
   // Release image previews when they leave the composer.
   const releasePreview = (attachment: Attachment) => { if (attachment.preview.startsWith('blob:')) URL.revokeObjectURL(attachment.preview) }
 
@@ -185,7 +192,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         if (!ACCEPTED.includes(file.type)) return { ...attachment, state: 'failed' as const, error: 'Use JPG, PNG, WebP, or GIF' }
         void prepareTutorImage(file).then((prepared) => {
           setAttachments((items) => items.map((item) => item.id === attachment.id
-            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 5 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size }
+            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 4 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size }
             : item))
         }).catch(() => setAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, state: 'failed', error: 'Could not read this image' } : item)))
         return attachment
@@ -216,6 +223,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       return { ...current, [threadId]: [...existing, userMessage, reply] }
     })
     let liveThread = threadId
+    let answered = false
     stopRef.current = streamTutorMessage(token, {
       conversation_id: threadId === NEW ? undefined : threadId,
       content,
@@ -233,10 +241,15 @@ export function Tutor({ session }: { session: AuthSession | null }) {
           setActiveId(conversationId)
         }
         setConversations((current) => [meta.conversation, ...(current ?? []).filter((item) => item.id !== conversationId)].map((item) => item.id === conversationId ? { ...item, updated_at: new Date().toISOString() } : item))
-        updateMessage(liveThread, userKey, (message) => ({ ...message, ...meta.user_message, key: userKey, status: undefined, progress: undefined }))
+        // The server accepted the message; it is stored while the reply starts.
+        updateMessage(liveThread, userKey, (message) => ({ ...message, status: undefined, progress: undefined }))
         updateMessage(liveThread, replyKey, (message) => ({ ...message, tier: meta.tier, grounded: meta.grounded_in }))
       },
-      onDelta: (text) => updateMessage(liveThread, replyKey, (message) => ({ ...message, content: message.content + text })),
+      onSaved: (stored) => updateMessage(liveThread, userKey, (message) => ({ ...message, ...stored, key: userKey, status: undefined, progress: undefined })),
+      onDelta: (text) => {
+        answered = true
+        updateMessage(liveThread, replyKey, (message) => ({ ...message, content: message.content + text }))
+      },
       onDone: ({ message: saved }) => {
         updateMessage(liveThread, replyKey, (message) => ({ ...message, ...saved, key: replyKey, status: undefined }))
         stopRef.current = null
@@ -248,10 +261,13 @@ export function Tutor({ session }: { session: AuthSession | null }) {
           ...current,
           [liveThread]: (current[liveThread] ?? []).flatMap((message) => {
             if (message.key === replyKey) return message.content ? [{ ...message, status: undefined }] : []
-            if (message.key === userKey && message.status) return [{ ...message, status: 'failed' as const, error, progress: undefined }]
+            // With no reply at all, the error and a Retry sit on the student's message. Resending
+            // a turn the server already saved reuses it instead of storing it twice.
+            if (message.key === userKey) return [answered ? { ...message, status: undefined, progress: undefined } : { ...message, status: 'failed' as const, error, progress: undefined }]
             return [message]
           }),
         }))
+        if (answered) setNotice(error)
       },
     })
   }
@@ -270,6 +286,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   function submit(event?: FormEvent) {
     event?.preventDefault()
     if (attachments.some((item) => item.state === 'preparing')) { setNotice('Images are still being prepared. One moment.'); return }
+    const total = attachments.reduce((sum, item) => sum + (item.state === 'ready' ? item.size ?? 0 : 0), 0)
+    if (total > MAX_TOTAL_IMAGE_BYTES) { setNotice('These images are too large to send together. Remove one and try again.'); return }
     const content = draft.trim() || (attachments.length ? 'What can you tell me about this?' : '')
     if (!content) return
     send(content, attachments)
@@ -446,6 +464,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
+              onFocus={warmAI}
               placeholder={course ? `Ask about ${unit || course}…` : 'Ask the tutor anything…'}
               aria-label="Message the tutor"
               rows={1}
