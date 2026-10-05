@@ -264,8 +264,28 @@ export async function signIn(email: string, password: string) {
   return session
 }
 
+// Set in sessionStorage when this browser tab asks for a reset link, so a
+// recovery link that arrives without it gets an extra confirmation first.
+const RESET_REQUESTED_KEY = 'bindit:reset-requested'
+
 export async function requestPasswordReset(email: string) {
   await authRequest('recover', { email }, appReturnUrl())
+  try {
+    sessionStorage.setItem(RESET_REQUESTED_KEY, String(Date.now()))
+  } catch {
+    // Without storage the recovery link just asks for confirmation first.
+  }
+}
+
+/** True (once) when this browser tab requested a password reset. */
+export function takeResetRequested() {
+  try {
+    const requested = sessionStorage.getItem(RESET_REQUESTED_KEY)
+    sessionStorage.removeItem(RESET_REQUESTED_KEY)
+    return Boolean(requested)
+  } catch {
+    return false
+  }
 }
 
 export type AuthRedirect =
