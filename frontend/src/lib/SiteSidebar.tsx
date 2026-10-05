@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Profile, StudyGroup, Task } from './api'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -219,6 +219,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const [groupParam, setGroupParam] = useState(readGroupParam)
   const [unreadTotal, setUnreadTotal] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  const menuButton = useRef<HTMLButtonElement>(null)
+  const menuPanel = useRef<HTMLDivElement>(null)
   const [layout, setLayout] = useState<Layout>(() => data.sandboxed ? DEFAULT_LAYOUT : readLayout())
   const [important, setImportant] = useState<string[]>(() => data.sandboxed ? [] : readImportant())
   const [editing, setEditing] = useState(false)
@@ -268,9 +270,15 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [data, session, onUnreadChange])
 
+  // The phone menu takes focus when it opens and hands it back to the Menu button when it closes.
   useEffect(() => {
     if (!menuOpen) return
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false) }
+    menuPanel.current?.querySelector<HTMLElement>('a, button')?.focus()
+    const close = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMenuOpen(false)
+      menuButton.current?.focus({ preventScroll: true })
+    }
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [menuOpen])
@@ -557,7 +565,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             </a>
           )
         })}
-        <button type="button" className={`bindit-tabbar__item${menuOpen || !TAB_BAR.includes(active) ? ' is-active' : ''}`} aria-expanded={menuOpen} aria-controls="bindit-menu" onClick={() => setMenuOpen((open) => !open)}>
+        <button type="button" ref={menuButton} className={`bindit-tabbar__item${menuOpen || !TAB_BAR.includes(active) ? ' is-active' : ''}`} aria-expanded={menuOpen} aria-controls="bindit-menu" onClick={() => setMenuOpen((open) => !open)}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" /></svg>
           <span>Menu</span>
           {unreadTotal ? <i className="bindit-tabbar__dot" aria-hidden="true" /> : null}
@@ -565,8 +573,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       </nav>
 
       {menuOpen ? (
-        <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setMenuOpen(false) }}>
-          <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages">
+        <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } }}>
+          <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages" ref={menuPanel}>
             {SECTIONS.map((section) => (
               <div key={section.label}>
                 <span className="bindit-sheet__section">{section.label}</span>
@@ -577,6 +585,24 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                 </ul>
               </div>
             ))}
+            {groups?.length ? (
+              <div>
+                <span className="bindit-sheet__section">My Groups</span>
+                <ul className="bindit-sheet__groups">
+                  {nestGroups(groups).map(({ group, child }) => {
+                    const current = active === 'stats' && groupParam === group.id
+                    return (
+                      <li key={group.id} className={child ? 'is-child' : undefined}>
+                        <a href={`#stats?group=${encodeURIComponent(group.id)}`} className={current ? 'is-active' : ''} aria-current={current ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+                          <span className="bindit-sheet__glyph">{glyphs.people}</span>
+                          <span className="bindit-rail__entry-text">{group.name}</span>
+                        </a>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : null}
             <div className="bindit-sheet__footer">
               <a href="#settings" onClick={() => setMenuOpen(false)}><NavIcon kind="settings" />Settings</a>
               <a href="#more" onClick={() => setMenuOpen(false)}><NavIcon kind="more" />Help</a>
