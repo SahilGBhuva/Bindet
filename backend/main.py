@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -849,20 +850,28 @@ async def upload_note(
     file: Annotated[UploadFile, File()],
     authorization: Annotated[str | None, Header()] = None,
 ):
-    user = auth.authenticated_user(authorization)
-    limit_action(user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
-    filename = file.filename or "notes"
+    # Sign-in checks, parsing, OCR and the database are all blocking calls. They run in
+    # the thread pool so a slow OCR request never stalls the event loop, and with it
+    # every other request (including streaming tutor replies) on this instance.
+    user = await run_in_threadpool(auth.authenticated_user, authorization)
+    await run_in_threadpool(limit_action, user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
+    return await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
+
+
+def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type: str | None, content: bytes) -> NoteResponse:
     suffix = Path(filename).suffix.lower()
-    content_type = note_content_type(suffix, file.content_type)
+    content_type = note_content_type(suffix, claimed_type)
     pages_skipped = 0
     try:
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
-            limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
                 raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
+            limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+            ai_tutor.warm_connection()
+            # The image goes to the vision model only; it is never stored.
             text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
                 image_bytes=content, content_type=content_type
             ))
@@ -871,16 +880,21 @@ async def upload_note(
                 text = note_ingestion.extract_text(filename, content)
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
-                    limit_action(user["id"], "ai_ocr", AI_OCR_PER_DAY, 1440)
+                    limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+                    ai_tutor.warm_connection()
                     ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
                     text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                 else:
                     raise
-    except (note_ingestion.NoteIngestionError, ai_tutor.AITutorError) as exc:
+    except ai_tutor.AITutorError as exc:
+        if str(exc).startswith("No readable notes"):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=OCR_UNAVAILABLE) from exc
+    except note_ingestion.NoteIngestionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
-    row = note_store.save_note(user["id"], course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
+    row = note_store.save_note(owner, course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
     return note_response(row, pages_skipped)
 
 
@@ -1042,6 +1056,7 @@ def sse(event: str, payload: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, default=str, ensure_ascii=False)}\n\n"
 
 
+OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable. Try again in a moment, or upload a text PDF, DOCX or TXT instead."
 TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 
