@@ -395,14 +395,35 @@ class TaskRouteTests(unittest.TestCase):
         task = tasks.create_task("alex-id", {"title": "Lab", "group_id": group["id"]})
         with self.as_user("alex-id"), patch.object(main, "TASK_ASSIGN_LIMIT", 2):
             main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
-            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["alex-id"]), "Bearer test")
+            # Assigning only yourself, unassigning, or resending the same list costs nothing.
+            for _ in range(3):
+                main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["alex-id"]), "Bearer test")
+            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
+            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
+            main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=[]), "Bearer test")
             with self.assertRaises(HTTPException) as caught:
                 main.update_task_route(task["id"], main.TaskUpdate(assignee_ids=["sam-id"]), "Bearer test")
             self.assertEqual(caught.exception.status_code, 429)
+            # The refused edit changed nothing.
+            self.assertEqual(tasks.get_task("alex-id", task["id"])["assignees"], [])
             # Other edits still go through.
             main.update_task_route(task["id"], main.TaskUpdate(status="in_progress"), "Bearer test")
             with self.assertRaises(HTTPException):
                 main.create_task_route(main.TaskCreate(title="More", group_id=group["id"], assignee_ids=["sam-id"]), "Bearer test")
+
+    def test_personal_tasks_and_moves_do_not_use_the_assignment_cap(self):
+        group = database.create_study_group("alex-id", "Bio crew")
+        other = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("sam-id", group["invite_code"])
+        database.join_study_group("sam-id", other["invite_code"])
+        personal = tasks.create_task("alex-id", {"title": "Read"})
+        task = tasks.create_task("alex-id", {"title": "Lab", "group_id": group["id"], "assignee_ids": ["sam-id"]})
+        with self.as_user("alex-id"), patch.object(main, "TASK_ASSIGN_LIMIT", 0):
+            for _ in range(3):
+                main.update_task_route(personal["id"], main.TaskUpdate(assignee_ids=["alex-id"]), "Bearer test")
+            # Moving keeps sam assigned without assigning anyone new.
+            moved = main.update_task_route(task["id"], main.TaskUpdate(group_id=other["id"]), "Bearer test")
+        self.assertEqual([p["student_id"] for p in moved["assignees"]], ["sam-id"])
 
     def test_update_only_applies_fields_that_were_sent(self):
         with self.as_user("alex-id"):

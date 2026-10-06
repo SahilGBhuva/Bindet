@@ -1751,9 +1751,12 @@ def update_task_route(task_id: str, data: TaskUpdate, authorization: Annotated[s
     try:
         database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
         changes = data.model_dump(exclude_unset=True)
-        if "assignee_ids" in changes:
-            database.check_social_rate_limit(user["id"], "task_assign", TASK_ASSIGN_LIMIT, 60)
-        return tasks.update_task(user["id"], task_id, changes)
+        # Charged only when the edit newly assigns a group task to someone else, not for
+        # personal tasks, assigning yourself, unassigning or moving with the same people.
+        return tasks.update_task(
+            user["id"], task_id, changes,
+            before_assigning_others=lambda: database.check_social_rate_limit(user["id"], "task_assign", TASK_ASSIGN_LIMIT, 60),
+        )
     except ValueError as error:
         raise social_error(error) from error
 

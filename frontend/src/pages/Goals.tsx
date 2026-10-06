@@ -820,6 +820,8 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
   )
 }
 
+const ASSIGNEE_SAVE_DELAY_MS = 600
+
 function AssigneePicker({ members, value, onChange, labelledBy }: { members: StudyGroup['members']; value: string[]; onChange: (next: string[]) => void; labelledBy: string }) {
   return (
     <div className="assignee-picker" role="group" aria-labelledby={labelledBy}>
@@ -862,6 +864,33 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
   const done = task.status === 'done'
   const pending = task.id.startsWith('temp-')
   const overdue = isOverdue(task, today)
+
+  // Assignee clicks update the picker at once, but only the final list is sent, once,
+  // ASSIGNEE_SAVE_DELAY_MS after the last click (or straight away if the panel closes).
+  const [assigneeDraft, setAssigneeDraft] = useState<string[] | null>(null)
+  const assigneeSave = useRef<{ timer: number; send: () => void } | null>(null)
+  const patchRef = useRef(onPatch)
+  useEffect(() => { patchRef.current = onPatch }, [onPatch])
+  useEffect(() => () => {
+    const pendingSave = assigneeSave.current
+    assigneeSave.current = null
+    if (pendingSave) { window.clearTimeout(pendingSave.timer); pendingSave.send() }
+  }, [])
+  const savedAssignees = task.assignees.map((person) => person.student_id)
+  const queueAssignees = (next: string[]) => {
+    setAssigneeDraft(next)
+    if (assigneeSave.current) window.clearTimeout(assigneeSave.current.timer)
+    const send = () => {
+      const unchanged = next.length === savedAssignees.length && next.every((id) => savedAssignees.includes(id))
+      if (next.length && !unchanged) patchRef.current({ assignee_ids: next })
+    }
+    const timer = window.setTimeout(() => {
+      assigneeSave.current = null
+      setAssigneeDraft(null)
+      send()
+    }, ASSIGNEE_SAVE_DELAY_MS)
+    assigneeSave.current = { timer, send }
+  }
 
   const toggleExpanded = () => {
     if (!expanded) onExpand()
@@ -1027,7 +1056,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                     {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </label>
-                {group && manageable ? <div className="ui-field is-wide"><span id={`task-assignees-${task.id}`}>Assignees</span><AssigneePicker labelledBy={`task-assignees-${task.id}`} members={group.members} value={task.assignees.map((person) => person.student_id)} onChange={(next) => { if (next.length) onPatch({ assignee_ids: next }) }} /></div> : null}
+                {group && manageable ? <div className="ui-field is-wide"><span id={`task-assignees-${task.id}`}>Assignees</span><AssigneePicker labelledBy={`task-assignees-${task.id}`} members={group.members} value={assigneeDraft ?? savedAssignees} onChange={queueAssignees} /></div> : null}
               </div>
             ) : <p className="task-hint">Only the creator, assignees or the group owner can edit this task. You can still comment.</p>}
             {task.group_id ? <p className="task-hint">Created by {task.owner.display_name}{task.assignees.length ? ` · Assigned to ${task.assignees.map((person) => person.display_name).join(', ')}` : ''}</p> : null}

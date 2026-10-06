@@ -543,7 +543,10 @@ def _clear_for_move(connection, task_id: str, mover_id: str) -> None:
     connection.execute(delete(task_activity).where(task_activity.c.task_id == task_id))
 
 
-def update_task(student_id: str, task_id: str, data: dict) -> dict:
+def update_task(student_id: str, task_id: str, data: dict, before_assigning_others=None) -> dict:
+    """Apply an edit. before_assigning_others, if given, is called (and may raise) before
+    anything is written when the edit newly assigns a group task to someone other than
+    the caller; the route uses it to charge the assignment rate limit only then."""
     init_tasks()
     values = _validated_fields(data)
     with database.engine().begin() as connection:
@@ -554,6 +557,17 @@ def update_task(student_id: str, task_id: str, data: dict) -> dict:
         actor = _names(connection, {student_id}).get(student_id, "A group member")
         group_id = _target_group(connection, task, student_id, data)
         moved = group_id != task["group_id"]
+        assignees = None
+        if "assignee_ids" in data or moved:
+            # Without an explicit list (a plain move) the current assignees carry over. Either way,
+            # current assignees who are not members of the task's group are dropped, never rejected;
+            # anyone newly named must be a current member.
+            requested = data["assignee_ids"] if "assignee_ids" in data else current_assignees
+            assignees = _validated_assignees(connection, group_id, task["owner_id"], requested, current_assignees)
+            # A move hands the task back to its creator; that is not assigning anyone new.
+            exempt = {student_id, task["owner_id"]} if moved else {student_id}
+            if group_id and before_assigning_others and assignees - current_assignees - exempt:
+                before_assigning_others()
         if moved:
             values["group_id"] = group_id
             # Milestones belong to one group; keep one only if it was chosen for the new group.
@@ -583,12 +597,7 @@ def update_task(student_id: str, task_id: str, data: dict) -> dict:
             _log(connection, task, student_id, "priority", f"Priority set to {values['priority']}")
         if "title" in values and values["title"] != task["title"]:
             _log(connection, task, student_id, "renamed", values["title"])
-        if "assignee_ids" in data or moved:
-            # Without an explicit list (a plain move) the current assignees carry over. Either way,
-            # current assignees who are not members of the task's group are dropped, never rejected;
-            # anyone newly named must be a current member.
-            requested = data["assignee_ids"] if "assignee_ids" in data else current_assignees
-            assignees = _validated_assignees(connection, group_id, task["owner_id"], requested, current_assignees)
+        if assignees is not None:
             added, removed = assignees - current_assignees, current_assignees - assignees
             if removed:
                 connection.execute(delete(task_assignees).where(
