@@ -91,6 +91,35 @@ export function clearLocalAccountData() {
 }
 
 /**
+ * Ends the signed-in state without touching local-only study data: removes the
+ * session, the tab's sessionStorage, the cached server responses (`bindit:` keys
+ * other than cosmetic preferences) and in-memory caches. The notebook, attempt
+ * history, avatar, student id and data owner stay, so the same account gets them
+ * back on its next sign-in; claimLocalData wipes them if a different account
+ * signs in instead.
+ */
+export function clearSignedInState() {
+  try {
+    localStorage.removeItem(SESSION_KEY)
+    localStorage.removeItem(LEGACY_SESSION_KEY)
+    const keys: string[] = []
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (key && key.startsWith('bindit:') && !COSMETIC_KEYS.has(key)) keys.push(key)
+    }
+    keys.forEach((key) => localStorage.removeItem(key))
+  } catch {
+    // Storage can be unavailable (private mode); nothing to clear then.
+  }
+  try {
+    sessionStorage.clear()
+  } catch {
+    // Same as above.
+  }
+  window.dispatchEvent(new Event(ACCOUNT_DATA_CLEARED_EVENT))
+}
+
+/**
  * Local study data belongs to whichever account signed in on this browser.
  * When a different account signs in, the previous account's data is wiped
  * before the new session is stored. Data with no recorded owner (written
@@ -208,7 +237,7 @@ export type RefreshResult = {
   session: AuthSession | null
   /** The refresh could not reach the auth server (or it errored); the session was kept. */
   failed: boolean
-  /** The auth server rejected the refresh token; all local account data was cleared. */
+  /** The auth server rejected the refresh token; the session and cached account responses were cleared. */
   rejected?: boolean
 }
 
@@ -241,8 +270,9 @@ export function refreshSessionIfDue(session: AuthSession): Promise<RefreshResult
       return { session: refreshed, failed: false }
     } catch (error) {
       if (error instanceof AuthRequestError && (error.status === 400 || error.status === 401)) {
-        // Same as signing out: nothing from the account stays in this browser.
-        clearLocalAccountData()
+        // The session is over, but this isn't an explicit sign-out: keep local-only
+        // study data for when the same account signs back in.
+        clearSignedInState()
         return { session: null, failed: false, rejected: true }
       }
       return { session: latest, failed: true }
