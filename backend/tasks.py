@@ -229,6 +229,10 @@ def _log(connection, task: dict, actor_id: str, kind: str, detail: str = "") -> 
     ))
 
 
+# Repeats of the same unread notification within this window are coalesced into one.
+NOTIFY_COALESCE_WINDOW = timedelta(minutes=30)
+
+
 def _notify(connection, recipients: set[str], actor_id: str, kind: str, message: str, group_id: str | None = None) -> None:
     """Notify recipients other than the actor. For group tasks only current members are
     notified, so students who left a group stop hearing about its tasks."""
@@ -238,17 +242,19 @@ def _notify(connection, recipients: set[str], actor_id: str, kind: str, message:
     if not recipients:
         return
     message = message[:240]
-    # Coalesce: an unread notification of this kind from this actor with the same text
-    # (which names the task) already tells the recipient, so repeated reassignments or
-    # comments don't pile up copies.
+    # Coalesce: a recent unread notification of this kind from this actor with the same
+    # text (which names the task) already tells the recipient, so repeated reassignments
+    # or comments don't pile up copies. Only recent ones count, so a different task
+    # with the same title later on still notifies.
     notifications = database.social_notifications
+    now = _now()
     recipients -= set(connection.execute(select(notifications.c.recipient_id).where(
         notifications.c.recipient_id.in_(recipients), notifications.c.actor_id == actor_id,
         notifications.c.kind == kind, notifications.c.message == message, notifications.c.is_read.is_(False),
+        notifications.c.created_at >= now - NOTIFY_COALESCE_WINDOW,
     )).scalars().all())
     if not recipients:
         return
-    now = _now()
     connection.execute(notifications.insert(), [{
         "recipient_id": recipient, "actor_id": actor_id, "kind": kind,
         "message": message, "is_read": False, "created_at": now,

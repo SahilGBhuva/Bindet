@@ -371,6 +371,16 @@ class TaskTests(unittest.TestCase):
         unread = [item for item in database.notifications_for("sam-id") if not item["is_read"]]
         self.assertEqual([item["kind"] for item in unread], ["task_assigned"])
 
+    def test_same_titled_notifications_only_coalesce_while_recent(self):
+        first = self.group_task(assignee_ids=["alex-id"])
+        tasks.update_task("alex-id", first["id"], {"assignee_ids": ["alex-id", "sam-id"]})
+        later = datetime.now(timezone.utc) + tasks.NOTIFY_COALESCE_WINDOW + timedelta(minutes=1)
+        second = self.group_task(assignee_ids=["alex-id"])
+        with patch.object(tasks, "_now", return_value=later):
+            tasks.update_task("alex-id", second["id"], {"assignee_ids": ["alex-id", "sam-id"]})
+        kinds = [item["kind"] for item in database.notifications_for("sam-id") if not item["is_read"]]
+        self.assertEqual(kinds.count("task_assigned"), 2)
+
 
 class TaskRouteTests(unittest.TestCase):
     def setUp(self):
