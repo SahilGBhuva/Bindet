@@ -33,6 +33,7 @@ class SlidingWindowTests(unittest.TestCase):
 class RequestGuardTests(unittest.TestCase):
     def setUp(self):
         rate_limit.limiter.reset()
+        rate_limit.unverified_tokens.reset()
 
     def test_anonymous_callers_get_the_tighter_budget(self):
         with patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 2):
@@ -69,15 +70,24 @@ class RequestGuardTests(unittest.TestCase):
             self.assertEqual(rate_limit.address_of(headers, "10.0.0.5"), "10.0.0.5")
             self.assertEqual(rate_limit.address_of(headers, None), "unknown")
 
-    def test_unverified_tokens_share_the_anonymous_budget(self):
+    def test_unverified_tokens_have_their_own_budget_counted_per_token(self):
         import auth
         auth.reset_cache()
         try:
-            with patch.object(rate_limit, "UNVERIFIED_PER_MINUTE", 3), patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 3):
-                # Each made-up token would otherwise get its own fresh budget.
-                waits = [rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", f"Bearer fake-{n}") for n in range(4)]
-                self.assertEqual(waits[:3], [0.0, 0.0, 0.0])
-                self.assertGreater(waits[3], 0)
+            with patch.object(rate_limit, "UNVERIFIED_TOKENS_PER_MINUTE", 3), patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 1):
+                # One fresh token sending many requests before it is verified counts once.
+                for _ in range(10):
+                    self.assertEqual(rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", "Bearer fresh-0"), 0.0)
+                # Distinct made-up tokens are capped, so they can't each mint a fresh budget.
+                waits = [rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", f"Bearer fake-{n}") for n in range(3)]
+                self.assertEqual(waits[:2], [0.0, 0.0])
+                self.assertGreater(waits[2], 0)
+                # A refused token is not remembered as counted, so retrying it stays refused.
+                self.assertGreater(rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", "Bearer fake-2"), 0)
+                # Unverified tokens don't touch the anonymous budget.
+                self.assertEqual(rate_limit.check_request("/api/progress/x", "GET", "4.4.4.4", None), 0.0)
+                # Another address has its own budget.
+                self.assertEqual(rate_limit.check_request("/api/tasks", "GET", "4.4.4.5", "Bearer fake-2"), 0.0)
                 # A token auth has verified uses its own per-student budget instead.
                 auth._remember(auth._cache_key("Bearer real"), {"id": "real-id"}, "", auth.time.monotonic())
                 self.assertEqual(rate_limit.check_request("/api/tasks", "GET", "4.4.4.4", "Bearer real"), 0.0)
@@ -87,17 +97,36 @@ class RequestGuardTests(unittest.TestCase):
         finally:
             auth.reset_cache()
 
+    def test_distinct_tokens_are_counted_again_after_the_window_and_stay_bounded(self):
+        seen = rate_limit.DistinctTokens()
+        seen.mark("a", "t1", 60, now=0.0)
+        self.assertTrue(seen.counted_recently("a", "t1", 60, now=59.0))
+        self.assertFalse(seen.counted_recently("a", "t1", 60, now=61.0))
+        self.assertFalse(seen.counted_recently("b", "t1", 60, now=1.0))
+        with patch.object(rate_limit, "UNVERIFIED_TOKENS_PER_MINUTE", 2):
+            for n in range(20):
+                seen.mark("a", f"x{n}", 60, now=100.0 + n)
+            self.assertLessEqual(len(seen._seen["a"]), 4)
+        with patch.object(rate_limit, "MAX_TOKEN_ADDRESSES", 4):
+            for n in range(20):
+                seen.mark(f"addr{n}", "t", 60, now=200.0 + n)
+            self.assertLessEqual(len(seen._seen), 4)
+
+    def test_auth_config_is_never_limited(self):
+        with patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 0), patch.object(rate_limit, "ADDRESS_PER_MINUTE", 0):
+            for authorization in (None, "Bearer junk"):
+                self.assertEqual(rate_limit.check_request("/api/auth/config", "GET", "2.2.2.2", authorization), 0.0)
+
     def test_routes_without_sign_in_always_use_the_anonymous_budget(self):
         import auth
         auth.reset_cache()
         auth._remember(auth._cache_key("Bearer real"), {"id": "real-id"}, "", auth.time.monotonic())
         try:
             with patch.object(rate_limit, "ANONYMOUS_PER_MINUTE", 2):
-                for path in ("/api/ai/warm", "/api/auth/config"):
-                    rate_limit.limiter.reset()
-                    self.assertEqual(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0.0)
-                    self.assertEqual(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0.0)
-                    self.assertGreater(rate_limit.check_request(path, "POST", "3.3.3.3", "Bearer real"), 0)
+                rate_limit.limiter.reset()
+                self.assertEqual(rate_limit.check_request("/api/ai/warm", "POST", "3.3.3.3", "Bearer real"), 0.0)
+                self.assertEqual(rate_limit.check_request("/api/ai/warm", "POST", "3.3.3.3", "Bearer real"), 0.0)
+                self.assertGreater(rate_limit.check_request("/api/ai/warm", "POST", "3.3.3.3", "Bearer real"), 0)
         finally:
             auth.reset_cache()
 

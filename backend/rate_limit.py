@@ -28,19 +28,23 @@ WINDOW_SECONDS = 60
 SIGNED_IN_PER_MINUTE = 240      # one student's token
 ADDRESS_PER_MINUTE = 1500       # one network address; a school can put hundreds of students behind one
 ANONYMOUS_PER_MINUTE = 60       # requests without a sign-in, per address
-# Requests carrying a token this instance has not verified yet also count against the
-# address's anonymous budget, so made-up tokens can't each mint a fresh per-user budget.
-# Real students land here once per token per minute per instance (until the token is
-# verified and cached), and a school can put hundreds behind one address, so this
-# ceiling sits above the anonymous one.
-UNVERIFIED_PER_MINUTE = 300
+# Tokens this instance has not verified yet get a budget of their own per address, so
+# made-up tokens can't each mint a fresh per-user budget. It counts distinct tokens,
+# not requests: a student opening the app sends several requests with one fresh token
+# before any of them is verified, and a school can put hundreds of students behind one
+# address. Floods of junk tokens are held back by auth's failed-verification budget
+# (badauth), which turns every further unknown token from that address into a 429.
+UNVERIFIED_TOKENS_PER_MINUTE = 600
 AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation, grading, note uploads, per student
 
 AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes")
-EXEMPT_PATHS = ("/api/health",)
+# /api/auth/config only returns public values (the Supabase URL and anon key) and every
+# page load asks for it, so it is never limited.
+EXEMPT_PATHS = ("/api/health", "/api/auth/config")
 # Routes that never verify a token: whatever the caller sends, they use the anonymous budget.
-NO_AUTH_PATHS = ("/api/ai/warm", "/api/auth/config")
+NO_AUTH_PATHS = ("/api/ai/warm",)
 MAX_KEYS = 50_000
+MAX_TOKEN_ADDRESSES = 10_000
 
 # The caller's network address, for routes that apply per-address limits of their own.
 client_address: ContextVar[str] = ContextVar("client_address", default="unknown")
@@ -93,6 +97,57 @@ class SlidingWindow:
 limiter = SlidingWindow()
 
 
+class DistinctTokens:
+    """Remembers, per address, when each unverified token was last counted.
+
+    Lets the limiter count a token once per window however many requests carry it.
+    Bounded: each address keeps at most a couple of windows' worth of counted tokens
+    (the limiter caps how many are counted), and the number of addresses is capped.
+    """
+
+    def __init__(self) -> None:
+        self._seen: dict[str, dict[str, float]] = {}
+        self._lock = threading.Lock()
+
+    def counted_recently(self, address: str, token: str, window: float = WINDOW_SECONDS, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            last = self._seen.get(address, {}).get(token)
+            return last is not None and last > now - window
+
+    def mark(self, address: str, token: str, window: float = WINDOW_SECONDS, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            seen = self._seen.get(address)
+            if seen is None:
+                if len(self._seen) >= MAX_TOKEN_ADDRESSES:
+                    self._evict_addresses(now, window)
+                seen = self._seen[address] = {}
+            if len(seen) >= 2 * UNVERIFIED_TOKENS_PER_MINUTE:
+                for stale in [item for item, last in seen.items() if last <= now - window]:
+                    del seen[stale]
+                if len(seen) >= 2 * UNVERIFIED_TOKENS_PER_MINUTE:
+                    for oldest in sorted(seen, key=seen.__getitem__)[: len(seen) // 2]:
+                        del seen[oldest]
+            seen[token] = now
+
+    def _evict_addresses(self, now: float, window: float) -> None:
+        stale = [address for address, seen in self._seen.items() if not seen or max(seen.values()) <= now - window]
+        for address in stale:
+            del self._seen[address]
+        if len(self._seen) >= MAX_TOKEN_ADDRESSES:
+            newest = {address: max(seen.values(), default=0.0) for address, seen in self._seen.items()}
+            for address in sorted(newest, key=newest.__getitem__)[: MAX_TOKEN_ADDRESSES // 2]:
+                del self._seen[address]
+
+    def reset(self) -> None:
+        with self._lock:
+            self._seen.clear()
+
+
+unverified_tokens = DistinctTokens()
+
+
 def behind_trusted_proxy() -> bool:
     """Vercel sets VERCEL on every deployment, and its edge overwrites the forwarding headers."""
     return bool(os.getenv("VERCEL"))
@@ -130,9 +185,12 @@ def check_request(path: str, method: str, address: str, authorization: str | Non
         return 0.0
     checks: list[tuple[str, int]] = [(f"ip:{address}", ADDRESS_PER_MINUTE)]
     token = None if path in NO_AUTH_PATHS else token_key(authorization)
+    count_unverified = False
     if token:
-        if not token_is_verified(authorization or ""):
-            checks.append((f"anon:{address}", UNVERIFIED_PER_MINUTE))
+        if not token_is_verified(authorization or "") and not unverified_tokens.counted_recently(address, token):
+            # A token this instance hasn't verified yet: count it once per window per address.
+            count_unverified = True
+            checks.append((f"unverified:{address}", UNVERIFIED_TOKENS_PER_MINUTE))
         checks.append((f"user:{token}", SIGNED_IN_PER_MINUTE))
         if method == "POST" and path.startswith(AI_PATHS):
             checks.append((f"ai:{token}", AI_PER_MINUTE))
@@ -142,6 +200,9 @@ def check_request(path: str, method: str, address: str, authorization: str | Non
         wait = limiter.hit(key, limit)
         if wait:
             return wait
+    if count_unverified:
+        # Only once the token was allowed, so a refused token is counted again on retry.
+        unverified_tokens.mark(address, token)
     return 0.0
 
 
