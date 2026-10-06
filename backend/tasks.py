@@ -527,18 +527,20 @@ def _target_group(connection, task: dict, student_id: str, data: dict) -> str | 
     return target
 
 
-def _clear_for_move(connection, task_id: str, mover_id: str) -> None:
+def _clear_for_move(connection, task_id: str, mover_id: str, creator_id: str | None = None) -> None:
     """Strip what the old group's members contributed before a task changes groups.
 
-    Comments and attachments written by anyone but the mover are deleted, and the
-    task's activity history is dropped rather than carried into the new group (its
-    details name the old group's members). The new group starts from a clean history.
+    Comments and attachments written by anyone but the mover or the task's creator
+    are deleted, and the task's activity history is dropped rather than carried into
+    the new group (its details name the old group's members). The new group starts
+    from a clean history.
     """
+    keep = {mover_id} | ({creator_id} if creator_id else set())
     connection.execute(delete(task_comments).where(
-        task_comments.c.task_id == task_id, task_comments.c.author_id != mover_id,
+        task_comments.c.task_id == task_id, task_comments.c.author_id.not_in(keep),
     ))
     connection.execute(delete(task_attachments).where(
-        task_attachments.c.task_id == task_id, task_attachments.c.added_by != mover_id,
+        task_attachments.c.task_id == task_id, task_attachments.c.added_by.not_in(keep),
     ))
     connection.execute(delete(task_activity).where(task_activity.c.task_id == task_id))
 
@@ -574,7 +576,7 @@ def update_task(student_id: str, task_id: str, data: dict, before_assigning_othe
             values["milestone_id"] = _validated_milestone(connection, group_id, data.get("milestone_id"))
             # Nothing other people wrote in the old group travels with the task, and the
             # old group's analytics no longer list it.
-            _clear_for_move(connection, task_id, student_id)
+            _clear_for_move(connection, task_id, student_id, task["owner_id"])
             task = {**task, "group_id": group_id}
             if group_id:
                 group_name = connection.execute(select(database.study_groups.c.name).where(

@@ -295,6 +295,21 @@ class TaskTests(unittest.TestCase):
         # The old group's analytics keep nothing about the task.
         self.assertEqual(tasks.group_analytics("alex-id", self.group["id"])["activity"], [])
 
+    def test_moving_keeps_the_creators_comments_and_links(self):
+        database.join_study_group("eve-id", self.group["invite_code"])
+        other = database.create_study_group("alex-id", "Chem crew")
+        database.join_study_group("sam-id", other["invite_code"])
+        task = tasks.create_task("sam-id", {"title": "Slides", "group_id": self.group["id"], "assignee_ids": ["eve-id"]})
+        tasks.add_comment("sam-id", task["id"], "Sam's outline")
+        tasks.add_comment("eve-id", task["id"], "Eve's thoughts")
+        tasks.add_attachment("sam-id", task["id"], "link", "Sam's deck", "https://example.com/sam")
+        tasks.add_attachment("eve-id", task["id"], "link", "Eve's doc", "https://example.com/eve")
+        # The group owner moves sam's task: sam's own work travels with it, eve's does not.
+        tasks.update_task("alex-id", task["id"], {"group_id": other["id"]})
+        seen = tasks.get_task("sam-id", task["id"])
+        self.assertEqual([c["body"] for c in seen["comments"]], ["Sam's outline"])
+        self.assertEqual([a["label"] for a in seen["attachments"]], ["Sam's deck"])
+
     def test_only_the_creator_can_make_a_group_task_personal(self):
         task = tasks.create_task("sam-id", {"title": "Slides", "group_id": self.group["id"]})
         with self.assertRaisesRegex(ValueError, "task_manage_forbidden"):

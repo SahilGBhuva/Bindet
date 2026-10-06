@@ -1045,8 +1045,10 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                   <select className="ui-select" value={task.group_id ?? ''} disabled={!manageable || pending}
                     onChange={(event) => {
                       const next = event.target.value || null
-                      // Moving between groups removes other people's comments and links (the server enforces this).
-                      if (task.group_id && next !== task.group_id && !window.confirm('Move this task? Comments and links from other people will be removed.')) {
+                      // Moving between groups removes comments and links from anyone but the mover and the
+                      // task's creator (the server enforces this).
+                      const others = task.owner.student_id === me ? 'other people' : `anyone but you and ${task.owner.display_name}`
+                      if (task.group_id && next !== task.group_id && !window.confirm(`Move this task? Comments and links from ${others} will be removed.`)) {
                         event.target.value = task.group_id
                         return
                       }
