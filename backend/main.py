@@ -153,7 +153,13 @@ class RequestBodyLimit:
         self.max_bytes = max_bytes
         self.route_limits = dict(route_limits or {})
 
-    def limit_for(self, path: str) -> int:
+    def limit_for(self, path: str, root_path: str = "") -> int:
+        """The cap for a path, matched the way routing would: without the app's mount
+        prefix (root_path, which ASGI servers may include in path) or a trailing slash."""
+        root_path = root_path.rstrip("/")
+        if root_path and (path == root_path or path.startswith(root_path + "/")):
+            path = path[len(root_path):]
+        path = path.rstrip("/") or "/"
         return self.route_limits.get(path, self.max_bytes)
 
     def _response(self, status: int, detail: str) -> JSONResponse:
@@ -163,7 +169,7 @@ class RequestBodyLimit:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        max_bytes = self.limit_for(scope.get("path", ""))
+        max_bytes = self.limit_for(scope.get("path", ""), scope.get("root_path", ""))
         too_large = f"That request is too large. Keep it under {_size_label(max_bytes)}."
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None:

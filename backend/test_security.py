@@ -554,6 +554,21 @@ class RequestBodyLimitTests(unittest.TestCase):
             response = client.post(path, content=b"x" * (main.MAX_REQUEST_BYTES + 1), headers={"Content-Type": "application/json"})
             self.assertEqual(response.status_code, 413)
 
+    def test_large_route_caps_survive_a_trailing_slash_or_mount_prefix(self):
+        limit = main.RequestBodyLimit(None, max_bytes=main.MAX_JSON_BYTES, route_limits=main.LARGE_BODY_ROUTES)
+        for path, root_path in (("/api/notes", ""), ("/api/notes/", ""), ("/backend/api/notes", "/backend"),
+                                ("/backend/api/tutor/messages/", "/backend/"), ("/api/notes", "/backend")):
+            self.assertEqual(limit.limit_for(path, root_path), main.MAX_REQUEST_BYTES, (path, root_path))
+        for path, root_path in (("/api/tasks", ""), ("/api/notes-extra", ""), ("/backend/api/tasks/", "/backend"),
+                                ("/backendx/api/notes", "/backend")):
+            self.assertEqual(limit.limit_for(path, root_path), main.MAX_JSON_BYTES, (path, root_path))
+        # End to end: an upload under a mount prefix keeps the large cap.
+        from fastapi.testclient import TestClient
+        over_json = b"x" * (main.MAX_JSON_BYTES + 1)
+        client = TestClient(main.app, root_path="/backend")
+        response = client.post("/api/notes/", content=over_json, headers={"Content-Type": "application/json"})
+        self.assertNotEqual(response.status_code, 413)
+
     def test_validation_errors_never_echo_the_input(self):
         from fastapi.testclient import TestClient
         secret = "S3CRET-" + "y" * 5000
