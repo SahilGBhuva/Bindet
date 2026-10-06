@@ -236,6 +236,16 @@ class TutorTests(unittest.TestCase):
         self.assertIsNone(slots.acquire("x", 1, now=1.0))
         self.assertIsNotNone(slots.acquire("x", 1, now=main.TUTOR_STREAM_SLOT_SECONDS + 1))
 
+    def test_a_client_leaving_at_the_first_event_releases_its_stream_slot(self):
+        main.tutor_streams.reset()
+        with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=lambda **_: iter(["Hi"])), \
+                patch.object(main, "StreamingResponse", side_effect=lambda content, **_: content):
+            events = main.send_tutor_message(main.TutorMessageRequest(content="What is a cell?"), "Bearer t")
+            self.assertTrue(next(events).startswith("event: meta"))
+            self.assertIn("alex", main.tutor_streams._slots)
+            events.close()  # what the server does when the client disconnects
+        self.assertEqual(main.tutor_streams._slots, {})
+
     def test_routing_uses_fast_model_for_simple_questions(self):
         self.assertEqual(ai_tutor.tutor_route("What is a cell?", False)["tier"], "fast")
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2

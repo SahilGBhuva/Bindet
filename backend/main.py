@@ -1550,8 +1550,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         chunks: list[str] = []
         saved = False
         user_sent = False
-        yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
         try:
+            # Inside the try, so a client that leaves at the very first event still
+            # releases its stream slot straight away.
+            yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
             for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
                 if not user_sent:
                     user_sent = True
