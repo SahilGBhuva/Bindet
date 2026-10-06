@@ -24,6 +24,8 @@ const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
 // Purely cosmetic preferences that are safe to keep across accounts. Anything
 // that reflects account data (important items, task tabs/notices) is cleared.
 const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2'])
+// Device-level flags that aren't account data and must outlive a sign-out.
+const DEVICE_KEYS = new Set<string>(['bindit-reset-requested'])
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
@@ -76,7 +78,7 @@ export function clearLocalAccountData() {
     const keys: string[] = []
     for (let index = 0; index < localStorage.length; index += 1) {
       const key = localStorage.key(index)
-      if (key && !COSMETIC_KEYS.has(key) && LOCAL_DATA_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.push(key)
+      if (key && !COSMETIC_KEYS.has(key) && !DEVICE_KEYS.has(key) && LOCAL_DATA_PREFIXES.some((prefix) => key.startsWith(prefix))) keys.push(key)
     }
     keys.forEach((key) => localStorage.removeItem(key))
   } catch {
@@ -327,25 +329,30 @@ export async function signIn(email: string, password: string) {
   return session
 }
 
-// Set in sessionStorage when this browser tab asks for a reset link, so a
-// recovery link that arrives without it gets an extra confirmation first.
-const RESET_REQUESTED_KEY = 'bindit:reset-requested'
+// Set in localStorage when this browser asks for a reset link, so a recovery link
+// opened here (in any tab, within RESET_REQUEST_TTL_MS) skips the extra confirmation
+// that a link this browser didn't ask for gets. Not a `bindit:` key, and kept by
+// clearLocalAccountData, because it is written while signed out and must survive
+// until the link is opened.
+const RESET_REQUESTED_KEY = 'bindit-reset-requested'
+const RESET_REQUEST_TTL_MS = 60 * 60 * 1000
 
 export async function requestPasswordReset(email: string) {
   await authRequest('recover', { email }, appReturnUrl())
   try {
-    sessionStorage.setItem(RESET_REQUESTED_KEY, String(Date.now()))
+    localStorage.setItem(RESET_REQUESTED_KEY, String(Date.now()))
   } catch {
     // Without storage the recovery link just asks for confirmation first.
   }
 }
 
-/** True (once) when this browser tab requested a password reset. */
+/** True (once) when this browser requested a password reset within the last hour. */
 export function takeResetRequested() {
   try {
-    const requested = sessionStorage.getItem(RESET_REQUESTED_KEY)
-    sessionStorage.removeItem(RESET_REQUESTED_KEY)
-    return Boolean(requested)
+    const requested = Number(localStorage.getItem(RESET_REQUESTED_KEY))
+    localStorage.removeItem(RESET_REQUESTED_KEY)
+    const age = Date.now() - requested
+    return requested > 0 && age >= 0 && age <= RESET_REQUEST_TTL_MS
   } catch {
     return false
   }
