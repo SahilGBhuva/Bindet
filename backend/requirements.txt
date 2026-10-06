@@ -1,7 +1,7 @@
 # Exact versions of the direct dependencies, matching the tested environment.
 # Upgrade deliberately (and keep pypdf>=6.18, python-multipart>=0.0.22 for their security fixes).
 fastapi==0.141.1
-uvicorn[standard]==0.52.4
+uvicorn[standard]==0.54.0
 eval_type_backport==0.4.0
 sqlalchemy==2.0.52
 psycopg[binary]==3.3.5
