@@ -124,6 +124,32 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(result.mistake_type, 'concept_or_format_error')
         self.assertTrue(result.hint)
 
+    def test_signed_in_answer_is_not_graded_when_the_ai_is_unavailable(self):
+        question_id = main.questions.save_question('student-ai', 'Which organelle makes ATP?', 'Mitochondria', 'Cells', 1)
+        request = main.AnswerRequest(question_id=question_id, student_answer='the powerhouse of the cell')
+
+        def refused(budget_left):
+            with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+                    patch.object(main, 'global_ai_available', return_value=budget_left), \
+                    patch.object(main.ai_tutor, 'grade_answer', side_effect=main.ai_tutor.AITutorError('offline')) as grader:
+                with self.assertRaises(main.HTTPException) as caught:
+                    main.analyze_answer(request, 'Bearer test')
+            self.assertEqual(caught.exception.status_code, 503)
+            self.assertEqual(caught.exception.detail, main.GRADING_UNAVAILABLE)
+            return grader
+
+        refused(budget_left=True)  # the AI grader failed
+        refused(budget_left=False).assert_not_called()  # the shared AI budget is used up
+        # Not marked missed and no attempt recorded: the student can simply resubmit.
+        self.assertEqual(main.questions.get_question('student-ai', question_id)['completed'], main.questions.OPEN)
+        self.assertIsNone(main.database.get_progress('student-ai'))
+        ai_result = {'correct': True, 'score': 100, 'mistake_type': None, 'misconception': None, 'explanation': 'Yes.', 'hint': None}
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+                patch.object(main.ai_tutor, 'grade_answer', return_value=ai_result):
+            result = main.analyze_answer(request, 'Bearer test')
+        self.assertTrue(result.correct)
+        self.assertEqual(result.xp_earned, main.FIRST_TRY_XP)
+
     def test_wrong_arithmetic_is_graded_without_ai(self):
         question_id = self.save_math_question('student-ai')
         with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \

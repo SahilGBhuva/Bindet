@@ -2021,6 +2021,9 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
     )
 
 
+GRADING_UNAVAILABLE = "We couldn’t check this answer right now — try again in a bit."
+
+
 @app.post("/api/analyze-answer", response_model=AnswerResponse)
 def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Header()] = None):
     student_id = verified_student_id(data.student_id, authorization)
@@ -2052,12 +2055,13 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                 database.check_social_rate_limit(student_id, "ai_grading", 120, 1440)
             except ValueError as error:
                 raise social_error(error) from error
+        if authorization and not global_ai_available():
+            # The shared AI budget is used up. Grading offline would mark answers the
+            # AI might accept as wrong, so don't grade at all: the student can resubmit.
+            raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"})
         try:
             if not authorization:
                 raise ai_tutor.AITutorError("Sign in for AI grading")
-            if not global_ai_available():
-                # The shared AI budget is used up: grade with the offline fallback instead.
-                raise ai_tutor.AITutorError("AI budget used up")
             ai_result = ai_tutor.grade_answer(
                 question=question["question"],
                 correct_answer=question["correct_answer"],
@@ -2073,7 +2077,12 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
             explanation = ai_result["explanation"]
             hint = ai_result["hint"]
             grading_source = "ai"
-        except ai_tutor.AITutorError:
+        except ai_tutor.AITutorError as error:
+            if authorization:
+                # The AI grader is unavailable: leave the question open and award or deny
+                # nothing, so the student can resubmit the same answer.
+                raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"}) from error
+            # Guests never get AI grading; they keep the offline fallback.
             correct = False
             score = 0
             mistake_type = classify_mistake(data.student_answer, question["correct_answer"])

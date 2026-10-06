@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { isAbortError, RequestTimeoutError } from '../lib/api'
+import { ApiError, isAbortError, RequestTimeoutError } from '../lib/api'
 import type { AnswerResult, Flashcard, GeneratedQuestion, Topic } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
@@ -656,7 +656,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         correct: result.correct,
       })
     } catch (error) {
-      setQuizError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t check that answer. Try again in a moment.')
+      // A 503 means the grader is busy or offline: the answer wasn't graded, so the
+      // server's message says to resubmit, and Try again sends the same answer.
+      const unavailable = error instanceof ApiError && error.status === 503
+      setQuizError(error instanceof RequestTimeoutError || unavailable ? (error as Error).message : 'Couldn’t check that answer. Try again in a moment.')
       setQuizFailed('check')
     } finally {
       setQuizBusy(false)
