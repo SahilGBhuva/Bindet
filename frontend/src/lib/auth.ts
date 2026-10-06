@@ -35,10 +35,17 @@ function appReturnUrl() {
 }
 
 function config() {
-  configPromise ??= fetch(`${API_URL}/api/auth/config`).then(async (response) => {
-    if (!response.ok) throw new Error('Accounts are not configured yet.')
-    return response.json() as Promise<AuthConfig>
-  })
+  if (!configPromise) {
+    const pending: Promise<AuthConfig> = fetch(`${API_URL}/api/auth/config`).then(async (response) => {
+      if (!response.ok) throw new Error('Accounts are not configured yet.')
+      return response.json() as Promise<AuthConfig>
+    })
+    configPromise = pending
+    // Forget a failed fetch so the next call tries again instead of failing until reload.
+    pending.catch(() => {
+      if (configPromise === pending) configPromise = null
+    })
+  }
   return configPromise
 }
 

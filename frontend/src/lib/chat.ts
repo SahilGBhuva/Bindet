@@ -64,10 +64,17 @@ function cacheGroupMessages(groupId: string, session: AuthSession, messages: Cha
 }
 
 function getConfig() {
-  configPromise ??= fetch(`${API_URL}/api/auth/config`).then(async (response) => {
-    if (!response.ok) throw new Error('Chat is not configured yet.')
-    return response.json() as Promise<SupabaseConfig>
-  })
+  if (!configPromise) {
+    const pending: Promise<SupabaseConfig> = fetch(`${API_URL}/api/auth/config`).then(async (response) => {
+      if (!response.ok) throw new Error('Chat is not configured yet.')
+      return response.json() as Promise<SupabaseConfig>
+    })
+    configPromise = pending
+    // Forget a failed fetch so the next call tries again instead of failing until reload.
+    pending.catch(() => {
+      if (configPromise === pending) configPromise = null
+    })
+  }
   return configPromise
 }
 
