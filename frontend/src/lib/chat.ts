@@ -321,6 +321,8 @@ export async function setGroupTyping(groupId: string, displayName: string, typin
 
 const RECONNECT_MIN_MS = 1200
 const RECONNECT_MAX_MS = 30_000
+// A joined socket that stays up this long counts as healthy and resets the backoff.
+const HEALTHY_RESET_MS = 30_000
 
 type RealtimeChange = { event: 'INSERT'; schema: 'public'; table: string; filter?: string }
 
@@ -331,13 +333,17 @@ type RealtimePacket = {
   payload?: {
     status?: string
     message?: string
+    extension?: string
     data?: { record?: ChatMessage }
   }
 }
 
 /**
  * Opens a realtime channel and keeps it open. Reconnects back off from 1.2s
- * up to 30s (reset after a successful join) and always join with the
+ * up to 30s, and the backoff resets only once the postgres_changes subscription
+ * is confirmed (system status ok) or the socket has stayed joined for
+ * HEALTHY_RESET_MS, so a join that keeps erroring right after never reconnects
+ * faster than the backoff. Reconnects always join with the
  * account's current access token. When the token is refreshed, the new one is
  * sent on the open channel; a rejected join, a closed or errored channel, or a
  * token-expiry notice closes the socket and reconnects with the fresh token.
@@ -353,6 +359,7 @@ function openRealtimeChannel(
   let socket: WebSocket | null = null
   let heartbeat: number | null = null
   let retryTimer: number | null = null
+  let healthyTimer: number | null = null
   let retryDelay = RECONNECT_MIN_MS
   let joined = false
   let sentToken = ''
@@ -363,6 +370,11 @@ function openRealtimeChannel(
   const currentToken = () => {
     const stored = loadAuthSession()
     return stored && stored.user.id === session.user.id ? stored.access_token : session.access_token
+  }
+
+  const clearHealthyTimer = () => {
+    if (healthyTimer) window.clearTimeout(healthyTimer)
+    healthyTimer = null
   }
 
   const reconnect = (current: WebSocket) => {
@@ -425,7 +437,13 @@ function openRealtimeChannel(
         }
         if (packet.ref === joinRef) {
           joined = true
-          retryDelay = RECONNECT_MIN_MS
+          // Joined, but not proven healthy yet: keep the backoff until the subscription
+          // is confirmed or the socket stays up for a while.
+          clearHealthyTimer()
+          healthyTimer = window.setTimeout(() => {
+            healthyTimer = null
+            if (socket === current && joined) retryDelay = RECONNECT_MIN_MS
+          }, HEALTHY_RESET_MS)
           // The token may have been refreshed while the join was in flight.
           pushToken()
         }
@@ -433,6 +451,11 @@ function openRealtimeChannel(
       }
       if (packet.event === 'phx_close' || packet.event === 'phx_error') {
         reconnect(current)
+        return
+      }
+      if (packet.event === 'system' && status === 'ok' && joined && (packet.payload?.extension ?? 'postgres_changes') === 'postgres_changes') {
+        // The database subscription is confirmed: the connection is healthy.
+        retryDelay = RECONNECT_MIN_MS
         return
       }
       if (packet.event === 'system' && (status === 'error' || (status !== 'ok' && /token|expired|jwt/i.test(packet.payload?.message ?? '')))) {
@@ -447,6 +470,7 @@ function openRealtimeChannel(
       if (heartbeat) window.clearInterval(heartbeat)
       heartbeat = null
       joined = false
+      clearHealthyTimer()
       if (closed || socket !== current) return
       retryTimer = window.setTimeout(open, retryDelay)
       retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
@@ -460,6 +484,7 @@ function openRealtimeChannel(
     unsubscribeAuth()
     if (heartbeat) window.clearInterval(heartbeat)
     if (retryTimer) window.clearTimeout(retryTimer)
+    clearHealthyTimer()
     socket?.close()
   }
 }
