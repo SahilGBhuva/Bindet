@@ -9,7 +9,6 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
-from docx import Document
 from pypdf import PdfReader, PdfWriter, apply_configuration
 
 MAX_NOTE_BYTES = 10 * 1024 * 1024
@@ -196,6 +195,9 @@ def extract_text(filename: str, content: bytes) -> str:
             text = extract_pdf_text(content)
         elif suffix == '.docx':
             validate_docx_archive(content)
+            # Imported here, not at the top: the PDF worker child runs this file too and
+            # never needs python-docx, so it starts faster without it.
+            from docx import Document
             document = Document(BytesIO(content))
             text = '\n'.join(paragraph.text for paragraph in document.paragraphs)
         else:

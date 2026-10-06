@@ -254,6 +254,25 @@ class NoteIngestionTests(unittest.TestCase):
             self.assertEqual(main.delete_note(saved["id"], "Bearer test"), {"deleted": True})
         self.assertIsNone(note_store.get_note("student-a", saved["id"]))
 
+class DocxTests(unittest.TestCase):
+    def test_docx_text_is_extracted(self):
+        from docx import Document
+        buffer = BytesIO()
+        document = Document()
+        document.add_paragraph("Mitosis has four phases.")
+        document.save(buffer)
+        text = note_ingestion.extract_text("cells.docx", buffer.getvalue())
+        self.assertIn("Mitosis has four phases.", text)
+
+    def test_pdf_worker_module_does_not_import_docx(self):
+        import subprocess
+        import sys
+        probe = "import sys, note_ingestion; print('docx' in sys.modules)"
+        result = subprocess.run([sys.executable, "-c", probe], cwd=os.path.dirname(os.path.abspath(note_ingestion.__file__)),
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.stdout.strip(), "False", result.stderr)
+
+
 
 if __name__ == "__main__":
     unittest.main()
