@@ -8,6 +8,7 @@ import {
 import type { AuthSession } from '../lib/auth'
 import { loadNotebook } from '../lib/session'
 import { toneForName } from '../lib/tones'
+import { useDrawer } from '../lib/useDrawer'
 import './Goals.css'
 
 /*
@@ -275,9 +276,11 @@ export function Goals({ session }: { session: AuthSession | null }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedId, draft, closePanel])
 
-  /* On phones the panel is a drawer: move focus into it when a task opens. */
+  /* On phones the panel is a drawer: focus moves into it when a task opens, the page behind
+     stays still, Tab stays inside, and focus returns to the task card when it closes. */
+  useDrawer({ open: phone && Boolean(selectedId || draft), onClose: closePanel, panel: panelRef, autoFocus: false })
   useEffect(() => {
-    if (phone && selectedId && !draft) panelRef.current?.focus()
+    if (phone && selectedId && !draft) panelRef.current?.focus({ preventScroll: true })
   }, [phone, selectedId, draft])
 
   const loadDetail = useCallback((taskId: string) => {

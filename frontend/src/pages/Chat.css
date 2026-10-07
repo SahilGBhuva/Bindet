@@ -358,8 +358,19 @@ a.chat-image:hover { border-color: var(--color-border-strong); }
 }
 
 @media (max-width: 860px) {
-  .chat { height: calc(100vh - 52px - 64px); height: calc(100dvh - 52px - 64px - env(safe-area-inset-bottom)); }
-  .app-shell > .sheet.is-chat { min-height: 0; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  /* The room fills the space between the top bar and the tab bar (or the keyboard while typing). */
+  .chat { height: calc(100vh - 52px - 64px); height: calc(100dvh - var(--phone-topbar) - var(--phone-tabbar) - var(--keyboard-inset)); }
+  .app-shell > .sheet.is-chat { min-height: 0; padding-bottom: var(--phone-tabbar); }
+  /* The conversation drawer clears the notch and the home bar. */
+  .chat__list { padding: env(safe-area-inset-top) 0 0 env(safe-area-inset-left); }
+  .chat__list-head { padding: 10px 10px 8px 16px; }
+  .chat__list-head .ui-button { height: 44px; }
+  .chat__group { min-height: 56px; }
+  .chat__list-toggle.ui-button { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .chat__details.ui-button { height: 44px; }
+  .chat__attachments li { max-width: 100%; }
+  .chat__attachments button { width: 40px; height: 40px; }
+  .chat__tools { gap: 4px; padding: 2px 6px 6px; }
   .chat__head { gap: 8px; min-height: 0; padding: 8px 12px; }
   .chat__head > .chat__mark { display: none; }
   .chat__members { display: none; }
@@ -369,9 +380,17 @@ a.chat-image:hover { border-color: var(--color-border-strong); }
   .chat__thread { padding: 16px 14px 16px; }
   .chat__toast { top: 60px; }
   .chat-message__body { max-width: 86%; }
+  .chat__first .ui-button { height: 44px; }
   .chat-image { width: min(260px, 100%); }
   /* Touch: composer tools and send are 40px. */
   .chat__tool,
-  .chat__send { width: 40px; height: 40px; }
+  .chat__send { width: 44px; height: 44px; }
   .chat__input textarea { font-size: 16px; }
+}
+
+/* Landscape phones: a slimmer head so the thread keeps some height. */
+@media (max-width: 860px) and (orientation: landscape) {
+  .chat__head { padding-block: 4px; }
+  .chat__title p { display: none; }
+  .chat__thread { padding-block: 12px; }
 }

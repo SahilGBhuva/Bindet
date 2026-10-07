@@ -8,6 +8,7 @@ import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
 import { MathExpression, MathText } from '../components/math/Math'
+import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import './Tutor.css'
 
 /*
@@ -136,6 +137,11 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const [course, setCourse] = useState(notebook.activeCourse || '')
   const [unit, setUnit] = useState(notebook.activeUnit || '')
   const [listOpen, setListOpen] = useState(false)
+  // Under 1000px the conversation list is a drawer: inert while closed, modal while open.
+  const narrow = useMediaQuery('(max-width: 1000px)')
+  const listPanel = useRef<HTMLElement>(null)
+  const closeList = useCallback(() => setListOpen(false), [])
+  useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
   const [dragActive, setDragActive] = useState(false)
   const [notice, setNotice] = useState('')
   const stopRef = useRef<(() => void) | null>(null)
@@ -379,7 +385,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   return (
     <div className={`tutor${listOpen ? ' is-list-open' : ''}`}>
-      <aside className="tutor__list" aria-label="Conversations">
+      <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
           <span className="ui-eyebrow">Tutor</span>
           <button type="button" className="ui-button ui-button--sm" onClick={newConversation}>
@@ -441,7 +447,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               <div className="tutor__thread-skeleton" aria-label="Loading conversation"><span className="ui-skeleton is-user" /><span className="ui-skeleton" /><span className="ui-skeleton is-short" /></div>
             ) : !thread.length ? (
               <div className="tutor__welcome">
-                <img src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+                <img src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" decoding="async" />
                 <h2>What are we working on?</h2>
                 <p>Ask anything. {course ? <>Answers use your notes for <b>{unit || course}</b> first.</> : 'Pick a course above and answers will use your own notes.'} Drop in a photo of a problem or a diagram if it helps.</p>
                 <div className="tutor__suggestions">
@@ -453,7 +459,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                 {message.role === 'assistant' ? <span className="tutor-message__mark" aria-hidden="true" /> : null}
                 <div className="tutor-message__body">
                   {message.previews?.length ? (
-                    <div className="tutor-message__images">{message.previews.map((src, index) => <img key={src} src={src} alt={message.attachments[index] ?? 'Attached image'} />)}</div>
+                    <div className="tutor-message__images">{message.previews.map((src, index) => <img key={src} src={src} alt={message.attachments[index] ?? 'Attached image'} width="120" height="120" loading="lazy" decoding="async" />)}</div>
                   ) : message.attachments.length ? (
                     <div className="tutor-message__files">{message.attachments.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
                   ) : null}
@@ -483,7 +489,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
             <ul className="tutor__attachments" aria-label="Attached images">
               {attachments.map((item) => (
                 <li key={item.id} className={`is-${item.state}`}>
-                  <img src={item.preview} alt="" />
+                  <img src={item.preview} alt="" width="40" height="40" />
                   <span><b>{item.name}</b><small>{item.state === 'preparing' ? 'Preparing…' : item.state === 'failed' ? item.error : `${Math.max(1, Math.round((item.size ?? 0) / 1024))} KB`}</small></span>
                   <button type="button" onClick={() => removeAttachment(item.id)} aria-label={`Remove ${item.name}`}>×</button>
                 </li>
@@ -500,6 +506,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               onFocus={warmAI}
               placeholder={course ? `Ask about ${unit || course}…` : 'Ask the tutor anything…'}
               aria-label="Message the tutor"
+              enterKeyHint="send"
+              autoCapitalize="sentences"
               rows={1}
               maxLength={4000}
             />

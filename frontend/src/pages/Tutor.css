@@ -86,7 +86,8 @@
 
 .tutor-message { display: flex; gap: 12px; animation: ui-pop var(--duration-base) var(--ease-out); }
 .tutor-message.is-user { justify-content: flex-end; }
-.tutor-message__body { display: grid; gap: 8px; min-width: 0; max-width: 100%; }
+/* One shrinkable column, so a long equation scrolls inside its own box instead of widening the thread. */
+.tutor-message__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; max-width: 100%; }
 .tutor-message.is-user .tutor-message__body { justify-items: end; max-width: min(560px, 88%); }
 .tutor-message__text {
   margin: 0;
@@ -116,7 +117,7 @@
 .tutor-message__mark::before { top: 10px; }
 .tutor-message__mark::after { top: 14px; width: 8px; }
 
-.tutor-rich { color: var(--color-text); font-size: var(--text-md); line-height: 1.65; overflow-wrap: anywhere; }
+.tutor-rich { min-width: 0; color: var(--color-text); font-size: var(--text-md); line-height: 1.65; overflow-wrap: anywhere; }
 .tutor-rich > :first-child { margin-top: 0; }
 .tutor-rich > :last-child { margin-bottom: 0; }
 .tutor-rich p { margin: 0 0 12px; }
@@ -296,13 +297,39 @@
 }
 
 @media (max-width: 860px) {
-  .tutor { height: calc(100dvh - 52px - 64px - env(safe-area-inset-bottom)); }
-  .app-shell > .sheet.is-tutor { padding-bottom: calc(64px + env(safe-area-inset-bottom)); min-height: 0; }
-  .tutor__head { flex-wrap: wrap; min-height: 0; padding: 8px 12px; }
+  /* The room fills the space between the top bar and the tab bar (or the keyboard while typing). */
+  .tutor { height: calc(100vh - 52px - 64px); height: calc(100dvh - var(--phone-topbar) - var(--phone-tabbar) - var(--keyboard-inset)); }
+  .app-shell > .sheet.is-tutor { padding-bottom: var(--phone-tabbar); min-height: 0; }
+  /* The conversation drawer clears the notch and the home bar. */
+  .tutor__list { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left); overscroll-behavior: contain; }
+  .tutor__list ul { overscroll-behavior: contain; }
+  .tutor__list-head { padding: 10px 10px 8px 16px; }
+  .tutor__list-head .ui-button { height: 44px; }
+  .tutor__list-item { min-height: 52px; padding-right: 52px; }
+  /* No hover on touch: the delete button is always shown, at a 44px tap size. */
+  .tutor__list-delete { right: 4px; width: 44px; height: 44px; opacity: 1; }
+  .tutor__head { flex-wrap: wrap; gap: 8px; min-height: 0; padding: 8px 12px; }
+  .tutor__list-toggle.ui-button { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .tutor__context { width: 100%; }
-  .tutor__context .ui-select { flex: 1; max-width: none; }
+  .tutor__context .ui-select { flex: 1; min-width: 0; max-width: none; height: 40px; font-size: 16px; }
   .tutor__hint { visibility: hidden; }
   .tutor__camera { display: grid; }
   .tutor__composer { padding: 0 12px 10px; }
   .tutor__thread { padding: 20px 14px 24px; }
+  .tutor__input textarea { font-size: 16px; }
+  .tutor__tool,
+  .tutor__send { width: 44px; height: 44px; }
+  .tutor__tools { gap: 4px; padding: 2px 6px 6px; }
+  .tutor__attachments li { max-width: 100%; }
+  .tutor__attachments button { width: 40px; height: 40px; }
+  .tutor-message__images img { width: 96px; height: 96px; }
+}
+
+/* Landscape phones: the head shrinks to one row so the thread keeps some height. */
+@media (max-width: 860px) and (orientation: landscape) {
+  .tutor__head { flex-wrap: nowrap; }
+  .tutor__context { width: auto; max-width: 50%; }
+  .tutor__title p { display: none; }
+  .tutor__thread { padding-block: 12px 16px; }
+  .tutor__welcome img { display: none; }
 }

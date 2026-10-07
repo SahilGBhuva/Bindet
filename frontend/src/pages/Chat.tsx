@@ -8,6 +8,7 @@ import {
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import './Chat.css'
 
 /*
@@ -171,7 +172,7 @@ function MessageImage({ message, session }: { message: ChatMessage; session: Aut
   if (!url) return <div ref={holder} className="chat-image is-loading ui-skeleton" role="img" aria-label={`Loading ${name}`} />
   return (
     <a className="chat-image" href={url} target="_blank" rel="noreferrer" aria-label={`Open ${name} in a new tab`}>
-      <img src={url} alt={name} loading="lazy" decoding="async" />
+      <img src={url} alt={name} width="320" height="240" loading="lazy" decoding="async" />
     </a>
   )
 }
@@ -195,6 +196,11 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const [images, setImages] = useState<DraftImage[]>([])
   const [dragActive, setDragActive] = useState(false)
   const [listOpen, setListOpen] = useState(false)
+  // Under 1000px the conversation list is a drawer: inert while closed, modal while open.
+  const narrow = useMediaQuery('(max-width: 1000px)')
+  const listPanel = useRef<HTMLElement>(null)
+  const closeList = useCallback(() => setListOpen(false), [])
+  useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
   const [notice, setNotice] = useState('')
   const [toast, setToast] = useState<{ groupId: string; groupName: string; preview: string } | null>(null)
 
@@ -572,7 +578,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   return (
     <div className={`chat${listOpen ? ' is-list-open' : ''}`}>
-      <aside className="chat__list" aria-label="Conversations" onKeyDown={(event) => { if (event.key === 'Escape') setListOpen(false) }}>
+      <aside ref={listPanel} className="chat__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="chat__list-head">
           <h1>Messages</h1>
           <a className="ui-button ui-button--ghost ui-button--sm" href="#profile">Groups</a>
@@ -695,7 +701,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
             {roomPending.map((item) => (
               <article key={item.key} className={`chat-message is-own is-${item.status}`}>
                 <div className="chat-message__body">
-                  {item.preview ? <span className="chat-image is-local"><img src={item.preview} alt={item.file?.name || 'Image being sent'} /></span> : null}
+                  {item.preview ? <span className="chat-image is-local"><img src={item.preview} alt={item.file?.name || 'Image being sent'} width="320" height="240" decoding="async" /></span> : null}
                   {item.body ? <p className="chat-message__text">{item.body}</p> : null}
                   {item.status === 'sending' && item.progress !== undefined && item.progress < 100 ? (
                     <div className="chat-message__progress" role="progressbar" aria-label="Uploading image" aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress}><i style={{ transform: `scaleX(${item.progress / 100})` }} /></div>
@@ -725,7 +731,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
             <ul className="chat__attachments" aria-label="Images to send">
               {images.map((item) => (
                 <li key={item.id} className={item.error ? 'is-failed' : undefined}>
-                  <img src={item.preview} alt="" />
+                  <img src={item.preview} alt="" width="40" height="40" />
                   <span><b>{item.file.name || 'Image'}</b><small>{item.error ?? formatFileSize(item.file.size)}</small></span>
                   <button type="button" onClick={() => removeImage(item.id)} aria-label={`Remove ${item.file.name || 'image'}`}>×</button>
                 </li>
@@ -741,6 +747,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
               onPaste={onPaste}
               placeholder={activeGroup ? `Message ${activeGroup.name}` : 'Message'}
               aria-label={activeGroup ? `Message ${activeGroup.name}` : 'Message'}
+              enterKeyHint="send"
+              autoCapitalize="sentences"
               rows={1}
               maxLength={2000}
               disabled={!activeGroup}
