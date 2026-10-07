@@ -147,9 +147,9 @@ const GUIDES: Guide[] = [
 ]
 
 const CATEGORIES: { id: FeedbackCategory; label: string }[] = [
-  { id: 'bug', label: 'Something’s broken' },
-  { id: 'idea', label: 'An idea' },
-  { id: 'other', label: 'Something else' },
+  { id: 'bug', label: 'Bug' },
+  { id: 'idea', label: 'Idea' },
+  { id: 'other', label: 'Other' },
 ]
 const MESSAGE_MAX = 2000
 
