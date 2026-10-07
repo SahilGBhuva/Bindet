@@ -495,7 +495,12 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
       const pool = demoTestQuestions(options.course, options.unit)
       const turn = practice.size
       // Each new test starts at a different question, so "New questions" shows a change.
-      const questions = pool.map((_, index) => pool[(index + (options.newQuestions ? turn : 0)) % pool.length]).slice(0, Math.max(1, Math.min(options.count, pool.length)))
+      // Choices are rotated (no randomness, so the demo stays the same for everyone) so the answer isn't always A.
+      const rotate = (choices: string[], by: number) => choices.map((_, index) => choices[(index + by) % choices.length])
+      const questions = pool
+        .map((_, index) => pool[(index + (options.newQuestions ? turn : 0)) % pool.length])
+        .slice(0, Math.max(1, Math.min(options.count, pool.length)))
+        .map((question, index) => (question.choices.length ? { ...question, choices: rotate(question.choices, (index * 3 + 1) % question.choices.length) } : question))
       const id = `demo-test-${turn + 1}`
       const test: PracticeTest = {
         id, course: options.course, unit: options.unit, status: 'in_progress', created_at: new Date(DEMO_NOW + turn * 60_000).toISOString(),

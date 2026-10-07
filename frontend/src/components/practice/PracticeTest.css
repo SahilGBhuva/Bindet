@@ -6,11 +6,12 @@
   gap: var(--space-5);
   min-width: 0;
   padding: var(--space-5) var(--space-6) var(--space-6);
+  scroll-margin-top: var(--space-4);
 }
 
 .practice__head {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3) var(--space-4);
@@ -26,6 +27,7 @@
 
 .practice__head-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
 }
@@ -311,7 +313,7 @@
   margin: 0;
   padding: 0;
   color: var(--color-text);
-  font-size: calc(var(--text-lg) * var(--focus-scale, 1));
+  font-size: var(--text-lg);
   font-weight: var(--weight-medium);
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -347,7 +349,7 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text);
-  font-size: calc(var(--text-md) * var(--focus-scale, 1));
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
   cursor: pointer;
   transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
@@ -402,8 +404,8 @@
 .practice__short .practice__prompt { margin-bottom: var(--space-2); }
 
 .practice__answer-input {
-  height: calc(44px * var(--focus-scale, 1));
-  font-size: max(16px, calc(var(--text-md) * var(--focus-scale, 1)));
+  height: 44px;
+  font-size: max(16px, var(--text-md));
 }
 
 .practice__steps {
@@ -642,7 +644,7 @@
 .practice__review-prompt {
   margin: 0;
   color: var(--color-text);
-  font-size: calc(var(--text-md) * var(--focus-scale, 1));
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -690,17 +692,24 @@
 .practice.is-focus .practice__leave { text-align: center; }
 
 .practice.is-focus .practice__prompt { font-size: calc(22px * var(--focus-scale, 1)); }
+.practice.is-focus .practice__choice,
+.practice.is-focus .practice__review-prompt { font-size: calc(var(--text-md) * var(--focus-scale, 1)); }
+.practice.is-focus .practice__answer-input {
+  height: calc(44px * var(--focus-scale, 1));
+  font-size: max(16px, calc(var(--text-md) * var(--focus-scale, 1)));
+}
 
 /* Phones: one column, finger-sized targets, inputs at 16px so iOS does not zoom. */
 
 @media (max-width: 860px) {
-  .practice { padding: var(--space-4); gap: var(--space-4); }
-  .practice__bar-top { margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0; padding: var(--space-3) var(--space-4); }
+  .practice { padding: var(--space-4); gap: var(--space-4); scroll-margin-top: calc(var(--phone-topbar, 0px) + var(--space-2)); }
+  .practice__bar-top { top: var(--phone-topbar, 0px); margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0; padding: var(--space-3) var(--space-4); }
   .practice__question { padding: var(--space-4); }
   .practice__nav-item { width: 44px; height: 44px; }
   .practice__segmented .ui-segmented__item { min-height: 40px; }
   .practice__minutes-input,
   .practice__instructions .ui-input { min-height: 44px; font-size: 16px; }
+  .practice__bar-actions .tools__focus-toggle,
   .practice__steps .ui-button,
   .practice__submit,
   .practice__flag,

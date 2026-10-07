@@ -102,6 +102,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const questionHeading = useRef<HTMLHeadingElement>(null)
   const resultsHeading = useRef<HTMLHeadingElement>(null)
   const confirmButton = useRef<HTMLButtonElement>(null)
+  const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     mounted.current = true
@@ -270,11 +271,13 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
 
   const onTick = useEffectEvent(() => {
     if (remaining === null || stage !== 'test') return
-    for (const mark of WARNINGS) {
-      if (remaining <= mark && remaining > 0 && !warned.current.has(mark)) {
-        WARNINGS.filter((other) => other >= mark).forEach((other) => warned.current.add(other))
-        setAnnouncement(mark >= 120 ? `${mark / 60} minutes left.` : '1 minute left.')
-      }
+    // Crossing 5 minutes, then 1 minute, is announced once each (a test opened with less
+    // time left announces what is actually left).
+    const crossed = WARNINGS.filter((mark) => remaining <= mark && remaining > 0 && !warned.current.has(mark))
+    if (crossed.length) {
+      crossed.forEach((mark) => warned.current.add(mark))
+      const minutesLeft = Math.max(1, Math.ceil(remaining / 60))
+      setAnnouncement(minutesLeft === 1 ? '1 minute left.' : `${minutesLeft} minutes left.`)
     }
     if (remaining <= 0 && !autoSubmitted.current) {
       autoSubmitted.current = true
@@ -288,6 +291,11 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   useEffect(() => {
     if (stage === 'test') questionHeading.current?.focus({ preventScroll: true })
   }, [stage, current])
+  // Starting (or opening) a test brings it to the top of the screen, below the page header.
+  const testId = test?.id
+  useEffect(() => {
+    if (testId) root.current?.scrollIntoView({ block: 'start' })
+  }, [testId])
   useEffect(() => {
     if (stage === 'results') resultsHeading.current?.focus({ preventScroll: false })
   }, [stage])
@@ -329,7 +337,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const header = (title: string, subtitle?: string, actions?: ReactNode) => (
     <div className="practice__head">
       <div className="practice__head-text">
-        <span className="ui-eyebrow">Practice test · {unit ?? 'Whole course'}</span>
+        <span className="ui-eyebrow">{unit === null ? `Practice test · ${course}` : 'Practice test'}</span>
         <h2 className="practice__title">{title}</h2>
         {subtitle ? <p className="practice__subtitle">{subtitle}</p> : null}
       </div>
@@ -379,7 +387,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
     const busy = stage !== 'setup'
     return (
       <div className="practice practice--setup" role="region" aria-label="Practice test">
-        {header(`Practice test: ${scopeLabel}`, 'A timed test written from your notes. Answers and explanations appear after you submit.',
+        {header(unit ?? 'The whole course', 'A timed test written from your notes. Answers and explanations appear after you submit.',
           <button className="ui-button ui-button--ghost practice__close" type="button" onClick={onClose}>Back</button>)}
         {stage === 'loading' ? (
           <p className="practice__status" role="status"><span className="ui-spinner" />Opening your test…</p>
@@ -474,7 +482,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
     const topics = [...(test.topics ?? [])].sort((a, b) => a.correct / a.total - b.correct / b.total)
     const weak = topics.filter((topic) => topic.weak).map((topic) => topic.topic)
     return (
-      <div className={`practice practice--results${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test results">
+      <div ref={root} className={`practice practice--results${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test results">
         <div className="practice__head">
           <div className="practice__head-text">
             <span className="ui-eyebrow">Practice test · {test.unit ?? 'Whole course'}</span>
@@ -588,7 +596,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const lowTime = remaining !== null && remaining <= 60
   const submittingNow = stage === 'submitting'
   return (
-    <div className={`practice practice--test${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test">
+    <div ref={root} className={`practice practice--test${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test">
       <div className="practice__bar-top">
         <div className="practice__progress-text">
           <span className="ui-eyebrow">Practice test · {test.unit ?? 'Whole course'}</span>
