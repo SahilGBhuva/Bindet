@@ -34,6 +34,17 @@ const OAUTH_FLOW_KEY = 'bindit-oauth-flow'
 // after taking it out of the address bar, before any other script or request runs.
 const OAUTH_RETURN_KEY = 'bindit-auth-return'
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
+// The IndexedDB database holding flashcards saved for offline study (lib/offlineCards.ts).
+export const OFFLINE_DB_NAME = 'bindit-offline'
+
+/* Deletes the offline flashcards. Started synchronously so it is queued even when the page reloads right after. */
+function deleteOfflineStore() {
+  try {
+    indexedDB?.deleteDatabase(OFFLINE_DB_NAME)
+  } catch {
+    // IndexedDB can be unavailable (some private modes); then nothing was saved.
+  }
+}
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
 
@@ -78,7 +89,8 @@ export function loadAuthSession(): AuthSession | null {
 /**
  * Removes everything bindit keeps in this browser for an account: the auth
  * session, notebook, avatar, study session, attempt history, student id and
- * the per-tab caches. In-memory caches listen for ACCOUNT_DATA_CLEARED_EVENT.
+ * the per-tab caches and the offline flashcards. In-memory caches listen for
+ * ACCOUNT_DATA_CLEARED_EVENT.
  */
 export function clearLocalAccountData() {
   try {
@@ -96,13 +108,14 @@ export function clearLocalAccountData() {
   } catch {
     // Same as above.
   }
+  deleteOfflineStore()
   window.dispatchEvent(new Event(ACCOUNT_DATA_CLEARED_EVENT))
 }
 
 /**
  * Ends the signed-in state without touching local-only study data: removes the
  * session, the tab's sessionStorage, the cached server responses (`bindit:` keys
- * other than cosmetic preferences) and in-memory caches. The notebook, attempt
+ * other than cosmetic preferences), the offline flashcards and in-memory caches. The notebook, attempt
  * history, avatar, student id and data owner stay, so the same account gets them
  * back on its next sign-in; claimLocalData wipes them if a different account
  * signs in instead.
@@ -125,6 +138,7 @@ export function clearSignedInState() {
   } catch {
     // Same as above.
   }
+  deleteOfflineStore()
   window.dispatchEvent(new Event(ACCOUNT_DATA_CLEARED_EVENT))
 }
 

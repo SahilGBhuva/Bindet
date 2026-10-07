@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import * as api from './api'
+import * as offlineCards from './offlineCards'
 import * as progress from './progress'
 import * as session from './session'
 
@@ -69,6 +70,9 @@ export type DataSource = {
   transferStudyGroup: typeof api.transferStudyGroup
   // Account (Settings). Always locked in the demo.
   deleteAccount: typeof api.deleteAccount
+  // Flashcards kept on this device for offline study (IndexedDB). The demo keeps none.
+  saveOfflineCards: typeof offlineCards.saveOfflineCards
+  loadOfflineCards: typeof offlineCards.loadOfflineCards
 }
 
 export const realData: DataSource = {
@@ -120,6 +124,8 @@ export const realData: DataSource = {
   deleteStudyGroup: api.deleteStudyGroup,
   transferStudyGroup: api.transferStudyGroup,
   deleteAccount: api.deleteAccount,
+  saveOfflineCards: offlineCards.saveOfflineCards,
+  loadOfflineCards: offlineCards.loadOfflineCards,
 }
 
 const DataContext = createContext<DataSource>(realData)

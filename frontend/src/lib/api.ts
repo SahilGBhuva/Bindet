@@ -194,6 +194,20 @@ export class RequestTimeoutError extends Error {
   }
 }
 
+export const OFFLINE_MESSAGE = 'You’re offline. This needs an internet connection — try again when you’re back online.'
+
+/** The device is offline, so the request was not sent (or could not reach bindit). */
+export class OfflineError extends Error {
+  constructor() {
+    super(OFFLINE_MESSAGE)
+    this.name = 'OfflineError'
+  }
+}
+
+function deviceOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
 export const RATE_LIMITED_MESSAGE = 'You’re doing that too fast. Try again in a minute.'
 export const AI_BREAK_MESSAGE = 'The AI is taking a short break. Try again later.'
 
@@ -258,6 +272,8 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   const token = await resolvedToken(accessToken)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   callerSignal?.throwIfAborted()
+  // Offline: say so at once instead of waiting for the request to fail.
+  if (deviceOffline()) throw new OfflineError()
   // One controller carries both the caller's cancellation and the time budget.
   const controller = new AbortController()
   let timedOut = false
@@ -269,6 +285,7 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
     response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal })
   } catch (error) {
     if (timedOut) throw new RequestTimeoutError()
+    if (deviceOffline() && !isAbortError(error)) throw new OfflineError()
     throw error
   } finally {
     window.clearTimeout(timer)
@@ -333,6 +350,7 @@ export async function uploadNote(file: File, course: string, unit: string, acces
  * switch from "Uploading…" to "Reading your notes…" at the real moment. Errors match request().
  */
 async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: number, onSent: () => void, accessToken?: string): Promise<T> {
+  if (deviceOffline()) throw new OfflineError()
   const token = await resolvedToken(accessToken)
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -355,7 +373,7 @@ async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: numb
       else reject(apiError(xhr.status, data, `bindit could not complete that request (${xhr.status}).`))
     }
     xhr.ontimeout = () => reject(new RequestTimeoutError())
-    xhr.onerror = () => reject(new TypeError('bindit couldn’t be reached. Check your connection and try again.'))
+    xhr.onerror = () => reject(deviceOffline() ? new OfflineError() : new TypeError('bindit couldn’t be reached. Check your connection and try again.'))
     xhr.send(body)
   })
 }

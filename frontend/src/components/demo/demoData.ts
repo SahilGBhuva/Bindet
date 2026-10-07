@@ -463,5 +463,8 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     deleteStudyGroup: locked('manage study groups'),
     transferStudyGroup: locked('manage study groups'),
     deleteAccount: locked('delete an account'),
+    // The demo never touches the visitor's storage: nothing is kept for offline use.
+    saveOfflineCards: () => Promise.resolve(),
+    loadOfflineCards: () => Promise.resolve(null),
   }
 }
