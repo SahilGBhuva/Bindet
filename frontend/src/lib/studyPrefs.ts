@@ -25,3 +25,31 @@ export function saveFocusSize(step: number) {
     // Not saved; the size still applies until the page is closed.
   }
 }
+
+/**
+ * Custom instructions for a unit's quiz or flashcards. Study data, not cosmetic: under
+ * the bindit: prefix but not in COSMETIC_KEYS, so signing out clears them.
+ */
+export const INSTRUCTIONS_MAX = 200
+export type InstructionKind = 'quiz' | 'cards'
+
+export function instructionsKey(kind: InstructionKind, course: string, unit: string) {
+  return `bindit:instructions:${kind}:${course.trim()}|${unit.trim()}`
+}
+
+export function loadInstructions(key: string): string {
+  try {
+    return (localStorage.getItem(key) ?? '').slice(0, INSTRUCTIONS_MAX)
+  } catch {
+    return ''
+  }
+}
+
+export function saveInstructions(key: string, value: string) {
+  try {
+    if (value.trim()) localStorage.setItem(key, value.slice(0, INSTRUCTIONS_MAX))
+    else localStorage.removeItem(key)
+  } catch {
+    // Not saved; the instructions still apply until the page is closed.
+  }
+}

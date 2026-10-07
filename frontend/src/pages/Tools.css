@@ -1333,3 +1333,47 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   .tools__cards.is-focus .tools__card-text { font-size: calc(24px * var(--focus-scale, 1)); }
   .tools__quiz.is-focus .tools__prompt { font-size: calc(21px * var(--focus-scale, 1)); }
 }
+
+/* Custom instructions (quiz and flashcards) */
+.tools__instructions {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  max-width: 660px;
+}
+
+.tools__quiz .tools__instructions { max-width: none; }
+
+.tools__optional {
+  color: var(--color-text-tertiary);
+  font-weight: var(--weight-regular, 400);
+}
+
+.tools__instructions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.tools__instructions-row .ui-input { flex: 1 1 240px; min-width: 0; }
+
+.tools__instructions-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.tools__instructions-meta span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tools__instructions-meta .is-full { color: var(--color-text-secondary); font-weight: var(--weight-semibold); }
+
+.tools__field-error {
+  margin: 0;
+  color: var(--color-danger-text, var(--color-danger));
+  font-size: var(--text-sm);
+}
+
+.tools__cards.is-focus .tools__instructions,
+.tools__quiz.is-focus .tools__instructions { display: none; }

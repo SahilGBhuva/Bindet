@@ -13,7 +13,8 @@ import {
 } from '../lib/session'
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
-import { FOCUS_SIZES, loadFocusSize, saveFocusSize } from '../lib/studyPrefs'
+import { FOCUS_SIZES, INSTRUCTIONS_MAX, instructionsKey, loadFocusSize, loadInstructions, saveFocusSize, saveInstructions } from '../lib/studyPrefs'
+import type { InstructionKind } from '../lib/studyPrefs'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
@@ -270,6 +271,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   // Focus mode: the current card or question, large, with the panel's other controls hidden.
   const [focusMode, setFocusMode] = useState(false)
   const [focusSize, setFocusSize] = useState(() => (data.sandboxed ? 1 : loadFocusSize()))
+  // Custom instructions per unit and kind, as typed (saved on this device), and any rejection.
+  const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({})
+  const [instructionErrors, setInstructionErrors] = useState<Record<string, string>>({})
+  const [remaking, setRemaking] = useState<{ done: number; total: number } | null>(null)
   const [orderOpen, setOrderOpen] = useState(false)
   const [orderDrag, setOrderDrag] = useState('')
   const [lookCourse, setLookCourse] = useState('')
@@ -290,7 +295,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   // Fingerprints of the questions shown most recently, newest first.
   const shownQuestions = useRef<string[]>([])
   // At most one question is fetched ahead per quiz setting; leaving that setting cancels it.
-  const prefetchedQuestions = useRef(new Map<string, { promise: Promise<GeneratedQuestion>; controller: AbortController }>())
+  const prefetchedQuestions = useRef(new Map<string, { promise: Promise<GeneratedQuestion>; controller: AbortController; instructions: string }>())
   const intentTimer = useRef(0)
 
   const courses = notebook.courses
@@ -327,6 +332,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const shortNotes = notesWith('too_short')
   const uploadBusy = Boolean(uploading)
   const quizKey = `${activeCourse}|${activeUnit}|notes:${unitNotes.length}|${quizDifficulty}`
+  const quizInstructionsKey = instructionsKey('quiz', activeCourse, activeUnit)
+  const cardInstructionsKey = instructionsKey('cards', activeCourse, activeUnit)
+  const instructionsFor = (key: string) => instructionDrafts[key] ?? (data.sandboxed ? '' : loadInstructions(key))
+  const quizInstructions = instructionsFor(quizInstructionsKey)
+  const cardInstructions = instructionsFor(cardInstructionsKey)
 
   useEffect(() => {
     data.saveNotebook(notebook)
@@ -821,7 +831,13 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
   async function loadQuizQuestion() {
     const sequence = ++quizSequence.current
-    const prefetched = prefetchedQuestions.current.get(quizKey)
+    const stored = prefetchedQuestions.current.get(quizKey)
+    // A question fetched ahead with other instructions is not the one asked for now.
+    if (stored && stored.instructions !== quizInstructions.trim()) {
+      stored.controller.abort()
+      prefetchedQuestions.current.delete(quizKey)
+    }
+    const prefetched = stored && stored.instructions === quizInstructions.trim() ? stored : undefined
     // The question on screen is never shown again as the "new" one; the last few are avoided when possible.
     const onScreen = quizQuestion ? questionFingerprint(quizQuestion.question) : ''
     const repeats = (question: GeneratedQuestion) => {
@@ -851,7 +867,13 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       primeNextQuestion()
     } catch (error) {
       if (sequence === quizSequence.current && !isAbortError(error)) {
-        setQuizError(quizLoadFailure(error))
+        if (error instanceof ApiError && error.code === 'instructions_rejected') {
+          // Shown under the instructions field; the question area says what to do.
+          setInstructionErrors((current) => ({ ...current, [quizInstructionsKey]: error.message }))
+          setQuizError('Change or clear your instructions to get a new question.')
+        } else {
+          setQuizError(quizLoadFailure(error))
+        }
         setQuizFailed('load')
       }
     } finally {
@@ -876,6 +898,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         : undefined,
       accessToken,
       signal,
+      quizInstructions.trim() || undefined,
     )
   }
 
@@ -883,7 +906,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const key = quizKey
     if (prefetchedQuestions.current.has(key)) return
     const controller = new AbortController()
-    const entry = { promise: requestQuizQuestion(controller.signal), controller }
+    const entry = { promise: requestQuizQuestion(controller.signal), controller, instructions: quizInstructions.trim() }
     prefetchedQuestions.current.set(key, entry)
     // A failed prefetch is simply dropped; the next question is then fetched on demand.
     void entry.promise.catch(() => { if (prefetchedQuestions.current.get(key) === entry) prefetchedQuestions.current.delete(key) })
@@ -1193,6 +1216,94 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </div>
   ) : null
   const loadingQuestion = quizBusy && !quizChecking
+
+  function setInstructions(key: string, value: string) {
+    const next = value.slice(0, INSTRUCTIONS_MAX)
+    setInstructionDrafts((current) => ({ ...current, [key]: next }))
+    setInstructionErrors((current) => {
+      if (!(key in current)) return current
+      const rest = { ...current }
+      delete rest[key]
+      return rest
+    })
+    if (!data.sandboxed) saveInstructions(key, next)
+  }
+
+  // Replaces each note's flashcards with new ones made using the unit's instructions, one note at a time.
+  async function remakeCards() {
+    const instructions = cardInstructions.trim()
+    const notes = unitNotes.filter((note) => cardsFor(note)?.status !== 'too_short' && !generatingNotes.current.has(note.id))
+    if (!instructions || !notes.length || remaking) return
+    if (!data.confirm(`Replace the flashcards for ${plural(notes.length, 'note')} in ${activeUnit} with new ones made with your instructions?`)) return
+    const key = cardInstructionsKey
+    setRemaking({ done: 0, total: notes.length })
+    try {
+      for (const [index, note] of notes.entries()) {
+        if (!mounted.current) return
+        const before = noteCards[note.id]
+        generatingNotes.current.add(note.id)
+        setNoteCards((current) => ({ ...current, [note.id]: { status: 'generating', count: 0, error: '', retry: false } }))
+        try {
+          const result = await data.remakeNoteFlashcards(note.id, instructions, accessToken)
+          if (!mounted.current) return
+          setSavedCards((current) => mergeCards(current.filter((item) => item.note_id !== note.id), result.cards))
+          setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
+          setCardIndex(0)
+          setCardFlipped(false)
+        } catch (error) {
+          if (!mounted.current) return
+          // The note keeps its old cards; say what went wrong under the field and stop.
+          setNoteCards((current) => {
+            const next = { ...current }
+            if (before) next[note.id] = before
+            else delete next[note.id]
+            return next
+          })
+          const message = error instanceof ApiError && error.code === 'instructions_rejected'
+            ? error.message
+            : `Couldn’t make new cards for “${note.fileName}”: ${flashcardFailure(error).error}`
+          setInstructionErrors((current) => ({ ...current, [key]: message }))
+          return
+        } finally {
+          generatingNotes.current.delete(note.id)
+        }
+        setRemaking({ done: index + 1, total: notes.length })
+      }
+      setNotice(`Made new flashcards for ${plural(notes.length, 'note')} in ${activeUnit}.`)
+    } finally {
+      if (mounted.current) setRemaking(null)
+    }
+  }
+
+  const instructionsField = (kind: InstructionKind, key: string, value: string, action?: React.ReactNode) => {
+    const id = `instructions-${kind}`
+    const error = instructionErrors[key]
+    return (
+      <div className="tools__instructions">
+        <label className="tools__label" htmlFor={id}>Instructions <span className="tools__optional">optional</span></label>
+        <div className="tools__instructions-row">
+          <input
+            id={id}
+            className="ui-input"
+            type="text"
+            value={value}
+            maxLength={INSTRUCTIONS_MAX}
+            onChange={(event) => setInstructions(key, event.target.value)}
+            placeholder="e.g. focus on vocabulary, make them harder, use fill-in-the-blank"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={`${id}-meta${error ? ` ${id}-error` : ''}`}
+            autoComplete="off"
+          />
+          {action}
+        </div>
+        <p className="tools__instructions-meta" id={`${id}-meta`}>
+          <span>{kind === 'quiz' ? 'Used for your next questions in this unit.' : 'Your saved cards change only when you make new ones.'}</span>
+          <span className={value.length >= INSTRUCTIONS_MAX ? 'is-full' : ''}>{value.length}/{INSTRUCTIONS_MAX}</span>
+        </p>
+        {error ? <p className="tools__field-error" id={`${id}-error`} role="alert">{error}</p> : null}
+      </div>
+    )
+  }
 
   function changeFocusSize(step: number) {
     const next = Math.max(0, Math.min(FOCUS_SIZES.length - 1, step))
@@ -1628,6 +1739,17 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     </div>
                   )}
                   {deckStatus}
+                  {unitNotes.length && !libraryLoading ? instructionsField('cards', cardInstructionsKey, cardInstructions, (
+                    <button
+                      className={`ui-button${remaking ? ' is-busy' : ''}`}
+                      type="button"
+                      onClick={() => void remakeCards()}
+                      disabled={!cardInstructions.trim() || Boolean(remaking) || makingNotes.length > 0}
+                    >
+                      Make new cards with these instructions
+                    </button>
+                  )) : null}
+                  {remaking ? <p className="tools__status" role="status"><span className="ui-spinner" />Making new cards… {remaking.done} of {remaking.total} notes</p> : null}
                 </div>
               ) : null}
 
@@ -1654,6 +1776,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       {focusControls}
                     </div>
                   </div>
+
+                  {instructionsField('quiz', quizInstructionsKey, quizInstructions)}
 
                   <div className={`tools__question${loadingQuestion ? ' is-loading' : ''}`} aria-busy={quizBusy}>
                     {loadingQuestion || (!quizQuestion && !quizError) ? (

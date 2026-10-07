@@ -36,6 +36,7 @@ export type DataSource = {
   listNotes: typeof api.listNotes
   listFlashcards: typeof api.listFlashcards
   generateNoteFlashcards: typeof api.generateNoteFlashcards
+  remakeNoteFlashcards: typeof api.remakeNoteFlashcards
   generateQuestion: typeof api.generateQuestion
   analyzeAnswer: typeof api.analyzeAnswer
   uploadNote: typeof api.uploadNote
@@ -83,6 +84,7 @@ export const realData: DataSource = {
   listNotes: api.listNotes,
   listFlashcards: api.listFlashcards,
   generateNoteFlashcards: api.generateNoteFlashcards,
+  remakeNoteFlashcards: api.remakeNoteFlashcards,
   generateQuestion: api.generateQuestion,
   analyzeAnswer: api.analyzeAnswer,
   uploadNote: api.uploadNote,

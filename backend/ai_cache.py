@@ -137,9 +137,13 @@ def flashcard_version() -> str:
     )
 
 
-def flashcard_key(*, course: str, unit: str, file_name: str, source_text: str) -> str:
-    """source_text is the note text exactly as sent to the model (after flashcard_source_text)."""
-    return make_key("flashcards", flashcard_version(), course, unit, file_name, source_text)
+def flashcard_key(*, course: str, unit: str, file_name: str, source_text: str, instructions_hash: str = "") -> str:
+    """source_text is the note text exactly as sent to the model (after flashcard_source_text).
+    Cards made with student instructions are keyed by their hash too (ai_tutor.instructions_hash)."""
+    parts = ["flashcards", flashcard_version(), course, unit, file_name, source_text]
+    if instructions_hash:
+        parts += ["instructions", instructions_hash]
+    return make_key(*parts)
 
 
 def cached_flashcards(key: str) -> list[dict] | None:

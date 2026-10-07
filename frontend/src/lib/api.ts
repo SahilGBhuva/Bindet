@@ -322,7 +322,7 @@ export function moveNotes(scope: { course: string; unit?: string; newCourse: str
   }, accessToken)
 }
 
-export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string, signal?: AbortSignal) {
+export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string, signal?: AbortSignal, instructions?: string) {
   return request<GeneratedQuestion>('/api/generate-question', {
     method: 'POST',
     body: JSON.stringify({
@@ -330,6 +330,7 @@ export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQ
       difficulty,
       student_id: getStudentId(),
       notes: notes ?? undefined,
+      instructions: instructions?.trim() || undefined,
     }),
     signal,
     timeoutMs: AI_TIMEOUTS.question,
@@ -346,6 +347,16 @@ export function generateNoteFlashcards(noteId: string, options?: { retry?: boole
   const query = options?.retry ? '?retry=1' : ''
   return request<NoteFlashcardsResult>(`/api/notes/${encodeURIComponent(noteId)}/flashcards${query}`, {
     method: 'POST',
+    signal,
+    timeoutMs: AI_TIMEOUTS.flashcards,
+  }, accessToken)
+}
+
+/* Replaces a note's flashcards with new ones made using the student's instructions. Asking again with the same instructions returns the saved cards. */
+export function remakeNoteFlashcards(noteId: string, instructions: string, accessToken?: string, signal?: AbortSignal) {
+  return request<NoteFlashcardsResult>(`/api/notes/${encodeURIComponent(noteId)}/flashcards/remake`, {
+    method: 'POST',
+    body: JSON.stringify({ instructions }),
     signal,
     timeoutMs: AI_TIMEOUTS.flashcards,
   }, accessToken)

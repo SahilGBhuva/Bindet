@@ -268,11 +268,29 @@ def neutral_personalization(target_topic: str) -> dict:
     }
 
 
-def question_cache_key(student_id: str, course: str, unit: str, focus: str, difficulty: int, source_text: str) -> str:
-    """Share generic questions, while keeping note-grounded (personalized) questions private."""
-    owner_scope = "shared" if question_scope_is_shared(source_text) else student_id
+def question_cache_key(student_id: str, course: str, unit: str, focus: str, difficulty: int, source_text: str, instructions_hash: str = "") -> str:
+    """Share generic questions, while keeping note-grounded (personalized) questions private.
+    Questions made with a student's instructions are personal too, and keyed by their hash."""
+    owner_scope = "shared" if question_scope_is_shared(source_text) and not instructions_hash else student_id
     source_fingerprint = hashlib.blake2s(source_text.encode("utf-8"), digest_size=12).hexdigest() if source_text else "none"
-    return ai_session_id(owner_scope, course, unit, focus, str(difficulty), source_fingerprint)
+    parts = [owner_scope, course, unit, focus, str(difficulty), source_fingerprint]
+    if instructions_hash:
+        parts.append("instructions:" + instructions_hash)
+    return ai_session_id(*parts)
+
+
+def instructions_error() -> HTTPException:
+    return HTTPException(status_code=400, detail={"code": "instructions_rejected", "message": ai_tutor.INSTRUCTIONS_REJECTED})
+
+
+def checked_instructions(raw: str | None, student_id: str, op: str) -> str:
+    """Cleaned instructions ("" for none), or a 400 for ones that try to steer the model
+    off task. Runs before any quota, budget or model call."""
+    instructions = ai_tutor.clean_instructions(raw)
+    if ai_tutor.instructions_rejected(instructions):
+        ai_tutor.log_ai_event(op, outcome="instructions_rejected", student_id=student_id)
+        raise instructions_error()
+    return instructions
 
 
 # Database row IDs (32-bit integer columns). Anything outside this range can't exist,
@@ -331,6 +349,9 @@ class QuestionRequest(BaseModel):
     difficulty: int = Field(default=1, ge=1, le=3)
     student_id: str = Field(default="anonymous", min_length=1, max_length=GUEST_ID_MAX_LENGTH)
     notes: NoteContext | None = None
+    # Optional student steering ("focus on vocabulary"). Untrusted: cleaned, screened and
+    # sent only inside a delimited block of the user message (see ai_tutor.PREFERENCES_RULE).
+    instructions: str | None = Field(default=None, max_length=200)
 
 
 class GeneratedQuestion(BaseModel):
@@ -2064,6 +2085,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
     has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
     if has_school_context and data.notes:
         student_id = auth.authenticated_user(authorization)["id"]
+        instructions = checked_instructions(data.instructions, student_id, "generate_quiz")
         ai_tutor.warm_connection()
         course, unit = data.notes.course.strip(), data.notes.unit.strip()
         target_topic = unit or course
@@ -2074,8 +2096,10 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             (note_store.context_for, student_id, course, unit),
             (questions.recent_questions, student_id),
         )
-        cache_key = question_cache_key(student_id, course, unit, data.topic, difficulty, source_text)
-        if question_scope_is_shared(source_text):
+        steering = ai_tutor.instructions_hash(instructions)
+        cache_key = question_cache_key(student_id, course, unit, data.topic, difficulty, source_text, steering)
+        shared = question_scope_is_shared(source_text) and not steering
+        if shared:
             # Shared bank: the model gets no student data. Only the difficulty (part of the
             # key) adapts to the student.
             personalization = neutral_personalization(target_topic)
@@ -2089,7 +2113,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         else:
             _rate_limited(student_id, "ai_question", 40, 1440)
             ai_question = fresh_quiz_question(
-                student_id=student_id, cache_key=cache_key, recent=recent, shared=question_scope_is_shared(source_text),
+                student_id=student_id, cache_key=cache_key, recent=recent, shared=shared, instructions=instructions,
                 course=course, unit=unit, source_labels=source_labels, focus=data.topic, difficulty=difficulty,
                 personalization=personalization, source_text=source_text,
                 session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
@@ -2290,6 +2314,85 @@ def make_note_flashcards(
         raise HTTPException(status_code=404, detail="Note not found")
     ai_cache.store_flashcards(cache_key, batch.cards)
     log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
+    return _note_flashcards_result(note_id, "ready", True, stored)
+
+
+class NoteFlashcardsRemake(BaseModel):
+    """Remake one note's cards, steered by the student's instructions (untrusted, see ai_tutor)."""
+    model_config = ConfigDict(extra="forbid")
+    instructions: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/api/notes/{note_id}/flashcards/remake")
+def remake_note_flashcards(
+    note_id: Annotated[str, PathParam(min_length=1, max_length=64)],
+    data: NoteFlashcardsRemake,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Replace a note's cards with ones made using the student's instructions.
+
+    Idempotent per (note, instructions): asking again with the same instructions returns
+    the stored cards without an AI call. Counts against the same daily flashcard limit as
+    normal generation, and the cards pass the same validation and grounding check.
+    """
+    owner = auth.authenticated_user(authorization)["id"]
+    instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
+    if not instructions:
+        raise instructions_error()
+    steering = ai_tutor.instructions_hash(instructions)
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
+    flashcards.init_flashcards()
+    note, state, style = gather((note_store.get_note, owner, note_id), (flashcards.job_state, owner, note_id), (flashcards.style_of, owner, note_id))
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if state["status"] == "generating" and not state["interrupted"]:
+        raise ai_error(409, "generation_in_progress")
+    if state["status"] == "ready" and style == steering:
+        return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
+    text = ai_tutor.flashcard_source_text(note["text"])
+    if ai_tutor.note_too_short(text):
+        return _note_flashcards_result(note_id, "too_short", False, [])
+    cache_key = ai_cache.flashcard_key(course=note["course"], unit=note["unit"], file_name=note["file_name"], source_text=text, instructions_hash=steering)
+    cached = ai_cache.cached_flashcards(cache_key)
+    reused = ai_tutor.clean_flashcards(cached, text, ai_tutor.flashcard_target(text), default_topic=note["unit"] or note["course"])[0] if cached else []
+    # Every remake counts against the same daily limit as a first generation (only an
+    # identical repeat, answered above from the stored cards, is free); the AI budget is
+    # spent only when the model is called.
+    flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
+    if not reused:
+        flashcard_budget()
+    outcome, attempt = flashcards.claim_regeneration(owner, note_id)
+    if outcome != "claimed":
+        raise ai_error(409, "generation_in_progress")
+    if reused:
+        new_cards = reused
+        log("cache_hit", cards_kept=len(reused))
+    else:
+        ai_tutor.warm_connection()
+        try:
+            batch = ai_tutor.generate_note_flashcards(
+                course=note["course"], unit=note["unit"], file_name=note["file_name"], note_text=text,
+                session_id=ai_session_id(owner, note_id, "flashcards"), instructions=instructions,
+            )
+        except ai_tutor.AIBadOutput as exc:
+            flashcards.release(owner, note_id, attempt, "ai_bad_output")
+            log("bad_output", error=exc)
+            raise ai_error(503, "ai_bad_output", retry_after=30) from exc
+        except ai_tutor.AITutorError as exc:
+            flashcards.release(owner, note_id, attempt, "ai_unavailable")
+            log("ai_error", error=exc)
+            raise ai_error(503, "ai_unavailable", retry_after=30) from exc
+        except BaseException as exc:
+            flashcards.release(owner, note_id, attempt, "ai_unavailable")
+            log("ai_error", error=exc)
+            raise
+        new_cards = batch.cards
+        ai_cache.store_flashcards(cache_key, batch.cards)
+        log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
+    stored = flashcards.replace(owner, note_id, note["course"], note["unit"], new_cards, steering)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Note not found")
     return _note_flashcards_result(note_id, "ready", True, stored)
 
 

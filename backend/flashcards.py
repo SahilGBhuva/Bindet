@@ -61,7 +61,17 @@ jobs = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
-FLASHCARD_TABLES = ("flashcards", "flashcard_jobs")
+# Which student instructions a note's current cards were made with (no row: none).
+# Holds only a hash, so asking again with the same instructions is answered from the stored cards.
+styles = Table(
+    "flashcard_styles", flashcard_metadata,
+    Column("note_id", String(36), primary_key=True),
+    Column("owner_id", String(100), nullable=False, index=True),
+    Column("instructions_hash", String(64), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+FLASHCARD_TABLES = ("flashcards", "flashcard_jobs", "flashcard_styles")
 STATUSES = ("ready", "generating", "failed", "too_short", "none")
 # A generation that has said `generating` this long crashed or was cut off.
 STALE_SECONDS = 90
@@ -194,6 +204,87 @@ def claim(owner_id: str, note_id: str, *, retry: bool = False) -> tuple[str, int
     return "claimed", attempt
 
 
+# --- Remaking a note's cards with student instructions --------------------------------
+
+def style_of(owner_id: str, note_id: str) -> str | None:
+    """The instructions hash the note's current cards were made with, or None."""
+    init_flashcards()
+    with database.engine().connect() as connection:
+        return connection.execute(select(styles.c.instructions_hash).where(
+            styles.c.note_id == note_id, styles.c.owner_id == owner_id)).scalar_one_or_none()
+
+
+def claim_regeneration(owner_id: str, note_id: str) -> tuple[str, int | None]:
+    """Start remaking a note's cards, whatever state they are in, unless they are being made
+    right now. Returns ("claimed", attempt) or ("generating", None). The old cards stay
+    until replace() swaps them, so a failed remake loses nothing (see release())."""
+    init_flashcards()
+    now = _now()
+    try:
+        with _guard(), database.engine().begin() as connection:
+            _lock_note(connection, note_id)
+            row = _job_row(connection, owner_id, note_id, for_update=True)
+            if row is not None and row["status"] == "generating" and not _is_stale(row, now):
+                return "generating", None
+            attempt = int(row["attempts"] or 0) + 1 if row is not None else 1
+            values = {"status": "generating", "attempts": attempt, "error": None, "started_at": now, "updated_at": now}
+            if row is None:
+                connection.execute(jobs.insert().values(note_id=note_id, owner_id=owner_id, card_count=0, **values))
+            else:
+                connection.execute(update(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id).values(**values))
+    except IntegrityError:
+        return "generating", None
+    return "claimed", attempt
+
+
+def release(owner_id: str, note_id: str, attempt: int, code: str) -> None:
+    """A remake failed: the note keeps its old cards (ready) or, with none, is marked failed."""
+    init_flashcards()
+    with _guard(), database.engine().begin() as connection:
+        count = connection.execute(select(func.count()).select_from(cards).where(
+            cards.c.note_id == note_id, cards.c.owner_id == owner_id)).scalar_one()
+        values = ({"status": "ready", "card_count": int(count), "error": None} if count
+                  else {"status": "failed", "error": SAFE_ERRORS.get(code, SAFE_ERRORS["ai_unavailable"])[:200]})
+        connection.execute(update(jobs).where(
+            jobs.c.note_id == note_id, jobs.c.owner_id == owner_id, jobs.c.status == "generating", jobs.c.attempts == attempt,
+        ).values(updated_at=_now(), **values))
+
+
+def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list[dict], instructions_hash: str) -> list[dict] | None:
+    """Swap the note's cards for new_cards and record the instructions they were made with,
+    in one transaction. Returns the stored cards, or None if the note was deleted meanwhile."""
+    init_flashcards()
+    now = _now()
+    with _guard(), database.engine().begin() as connection:
+        _lock_note(connection, note_id)
+        notes = note_store.notes
+        if connection.execute(select(notes.c.id).where(notes.c.id == note_id, notes.c.student_id == owner_id)).first() is None:
+            connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
+            connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
+            connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
+            return None
+        connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
+        _insert_ignoring_duplicates(connection, [
+            {
+                "id": str(uuid.uuid4()), "owner_id": owner_id, "note_id": note_id, "course": course[:120], "unit": unit[:160],
+                "front": card["front"][:300], "back": card["back"][:700], "topic": card["topic"][:60],
+                "front_key": ai_tutor.front_key(card["front"]), "position": position, "created_at": now,
+            }
+            for position, card in enumerate(new_cards)
+        ])
+        count = connection.execute(select(func.count()).select_from(cards).where(cards.c.note_id == note_id)).scalar_one()
+        values = {"status": "ready", "card_count": int(count), "error": None, "updated_at": now}
+        if _job_row(connection, owner_id, note_id, for_update=True) is None:
+            connection.execute(jobs.insert().values(note_id=note_id, owner_id=owner_id, attempts=1, started_at=now, **values))
+        else:
+            connection.execute(update(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id).values(**values))
+        connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
+        connection.execute(styles.insert().values(note_id=note_id, owner_id=owner_id, instructions_hash=instructions_hash, updated_at=now))
+        rows = connection.execute(select(cards).where(cards.c.owner_id == owner_id, cards.c.note_id == note_id)
+                                  .order_by(cards.c.position, cards.c.created_at)).mappings().all()
+    return [_card(row) for row in rows]
+
+
 def mark_too_short(owner_id: str, note_id: str) -> None:
     """Record that the note is too short for flashcards (unless it already has cards or is generating)."""
     init_flashcards()
@@ -259,6 +350,8 @@ def complete(owner_id: str, note_id: str, course: str, unit: str, new_cards: lis
             ])
             count = connection.execute(select(func.count()).select_from(cards).where(cards.c.note_id == note_id)).scalar_one()
             values = {"status": "ready", "card_count": int(count), "error": None, "updated_at": now}
+            # Plain (instruction-less) cards: the note no longer holds an instructed set alone.
+            connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
             if row is None:
                 connection.execute(jobs.insert().values(note_id=note_id, owner_id=owner_id, attempts=1, started_at=now, **values))
             else:
@@ -316,6 +409,7 @@ def delete_note_and_cards(owner_id: str, note_id: str) -> bool:
             return False
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
+        connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
     return True
 
 
@@ -346,3 +440,4 @@ def reset_flashcards() -> None:
     with database.engine().begin() as connection:
         connection.execute(delete(cards))
         connection.execute(delete(jobs))
+        connection.execute(delete(styles))
