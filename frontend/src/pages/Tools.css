@@ -1377,3 +1377,6 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 
 .tools__cards.is-focus .tools__instructions,
 .tools__quiz.is-focus .tools__instructions { display: none; }
+
+.tools__quiz.is-focus .tools__answer { align-items: stretch; }
+.tools__quiz.is-focus .tools__answer .ui-button { height: auto; min-height: calc(48px * var(--focus-scale, 1)); font-size: var(--text-md, 16px); }
