@@ -8,6 +8,7 @@ import {
   getCachedProfile,
   getCachedStudyGroups,
   getGroupAnalytics,
+  localDay,
   getStudyGroups,
   getTasks,
   notifyGroup,
@@ -137,7 +138,7 @@ export function ProjectStats({ session }: { session: AuthSession | null }) {
   useEffect(() => {
     if (!token || !groupId) return
     let active = true
-    getGroupAnalytics(groupId, token)
+    getGroupAnalytics(groupId, token, localDay())
       .then((data) => {
         if (!active) return
         setAnalytics((current) => ({ ...current, [groupId]: data }))

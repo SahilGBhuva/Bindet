@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import {
   ApiError, addTaskChecklistItem, addTaskComment, addTaskLink, createTask, deleteTask, deleteTaskAttachment, deleteTaskChecklistItem,
   getCachedFriends, getCachedStudyGroups, getCachedTasks, getFriends, getStudyGroups, getTask, getTasks, parseServerTime,
@@ -153,6 +153,23 @@ function usePhone() {
   return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false)
 }
 
+/* `#goals?task=<id>` (sidebar, Home) opens that task; `#goals?new` (search palette) starts a new one. */
+type TaskLink = { task: string } | { compose: true }
+
+function readTaskLink(): TaskLink | null {
+  const [screen, query = ''] = window.location.hash.replace(/^#/, '').split('?')
+  if (screen !== 'goals' || !query) return null
+  const params = new URLSearchParams(query)
+  const task = params.get('task')
+  if (task) return { task }
+  return params.has('new') ? { compose: true } : null
+}
+
+/* Once handled, the link is dropped from the address bar so the same link works again later. */
+function clearTaskLink() {
+  if (/^#goals\?/.test(window.location.hash)) window.history.replaceState(window.history.state, '', '#goals')
+}
+
 /* ---------- icons ---------- */
 
 type IconName = 'triangle' | 'people' | 'rect' | 'square-plus' | 'edit' | 'pencil' | 'list' | 'board' | 'settings' | 'close-box' | 'close'
@@ -210,6 +227,10 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [today] = useState(() => isoDay(new Date()))
   const [reload, setReload] = useState(0)
+  const [fetched, setFetched] = useState(false)
+  const [link, setLink] = useState<TaskLink | null>(readTaskLink)
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null)
+  const [linksHandled, setLinksHandled] = useState(0)
   const pendingDetails = useRef(new Set<string>())
   const pendingDeletes = useRef(new Map<string, { timer: number; task: Task }>())
   const panelRef = useRef<HTMLElement>(null)
@@ -233,6 +254,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
       if (social.status === 'fulfilled') setNotice(latestTaskNotice(social.value.notifications))
       setLoaded(true)
+      setFetched(true)
     })
     return () => { cancelled = true }
   }, [token, reload])
@@ -298,6 +320,51 @@ export function Goals({ session }: { session: AuthSession | null }) {
   }, [])
 
   const compose = useCallback((next: Draft) => { setSelectedId(null); setDraft(next) }, [])
+
+  useEffect(() => {
+    const sync = () => setLink(readTaskLink())
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
+
+  /* Follow a deep link once the task is known: the right tab, selected, and scrolled into view.
+     An id that isn't among the student's tasks (after a fresh load) is ignored. Resolved while
+     rendering, so the page never paints the wrong tab first. */
+  if (link) {
+    const target = 'task' in link ? tasks.find((task) => task.id === link.task) : undefined
+    if ('compose' in link) {
+      setSelectedId(null)
+      setDraft({ group_id: null })
+    } else if (target) {
+      const personal = !target.group_id || target.assignees.some((person) => person.student_id === me)
+      setTabState(personal ? 'mine' : 'group')
+      if (target.status === 'done') setShowDoneState(true)
+      setDraft(null)
+      setSelectedId(target.id)
+      setPanelClosed(false)
+      setScrollTarget(target.id)
+    }
+    if ('compose' in link || target || fetched || !token) {
+      setLink(null)
+      setLinksHandled((count) => count + 1)
+    }
+  }
+
+  // Remember the tab a link switched to, and drop the handled link from the address bar.
+  useEffect(() => {
+    if (!linksHandled) return
+    writePref('bindit:tasks:tab', tab)
+    clearTaskLink()
+  }, [linksHandled, tab])
+
+  useEffect(() => {
+    if (!scrollTarget) return
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector(`[data-task-id="${CSS.escape(scrollTarget)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      setScrollTarget(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [scrollTarget])
 
   const replaceTask = useCallback((taskId: string, next: Task | null) => {
     setTasks((current) => next ? current.map((task) => task.id === taskId ? next : task) : current.filter((task) => task.id !== taskId))
@@ -596,7 +663,7 @@ function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { 
   const pending = task.id.startsWith('temp-')
   const isSelected = task.id === selectedId
   return (
-    <li className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
+    <li data-task-id={task.id} className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
       draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
@@ -824,6 +891,23 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
 }
 
 const ASSIGNEE_SAVE_DELAY_MS = 600
+const DESCRIPTION_SAVE_DELAY_MS = 800
+
+type PanelFields = { title: string; description: string; location: string; course: string }
+
+/* What the panel's text fields hold that the task doesn't yet: only fields this student may change. */
+function unsavedFields(task: Task, fields: PanelFields): TaskInput {
+  const changes: TaskInput = {}
+  if (task.id.startsWith('temp-')) return changes
+  const title = fields.title.trim()
+  if (task.can_manage && title && title !== task.title) changes.title = title
+  if (task.can_edit) {
+    if (fields.description !== task.description) changes.description = fields.description
+    if (fields.location.trim() !== task.location) changes.location = fields.location.trim()
+    if (fields.course.trim() !== task.course) changes.course = fields.course.trim()
+  }
+  return changes
+}
 
 function AssigneePicker({ members, value, onChange, labelledBy }: { members: StudyGroup['members']; value: string[]; onChange: (next: string[]) => void; labelledBy: string }) {
   return (
@@ -871,28 +955,61 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
   // Assignee clicks update the picker at once, but only the final list is sent, once,
   // ASSIGNEE_SAVE_DELAY_MS after the last click (or straight away if the panel closes).
   const [assigneeDraft, setAssigneeDraft] = useState<string[] | null>(null)
-  const assigneeSave = useRef<{ timer: number; send: () => void } | null>(null)
+  const assigneeSave = useRef<{ timer: number; changes: () => TaskInput | null } | null>(null)
   const patchRef = useRef(onPatch)
-  useEffect(() => { patchRef.current = onPatch }, [onPatch])
+  // The latest task and field values, for saving whatever is still pending when the panel closes.
+  const taskRef = useRef(task)
+  const fieldsRef = useRef<PanelFields>({ title, description, location, course })
+  const descriptionTimer = useRef(0)
+  // Esc in a field puts the saved value back; its blur must not save the edit it just undid.
+  const skipBlurSave = useRef(false)
+  useLayoutEffect(() => {
+    patchRef.current = onPatch
+    taskRef.current = task
+    fieldsRef.current = { title, description, location, course }
+  })
+  /* Closing the panel any way at all (Esc, ×, tapping outside, another task, Back, leaving
+     the page) saves edits that haven't been saved yet, in one request. */
   useEffect(() => () => {
-    const pendingSave = assigneeSave.current
+    window.clearTimeout(descriptionTimer.current)
+    const pendingAssignees = assigneeSave.current
     assigneeSave.current = null
-    if (pendingSave) { window.clearTimeout(pendingSave.timer); pendingSave.send() }
+    if (pendingAssignees) window.clearTimeout(pendingAssignees.timer)
+    const changes = { ...unsavedFields(taskRef.current, fieldsRef.current), ...pendingAssignees?.changes() }
+    if (Object.keys(changes).length) patchRef.current(changes)
   }, [])
   const savedAssignees = task.assignees.map((person) => person.student_id)
   const queueAssignees = (next: string[]) => {
     setAssigneeDraft(next)
     if (assigneeSave.current) window.clearTimeout(assigneeSave.current.timer)
-    const send = () => {
+    const changes = (): TaskInput | null => {
       const unchanged = next.length === savedAssignees.length && next.every((id) => savedAssignees.includes(id))
-      if (next.length && !unchanged) patchRef.current({ assignee_ids: next })
+      return next.length && !unchanged ? { assignee_ids: next } : null
     }
     const timer = window.setTimeout(() => {
       assigneeSave.current = null
       setAssigneeDraft(null)
-      send()
+      const pending = changes()
+      if (pending) patchRef.current(pending)
     }, ASSIGNEE_SAVE_DELAY_MS)
-    assigneeSave.current = { timer, send }
+    assigneeSave.current = { timer, changes }
+  }
+
+  const saveDescription = (value: string) => {
+    window.clearTimeout(descriptionTimer.current)
+    if (value !== taskRef.current.description) onPatch({ description: value })
+  }
+  // While typing, details save DESCRIPTION_SAVE_DELAY_MS after the last keystroke.
+  const typeDescription = (value: string) => {
+    setDescription(value)
+    window.clearTimeout(descriptionTimer.current)
+    descriptionTimer.current = window.setTimeout(() => {
+      if (value !== taskRef.current.description) patchRef.current({ description: value })
+    }, DESCRIPTION_SAVE_DELAY_MS)
+  }
+  const blurSave = (save: () => void) => {
+    if (skipBlurSave.current) { skipBlurSave.current = false; return }
+    save()
   }
 
   const toggleExpanded = () => {
@@ -964,6 +1081,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
   }
 
   const saveLocation = () => { if (location.trim() !== task.location) onPatch({ location: location.trim() }) }
+  const saveCourse = () => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }
 
   return (
     <div className="task-sheet">
@@ -978,10 +1096,16 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
           {manageable ? (
             <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
               onChange={(event) => setTitle(event.target.value)}
-              onBlur={() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) }}
+              onBlur={() => blurSave(() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) })}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur()
-                if (event.key === 'Escape') { event.preventDefault(); setTitle(task.title); event.currentTarget.blur() }
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  setTitle(task.title)
+                  fieldsRef.current = { ...fieldsRef.current, title: task.title }
+                  skipBlurSave.current = true
+                  event.currentTarget.blur()
+                }
               }} />
           ) : <h2 className="task-title">{task.title}</h2>}
           <button type="button" className={`task-pill task-complete${done ? ' is-done' : ''}`} disabled={!editable || pending} aria-pressed={done}
@@ -1007,10 +1131,16 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                   <label htmlFor={`task-location-${task.id}`}>Location:</label>
                   <Icon name="pin" />
                   <input id={`task-location-${task.id}`} className="task-location__input" value={location} placeholder="Add a place" maxLength={200} autoComplete="off" enterKeyHint="done"
-                    onChange={(event) => setLocation(event.target.value)} onBlur={saveLocation}
+                    onChange={(event) => setLocation(event.target.value)} onBlur={() => blurSave(saveLocation)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') event.currentTarget.blur()
-                      if (event.key === 'Escape') { event.preventDefault(); setLocation(task.location); event.currentTarget.blur() }
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setLocation(task.location)
+                        fieldsRef.current = { ...fieldsRef.current, location: task.location }
+                        skipBlurSave.current = true
+                        event.currentTarget.blur()
+                      }
                     }} />
                 </>
               ) : <><span>Location:</span><Icon name="pin" /><span className="task-location__text">{task.location || 'None'}</span></>}
@@ -1041,7 +1171,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                   </select>
                 </label>
                 <label className="ui-field"><span>Course</span>
-                  <input className="ui-input" value={course} maxLength={120} placeholder="Optional" autoComplete="off" enterKeyHint="done" list={`task-courses-${task.id}`} onChange={(event) => setCourse(event.target.value)} onBlur={() => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }} />
+                  <input className="ui-input" value={course} maxLength={120} placeholder="Optional" autoComplete="off" enterKeyHint="done" list={`task-courses-${task.id}`} onChange={(event) => setCourse(event.target.value)} onBlur={saveCourse} />
                   <datalist id={`task-courses-${task.id}`}>{courses.map((name) => <option key={name} value={name} />)}</datalist>
                 </label>
                 <label className="ui-field"><span>Group</span>
@@ -1072,7 +1202,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
 
       <label className="task-section-label" htmlFor={`task-details-${task.id}`}>Details</label>
       <textarea id={`task-details-${task.id}`} className="task-details" value={description} disabled={!editable} rows={5} maxLength={4000} placeholder={editable ? 'Start typing' : 'No details'}
-        onChange={(event) => setDescription(event.target.value)} onBlur={() => { if (description !== task.description) onPatch({ description }) }} />
+        onChange={(event) => typeDescription(event.target.value)} onBlur={() => saveDescription(description)} />
 
       {expanded ? (
         <div className="task-extras">

@@ -811,6 +811,9 @@
 }
 .ui-alert > span { flex: 1; }
 .ui-alert--info { border-color: var(--color-border); background: var(--color-surface-sunken); }
+/* "Finish setting up your profile" (Home, Friends & groups): the action wraps under the text on narrow screens. */
+.profile-setup-card { flex-wrap: wrap; }
+.profile-setup-card > span { min-width: min(260px, 100%); }
 
 @media (max-width: 720px) {
   .ui-page { padding: var(--space-6) var(--space-4) 96px; }

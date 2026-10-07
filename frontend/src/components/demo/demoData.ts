@@ -460,5 +460,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
       }
       return wait([...scopes.values()])
     },
+    deleteStudyGroup: locked('manage study groups'),
+    transferStudyGroup: locked('manage study groups'),
   }
 }

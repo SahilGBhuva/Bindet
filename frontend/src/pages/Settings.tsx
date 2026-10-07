@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
 import { accountDisplayName, suggestedUsername } from '../lib/accountName'
 import { requestPasswordReset, signIn, signOutAndReload, signUp, type AuthSession } from '../lib/auth'
-import { loadThemePreference, saveThemePreference, type ThemePreference } from '../lib/theme'
+import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
 
 const GOALS = [
@@ -66,7 +66,7 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [goalStatus, setGoalStatus] = useState('')
   const [privacyStatus, setPrivacyStatus] = useState('')
   const [copied, setCopied] = useState(false)
-  const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
+  const theme = useThemePreference()
 
   // The saved profile belongs to whoever is signed in now; anything else is ignored.
   const current = loaded && session && loaded.userId === session.user.id ? loaded : null
@@ -105,7 +105,6 @@ export function Settings({ session, onSession }: SettingsProps) {
   }, [copied])
 
   function chooseTheme(next: ThemePreference) {
-    setTheme(next)
     saveThemePreference(next)
   }
 

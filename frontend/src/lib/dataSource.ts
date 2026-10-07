@@ -64,6 +64,9 @@ export type DataSource = {
 
   // Server data (added later)
   listNoteScopes: typeof api.listNoteScopes
+  // Study group ownership (owner only)
+  deleteStudyGroup: typeof api.deleteStudyGroup
+  transferStudyGroup: typeof api.transferStudyGroup
 }
 
 export const realData: DataSource = {
@@ -112,6 +115,8 @@ export const realData: DataSource = {
   hourOf: (timestamp) => new Date(timestamp).getHours(),
   confirm: (message) => window.confirm(message),
   listNoteScopes: api.listNoteScopes,
+  deleteStudyGroup: api.deleteStudyGroup,
+  transferStudyGroup: api.transferStudyGroup,
 }
 
 const DataContext = createContext<DataSource>(realData)

@@ -25,9 +25,13 @@ const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
 // that reflects account data (important items, task tabs/notices) is cleared.
 const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2', 'bindit:focus-text-size'])
 // Device-level flags that aren't account data and must outlive a sign-out.
+const DEVICE_KEYS = new Set<string>(['bindit-reset-requested'])
 // A Google sign-in started here is pending until the browser comes back from Google.
+// It is cleared on sign-out like any other bindit- key; it only has to last the round trip.
 const OAUTH_FLOW_KEY = 'bindit-oauth-flow'
-const DEVICE_KEYS = new Set<string>(['bindit-reset-requested', OAUTH_FLOW_KEY])
+// Where public/theme-init.js puts a Google return's query (?code=, ?flow=, ?error=…)
+// after taking it out of the address bar, before any other script or request runs.
+const OAUTH_RETURN_KEY = 'bindit-auth-return'
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
@@ -349,7 +353,7 @@ export async function requestPasswordReset(email: string) {
 }
 
 /** True (once) when this browser requested a password reset within the last hour. */
-export function takeResetRequested() {
+function takeResetRequested() {
   try {
     const requested = Number(localStorage.getItem(RESET_REQUESTED_KEY))
     localStorage.removeItem(RESET_REQUESTED_KEY)
@@ -358,6 +362,17 @@ export function takeResetRequested() {
   } catch {
     return false
   }
+}
+
+const resetChecks = new WeakMap<object, boolean>()
+
+/**
+ * takeResetRequested, answered once per redirect: the flag is removed when read, so a
+ * re-run effect (React StrictMode in development) must get the same answer as the first run.
+ */
+export function resetRequestedFor(redirect: AuthRedirect) {
+  if (!resetChecks.has(redirect)) resetChecks.set(redirect, takeResetRequested())
+  return resetChecks.get(redirect) === true
 }
 
 export type AuthRedirect =
@@ -406,6 +421,7 @@ function redirectErrorMessage(errorCode: string | null, errorName: string | null
 export function takeAuthRedirect(): AuthRedirect {
   if (authRedirect) return authRedirect
   const oauth = takeOAuthRedirect()
+  pruneExpiredOAuthFlows()
   if (oauth) {
     authRedirect = oauth
     return authRedirect
@@ -518,11 +534,11 @@ function forgetOAuthFlow() {
 }
 
 /**
- * The verifier this browser saved when it started a Google sign-in, removed so
- * it can be used only once. The tab's own copy wins; the localStorage copy
- * covers browsers that drop sessionStorage across the round trip to Google.
+ * The Google sign-in this browser started, if any (expired or not). The tab's own copy
+ * wins; the localStorage copy covers browsers that drop sessionStorage across the
+ * round trip to Google. Nothing is removed here.
  */
-function takeOAuthFlow(): { flow: OAuthFlow | null; expired: boolean } {
+function readStoredOAuthFlow(): OAuthFlow | null {
   let flow: OAuthFlow | null = null
   for (const storage of [sessionStorage, localStorage]) {
     try {
@@ -531,46 +547,95 @@ function takeOAuthFlow(): { flow: OAuthFlow | null; expired: boolean } {
       // Storage unavailable.
     }
   }
-  forgetOAuthFlow()
-  if (!flow) return { flow: null, expired: false }
-  const age = Date.now() - flow.createdAt
-  if (age < 0 || age > OAUTH_FLOW_TTL_MS) return { flow: null, expired: true }
-  return { flow, expired: false }
+  return flow
 }
 
-const OAUTH_QUERY_KEYS = ['code', 'error', 'error_code', 'error_description', 'state']
+function oauthFlowExpired(flow: OAuthFlow) {
+  const age = Date.now() - flow.createdAt
+  return age < 0 || age > OAUTH_FLOW_TTL_MS
+}
 
-/** Handles a return from Google (query `code` or OAuth error); null when the URL isn't one. */
-function takeOAuthRedirect(): AuthRedirect | null {
+/* Removes a stored sign-in that can no longer finish, so a stale verifier never lingers. */
+function pruneExpiredOAuthFlows() {
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      const raw = storage.getItem(OAUTH_FLOW_KEY)
+      if (!raw) continue
+      const flow = readOAuthFlow(storage)
+      if (!flow || oauthFlowExpired(flow)) storage.removeItem(OAUTH_FLOW_KEY)
+    } catch {
+      // Storage unavailable.
+    }
+  }
+}
+
+const OAUTH_QUERY_KEYS = ['code', 'flow', 'error', 'error_code', 'error_description', 'state']
+const OAUTH_RETURN_MAX_AGE_MS = 2 * 60 * 1000
+
+/**
+ * The query a Google sign-in came back with. public/theme-init.js normally moved it
+ * from the address bar into sessionStorage before anything loaded (so the code never
+ * reaches a Referer header); without storage it is still in the URL, and is taken
+ * out of the address bar and history here.
+ */
+function takeOAuthReturnParams(): URLSearchParams {
+  const params = new URLSearchParams()
+  try {
+    const raw = sessionStorage.getItem(OAUTH_RETURN_KEY)
+    if (raw) {
+      sessionStorage.removeItem(OAUTH_RETURN_KEY)
+      const saved = JSON.parse(raw) as { at?: unknown; params?: unknown }
+      const age = typeof saved.at === 'number' ? Date.now() - saved.at : Infinity
+      if (age >= 0 && age <= OAUTH_RETURN_MAX_AGE_MS && saved.params && typeof saved.params === 'object') {
+        for (const [key, value] of Object.entries(saved.params as Record<string, unknown>)) {
+          if (OAUTH_QUERY_KEYS.includes(key) && typeof value === 'string') params.set(key, value)
+        }
+      }
+    }
+  } catch {
+    // Storage unavailable or unreadable: fall back to the address bar.
+  }
   const query = new URLSearchParams(window.location.search)
+  if (OAUTH_QUERY_KEYS.some((key) => query.has(key))) {
+    OAUTH_QUERY_KEYS.forEach((key) => {
+      const value = query.get(key)
+      if (value !== null && !params.has(key)) params.set(key, value)
+      query.delete(key)
+    })
+    const search = query.toString()
+    window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
+  }
+  return params
+}
+
+/**
+ * Handles a return from Google (query `code` or OAuth error, plus the `flow` id this
+ * browser put in the return address); null when the URL isn't one. A code is only
+ * exchanged when its flow id matches the sign-in this browser started, and the stored
+ * verifier is only forgotten then: a crafted `?code=` or `?error=` can't cancel a
+ * sign-in that is still on its way back.
+ */
+function takeOAuthRedirect(): AuthRedirect | null {
+  const query = takeOAuthReturnParams()
   const code = query.get('code')
+  const flowId = query.get('flow')
   const errorName = query.get('error')
   const errorCode = query.get('error_code')
-  // A bare ?error= with nothing else is someone else's URL; ours always comes with a code or details.
-  const isOAuthError = Boolean(errorName && (errorCode || query.has('error_description') || hasPendingOAuthFlow()))
-  if (!code && !isOAuthError) return null
-  // Take the code (and any error text) out of the address bar and history before anything else.
-  OAUTH_QUERY_KEYS.forEach((key) => query.delete(key))
-  const search = query.toString()
-  window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
-  const { flow, expired } = takeOAuthFlow()
+  // A bare ?error= with nothing else is someone else's URL; ours always comes with a flow id, a code or details.
+  const isOAuthError = Boolean(errorName && (errorCode || query.has('error_description') || flowId))
+  if (!code && !isOAuthError && !flowId) return null
+  const flow = readStoredOAuthFlow()
+  // Never exchange a code without this browser's own verifier for this very sign-in.
+  if (!flow || !flowId || flowId !== flow.id) return { kind: 'error', message: OAUTH_NOT_STARTED_HERE }
+  forgetOAuthFlow()
+  if (oauthFlowExpired(flow)) return { kind: 'error', message: OAUTH_EXPIRED }
   if (isOAuthError) {
     // Anyone can craft this URL, so its free-text error_description is never shown.
     const message = (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) || (errorName && OAUTH_ERROR_MESSAGES[errorName]) || OAUTH_FAILED
     return { kind: 'error', message }
   }
-  // Never exchange a code without this browser's own verifier.
-  if (!flow) return { kind: 'error', message: expired ? OAUTH_EXPIRED : OAUTH_NOT_STARTED_HERE }
   if (!code || code.length > 512) return { kind: 'error', message: OAUTH_FAILED }
   return { kind: 'oauth', code, codeVerifier: flow.verifier }
-}
-
-function hasPendingOAuthFlow() {
-  try {
-    return Boolean(readOAuthFlow(sessionStorage) ?? readOAuthFlow(localStorage))
-  } catch {
-    return false
-  }
 }
 
 /** True when the server has Google sign-in turned on (AUTH_GOOGLE_ENABLED). */
@@ -585,7 +650,7 @@ export async function googleSignInEnabled() {
 /**
  * Starts "Continue with Google": saves a fresh PKCE verifier in this browser and
  * sends the page to the auth server, which hands over to Google and comes back
- * to appReturnUrl() with `?code=`. Resolves only if navigation didn't happen.
+ * to appReturnUrl() with `?flow=<id>&code=`. Resolves only if navigation didn't happen.
  */
 export async function startGoogleSignIn() {
   const settings = await config()
@@ -607,8 +672,10 @@ export async function startGoogleSignIn() {
   if (!saved) throw new Error('Google sign-in needs site storage turned on. Use your email instead.')
   const authorizeUrl = new URL(`${settings.supabase_url}/auth/v1/authorize`)
   authorizeUrl.searchParams.set('provider', 'google')
-  // Always our own address, never one taken from the URL: no open redirect.
-  authorizeUrl.searchParams.set('redirect_to', appReturnUrl())
+  // Always our own address, never one taken from the URL: no open redirect. The flow id
+  // ties the code that comes back to this sign-in (the Supabase redirect allowlist entry
+  // for the app, `<origin>/**`, covers `/?flow=…`).
+  authorizeUrl.searchParams.set('redirect_to', `${appReturnUrl()}?flow=${encodeURIComponent(flow.id)}`)
   authorizeUrl.searchParams.set('code_challenge', challenge)
   authorizeUrl.searchParams.set('code_challenge_method', 's256')
   window.location.assign(authorizeUrl.toString())

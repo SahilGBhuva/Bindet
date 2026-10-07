@@ -130,6 +130,18 @@ export function parseServerTime(value: string | null | undefined): number {
 }
 const CACHE_WINDOW_MS = 30_000
 
+/*
+ * Fired on window after this tab changes tasks, study groups or the profile, so
+ * views that cache them (the sidebar) refresh at once instead of within 30 seconds.
+ */
+export const TASKS_CHANGED_EVENT = 'bindit:tasks-changed'
+export const GROUPS_CHANGED_EVENT = 'bindit:groups-changed'
+export const PROFILE_CHANGED_EVENT = 'bindit:profile-changed'
+
+function announce(name: string) {
+  window.dispatchEvent(new Event(name))
+}
+
 function tokenSubject(accessToken: string) {
   try {
     const encoded = accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
@@ -485,7 +497,13 @@ export function saveAccountProfile(
   return request<Profile>('/api/account/profile', {
     method: 'PUT',
     body: JSON.stringify(profile),
-  }, accessToken)
+  }, accessToken).then((saved) => {
+    const identity = tokenSubject(accessToken)
+    profileCache.set(identity, { savedAt: Date.now(), data: saved })
+    writeSessionCache(`bindit:profile:${identity}`, saved)
+    announce(PROFILE_CHANGED_EVENT)
+    return saved
+  })
 }
 
 
@@ -530,16 +548,33 @@ export async function getStudyGroups(accessToken: string, force = false) {
   return data
 }
 
+/* After a group change the cached list is stale: the next read fetches, and listeners refresh now. */
+function groupsChanged<T>(accessToken: string) {
+  return (result: T) => {
+    const identity = tokenSubject(accessToken)
+    const cached = groupCache.get(identity)
+    if (cached) groupCache.set(identity, { savedAt: 0, data: cached.data })
+    try {
+      sessionStorage.removeItem(`bindit:groups:${identity}`)
+    } catch {
+      // Storage unavailable: nothing cached there.
+    }
+    announce(GROUPS_CHANGED_EVENT)
+    return result
+  }
+}
+
 export function createStudyGroup(group: { name: string; description: string; weekly_goal_xp: number }, accessToken: string) {
-  return request<StudyGroup>('/api/study-groups', { method: 'POST', body: JSON.stringify(group) }, accessToken)
+  return request<StudyGroup>('/api/study-groups', { method: 'POST', body: JSON.stringify(group) }, accessToken).then(groupsChanged<StudyGroup>(accessToken))
 }
 
 export function joinStudyGroup(inviteCode: string, accessToken: string) {
-  return request<StudyGroup>('/api/study-groups/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }, accessToken)
+  return request<StudyGroup>('/api/study-groups/join', { method: 'POST', body: JSON.stringify({ invite_code: inviteCode }) }, accessToken).then(groupsChanged<StudyGroup>(accessToken))
 }
 
+/* Leaving as the owner works only when nobody else is left (the group is deleted); otherwise 409 owner_must_transfer. */
 export function leaveStudyGroup(groupId: string, accessToken: string) {
-  return request<{ left: boolean }>(`/api/study-groups/${encodeURIComponent(groupId)}/members/me`, { method: 'DELETE' }, accessToken)
+  return request<{ left: boolean }>(`/api/study-groups/${encodeURIComponent(groupId)}/members/me`, { method: 'DELETE' }, accessToken).then(groupsChanged<{ left: boolean }>(accessToken))
 }
 
 export function sendFriendRequest(friendCode: string, accessToken: string) {
@@ -836,6 +871,7 @@ export function setCachedTasks(accessToken: string, data: Task[]) {
   const identity = tokenSubject(accessToken)
   taskCache.set(identity, { savedAt: Date.now(), data })
   writeSessionCache(`bindit:tasks:${identity}`, data)
+  announce(TASKS_CHANGED_EVENT)
 }
 
 export async function getTasks(accessToken: string, force = false) {
@@ -891,8 +927,9 @@ export function getCachedGroupAnalytics(groupId: string) {
   return analyticsCache.get(groupId) ?? null
 }
 
-export async function getGroupAnalytics(groupId: string, accessToken: string) {
-  const data = await request<GroupAnalytics>(`/api/study-groups/${encodeURIComponent(groupId)}/analytics`, undefined, accessToken)
+/* `today` is the student's local date, so "overdue" and the burn-down end on their day, not the server's (UTC). */
+export async function getGroupAnalytics(groupId: string, accessToken: string, today = localDay()) {
+  const data = await request<GroupAnalytics>(`/api/study-groups/${encodeURIComponent(groupId)}/analytics?today=${encodeURIComponent(today)}`, undefined, accessToken)
   analyticsCache.set(groupId, data)
   return data
 }
@@ -915,4 +952,23 @@ export type NoteScope = { course: string; unit: string; note_count: number; last
 export async function listNoteScopes(accessToken?: string, signal?: AbortSignal): Promise<NoteScope[]> {
   const data = await request<{ scopes?: NoteScope[] }>('/api/notes/scopes', { signal }, accessToken)
   return Array.isArray(data?.scopes) ? data.scopes : []
+}
+
+/* ---- Group ownership ------------------------------------------------------- */
+
+/* Owner only. The group's tasks become their creators' personal tasks. */
+export function deleteStudyGroup(groupId: string, accessToken: string) {
+  return request<{ deleted: boolean }>(`/api/study-groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' }, accessToken)
+    .then(groupsChanged<{ deleted: boolean }>(accessToken))
+}
+
+/* Owner only; the new owner must already be a member. Returns the updated group. */
+export function transferStudyGroup(groupId: string, newOwnerId: string, accessToken: string) {
+  return request<StudyGroup>(`/api/study-groups/${encodeURIComponent(groupId)}/transfer`, { method: 'POST', body: JSON.stringify({ new_owner_id: newOwnerId }) }, accessToken)
+    .then(groupsChanged<StudyGroup>(accessToken))
+}
+
+/* The student's local calendar day (YYYY-MM-DD), which the server uses for "today" and "overdue". */
+export function localDay(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }

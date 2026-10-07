@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Profile, StudyGroup, Task } from './api'
+import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, parseServerTime, type Profile, type StudyGroup, type Task } from './api'
 import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
-import { loadThemePreference, saveThemePreference, type ThemePreference } from './theme'
+import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
-import { useDrawer } from './useDrawer'
+import { useDrawer, useMediaQuery } from './useDrawer'
 import './SiteSidebar.css'
 
 type NavItem = { id: Screen; label: string; short?: string }
@@ -38,6 +38,8 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
 
 /* The phone tab bar keeps the four places students go most; everything else is one tap away in Menu. */
 const TAB_BAR: Screen[] = ['home', 'tools', 'goals', 'tutor']
+/* Matches the phone breakpoint in SiteSidebar.css, where the tab bar and Menu sheet replace the rail. */
+const PHONE_QUERY = '(max-width: 860px)'
 
 const paths: Record<Screen, ReactNode> = {
   home: <><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z" /></>,
@@ -73,12 +75,8 @@ const THEME_NEXT: Record<ThemePreference, ThemePreference> = { system: 'light', 
 const THEME_LABEL: Record<ThemePreference, string> = { system: 'Theme: match system', light: 'Theme: light', dark: 'Theme: dark' }
 
 function ThemeButton() {
-  const [preference, setPreference] = useState<ThemePreference>(loadThemePreference)
-  const next = () => {
-    const value = THEME_NEXT[preference]
-    setPreference(value)
-    saveThemePreference(value)
-  }
+  const preference = useThemePreference()
+  const next = () => saveThemePreference(THEME_NEXT[preference])
   return (
     <button className="bindit-rail__theme" type="button" onClick={next} aria-label={`${THEME_LABEL[preference]}. Change theme`} title={THEME_LABEL[preference]}>
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -167,7 +165,7 @@ function nestGroups(groups: StudyGroup[]) {
   const rows: { group: StudyGroup; child: boolean }[] = []
   let parentWord = ''
   // Oldest first, so the group that started a family ("LM work team") comes before the ones that grew from it.
-  const ordered = groups.toSorted((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+  const ordered = groups.toSorted((a, b) => parseServerTime(a.created_at) - parseServerTime(b.created_at))
   for (const group of ordered) {
     const word = group.name.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
     const child = Boolean(word) && word === parentWord
@@ -206,9 +204,11 @@ type SiteSidebarProps = {
   onCollapsedChange?: (collapsed: boolean) => void
   /* Lets the shell's top bar show the Messages unread dot without a second request. */
   onUnreadChange?: (total: number) => void
+  /* The search palette is open: the phone menu sheet closes so the two never stack or fight for focus. */
+  commandOpen?: boolean
 }
 
-export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onUnreadChange }: SiteSidebarProps) {
+export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onUnreadChange, commandOpen = false }: SiteSidebarProps) {
   const data = useData()
   // The landing demo has no session but a sandboxed, in-memory data source it may read from.
   const canRead = Boolean(session) || data.sandboxed
@@ -230,9 +230,16 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   // A failed refresh with nothing cached says so (the rail retries every 30 seconds) instead of looking empty.
   const [failed, setFailed] = useState({ tasks: false, groups: false })
 
+  // The Menu sheet only exists on phones. It closes when the page changes, when the search
+  // palette opens, and when the window grows past the phone layout, so its scroll lock
+  // never outlives it.
+  const isPhone = useMediaQuery(PHONE_QUERY)
+  if (menuOpen && (!isPhone || commandOpen)) setMenuOpen(false)
+
   // Courses can change on other pages, so reread the local notebook whenever the page changes.
   if (seenActive !== active) {
     setSeenActive(active)
+    setMenuOpen(false)
     setNotebook(data.loadNotebook())
     setNow(data.now())
   }
@@ -242,7 +249,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   useEffect(() => data.onNotebookChange(() => setNotebook(data.loadNotebook())), [data])
 
   useEffect(() => {
-    const sync = () => setGroupParam(readGroupParam())
+    const sync = () => {
+      setGroupParam(readGroupParam())
+      setMenuOpen(false)
+    }
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -279,10 +289,42 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [data, session, onUnreadChange])
 
+  // Changes made in this tab show at once: a task edit updates the shared cache (read it
+  // directly), and group or profile writes fetch fresh copies past the 30-second cache.
+  useEffect(() => {
+    if (!session || data.sandboxed) return
+    const token = session.access_token
+    let live = true
+    const onTasks = () => {
+      const cached = data.getCachedTasks(token)
+      if (cached) setTasks(cached)
+    }
+    const onGroups = () => {
+      void Promise.allSettled([data.getStudyGroups(token, true), data.getTasks(token, true)]).then(([nextGroups, nextTasks]) => {
+        if (!live) return
+        if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
+        if (nextTasks.status === 'fulfilled') setTasks(nextTasks.value)
+      })
+    }
+    const onProfile = () => {
+      void data.getAccountProfile(token, true).then((next) => { if (live) setProfile(next) }).catch(() => undefined)
+    }
+    window.addEventListener(TASKS_CHANGED_EVENT, onTasks)
+    window.addEventListener(GROUPS_CHANGED_EVENT, onGroups)
+    window.addEventListener(PROFILE_CHANGED_EVENT, onProfile)
+    return () => {
+      live = false
+      window.removeEventListener(TASKS_CHANGED_EVENT, onTasks)
+      window.removeEventListener(GROUPS_CHANGED_EVENT, onGroups)
+      window.removeEventListener(PROFILE_CHANGED_EVENT, onProfile)
+    }
+  }, [data, session])
+
   // The phone menu takes focus when it opens, keeps the page behind it still, closes on Esc
   // and hands focus back to the Menu button when it closes.
   const closeMenu = useCallback(() => setMenuOpen(false), [])
-  useDrawer({ open: menuOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
+  const sheetOpen = menuOpen && isPhone && !commandOpen
+  useDrawer({ open: sheetOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
 
   const displayName = profile?.display_name || accountDisplayName(session?.user) || 'Your account'
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'B'
@@ -371,7 +413,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {highlighted.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals" title={task.title}>
+                <a className="bindit-rail__entry" href={`#goals?task=${encodeURIComponent(task.id)}`} title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--dot" aria-hidden="true">·</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
@@ -442,7 +484,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {nextTasks.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals" title={task.title}>
+                <a className="bindit-rail__entry" href={`#goals?task=${encodeURIComponent(task.id)}`} title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--star" aria-hidden="true">*</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
@@ -574,7 +616,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         </button>
       </nav>
 
-      {menuOpen ? (
+      {sheetOpen ? (
         <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } }}>
           <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages" ref={menuPanel}>
             {SECTIONS.map((section) => (

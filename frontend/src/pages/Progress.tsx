@@ -85,7 +85,7 @@ export function Progress({ session }: ProgressProps) {
     [activeCourse, notebook.deposits, attempts, stats],
   )
 
-  // Opens Tools on the recommended unit, the same way Home opens a course.
+  // Opens Study on the recommended unit, the same way Home opens a course.
   function practiceNext() {
     if (!pulse?.recommended) return
     data.saveNotebook({ ...data.loadNotebook(), activeCourse: pulse.course.name, activeUnit: pulse.recommended })
@@ -114,8 +114,8 @@ export function Progress({ session }: ProgressProps) {
           <div className="ui-empty">
             <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="104" height="125" />
             <h2 className="ui-empty__title">No courses yet</h2>
-            <p className="ui-empty__copy">Add a course and its units in Tools. Each one gets a mastery report here once you start quizzing.</p>
-            <a className="ui-button ui-button--primary" href="#tools">Open Tools</a>
+            <p className="ui-empty__copy">Add a course and its units in Study. Each one gets a mastery report here once you start quizzing.</p>
+            <a className="ui-button ui-button--primary" href="#tools">Open Study</a>
           </div>
         </div>
       ) : (
@@ -286,12 +286,12 @@ function CourseBoard({
               <figcaption className="progress__note">
                 {pulse.live
                   ? 'Each session is three answers. Hover the chart, or focus it and use the arrow keys, to read every line.'
-                  : <>Every line stays flat until you quiz. Quiz a unit in <a className="ui-link" href="#tools">Tools</a> to start the trend.</>}
+                  : <>Every line stays flat until you quiz. Quiz a unit in <a className="ui-link" href="#tools">Study</a> to start the trend.</>}
               </figcaption>
             </>
           ) : (
             <figcaption className="progress__note">
-              {course.name} has no units yet, so there is nothing to plot. Create units in <a className="ui-link" href="#tools">Tools</a>.
+              {course.name} has no units yet, so there is nothing to plot. Create units in <a className="ui-link" href="#tools">Study</a>.
             </figcaption>
           )}
         </figure>
@@ -319,7 +319,7 @@ function CourseBoard({
         ) : (
           <div className="ui-panel">
             <p className="progress__empty">
-              Create units for {course.name} in <a className="ui-link" href="#tools">Tools</a> and they will be graded here.
+              Create units for {course.name} in <a className="ui-link" href="#tools">Study</a> and they will be graded here.
             </p>
           </div>
         )}

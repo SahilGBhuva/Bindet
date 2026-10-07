@@ -1,8 +1,9 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useState } from 'react'
 import { AuthGate } from './components/AuthGate'
 import { CommandPalette } from './components/CommandPalette'
+import { PROFILE_SETUP_ROUTED_KEY } from './components/ProfileSetupCard'
 import { useAuth } from './lib/AuthContext'
-import { getStudyGroups, recordDailyLogin } from './lib/api'
+import { getAccountProfile, getStudyGroups, recordDailyLogin } from './lib/api'
 import { SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
 import { getStudentId } from './lib/session'
 import { NavIcon, SiteSidebar } from './lib/SiteSidebar'
@@ -184,6 +185,27 @@ function AppShell() {
     void recordDailyLogin(studentId, session?.access_token).catch(() => undefined)
   }, [session?.user.id, session?.access_token])
 
+  // A new account without a bindit profile (a first Google sign-in) is taken to Settings
+  // once per device to choose a name and username; Home and Friends & groups keep a
+  // reminder card until it's done. The flag is a bindit- key, so signing out clears it.
+  const accessToken = session?.access_token
+  const userId = session?.user.id
+  useEffect(() => {
+    if (!accessToken || !userId) return
+    let live = true
+    void getAccountProfile(accessToken).then((profile) => {
+      if (!live || profile) return
+      try {
+        if (localStorage.getItem(PROFILE_SETUP_ROUTED_KEY) === userId) return
+        localStorage.setItem(PROFILE_SETUP_ROUTED_KEY, userId)
+      } catch {
+        return
+      }
+      if (currentScreen() !== 'settings') window.location.hash = 'settings'
+    }).catch(() => undefined)
+    return () => { live = false }
+  }, [accessToken, userId])
+
   // Warm the next likely screens and the group list after Home has painted.
   useEffect(() => whenIdle(() => {
     for (const key of PREFETCH) void loaders[key]().catch(() => undefined)
@@ -199,7 +221,7 @@ function AppShell() {
   return (
     <div className={`app-shell${railCollapsed ? ' is-rail-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
-      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} />
+      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} commandOpen={commandOpen} />
       <header className="app-bar">
         <nav className="app-bar__pages" aria-label="Pages">
           {PAGE_ICONS.map((item) => {

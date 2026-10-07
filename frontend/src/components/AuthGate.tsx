@@ -17,7 +17,7 @@ import {
   signUp,
   startGoogleSignIn,
   takeAuthRedirect,
-  takeResetRequested,
+  resetRequestedFor,
   updatePassword,
   verifyRedirectTokens,
   verifySignupCode,
@@ -174,7 +174,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             discardSession(linked)
             gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account', via: 'link' }
           } else if (redirect.type === 'recovery') {
-            gate = { kind: 'recovery', session: linked, confirmed: takeResetRequested() }
+            gate = { kind: 'recovery', session: linked, confirmed: resetRequestedFor(redirect) }
           } else if (current) {
             saveAuthSession(linked)
             next = linked
@@ -489,6 +489,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   minLength={8}
                   required
                   disabled={busy}
+                  enterKeyHint="next"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                 />
@@ -506,6 +507,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 minLength={8}
                 required
                 disabled={busy}
+                enterKeyHint="go"
                 value={passwordAgain}
                 onChange={(event) => setPasswordAgain(event.target.value)}
               />
@@ -610,6 +612,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   className="auth-input"
                   inputMode="numeric"
                   autoComplete="one-time-code"
+                  enterKeyHint="go"
                   placeholder="6-digit code"
                   required
                   disabled={busy}
@@ -647,8 +650,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 ← Back
               </button>
             </div>
-            <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : mode === 'reset' ? 'Forgot password' : 'Start studying'}</p>
-            <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : mode === 'reset' ? 'Reset your password' : 'Create your account'}</h1>
+            <div className="auth-card__head">
+              <div>
+                <p className="auth-eyebrow">{mode === 'login' ? 'Welcome back' : mode === 'reset' ? 'Forgot password' : 'Start studying'}</p>
+                <h1 className="auth-title" id="auth-title">{mode === 'login' ? 'Log in' : mode === 'reset' ? 'Reset your password' : 'Create your account'}</h1>
+              </div>
+              <img className="auth-card__mascot auth-card__mascot--corner" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+            </div>
             {mode === 'reset' ? <p className="auth-lead">Enter your email and we’ll send you a link to set a new password.</p> : null}
             {mode === 'signup' && signupReason ? (
               <p className="auth-reason" role="status">
@@ -667,7 +675,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <form className="auth-form" onSubmit={submit}>
               <label className="auth-field">
                 <span>Email</span>
-                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy || googleBusy} value={email} onChange={(event) => setEmail(event.target.value)} />
+                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy || googleBusy} enterKeyHint={mode === 'reset' ? 'send' : 'next'} value={email} onChange={(event) => setEmail(event.target.value)} />
               </label>
               {mode !== 'reset' ? <label className="auth-field">
                 <span>Password</span>
@@ -679,6 +687,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     minLength={mode === 'signup' ? 8 : 6}
                     required
                     disabled={busy}
+                    enterKeyHint="go"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                   />

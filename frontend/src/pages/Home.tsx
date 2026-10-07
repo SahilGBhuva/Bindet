@@ -4,8 +4,9 @@ import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
-import { loadThemePreference, saveThemePreference, type ThemePreference } from '../lib/theme'
+import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
+import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import './Home.css'
 
 /*
@@ -219,11 +220,14 @@ export function Home({ session }: { session: AuthSession | null }) {
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [profile, setProfile] = useState<Profile | null>(() => token ? data.getCachedProfile(token) : null)
+  // Signed in, but the server has no bindit profile for this account yet.
+  const [profileMissing, setProfileMissing] = useState(false)
   const [social, setSocial] = useState<FriendsHub | null>(() => token ? data.getCachedFriends(token) : null)
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? data.getCachedStudyGroups(token) : [])
   const [tasks, setTasks] = useState<Task[] | null>(() => token ? data.getCachedTasks(token) : [])
   const [now, setNow] = useState(() => data.now())
-  const [theme, setTheme] = useState<ThemePreference>(() => data.sandboxed ? 'system' : loadThemePreference())
+  // The landing demo never reads the visitor's storage.
+  const theme = useThemePreference(!data.sandboxed)
   const [filter, setFilter] = useState<Filter>('none')
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [compact, setCompact] = useState(false)
@@ -239,7 +243,11 @@ export function Home({ session }: { session: AuthSession | null }) {
   useEffect(() => {
     if (!token) return
     let active = true
-    void data.getAccountProfile(token).then((value) => { if (active) setProfile(value) }).catch(() => undefined)
+    void data.getAccountProfile(token).then((value) => {
+      if (!active) return
+      setProfile(value)
+      setProfileMissing(value === null)
+    }).catch(() => undefined)
     void data.getFriends(token).then((value) => { if (active) setSocial(value) }).catch(() => undefined)
     void data.getStudyGroups(token).then((value) => {
       if (!active) return
@@ -310,9 +318,7 @@ export function Home({ session }: { session: AuthSession | null }) {
 
   function cycleTheme() {
     if (data.sandboxed) return
-    const next = THEME_NEXT[theme]
-    setTheme(next)
-    saveThemePreference(next)
+    saveThemePreference(THEME_NEXT[theme])
   }
 
   function openCourse(course: Course) {
@@ -472,6 +478,8 @@ export function Home({ session }: { session: AuthSession | null }) {
             )}
           </section>
         </header>
+
+        {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
 
         <div className="home__grid">
           <div className="home__main">

@@ -2,8 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Referrers carry the origin only, never the path or query: a Google sign-in returns to /?flow=…&code=…, and requests the browser starts while parsing (before any script runs) must not send that code even to this site. Cross-origin behaviour matches the Referrer-Policy header. -->
+    <meta name="referrer" content="strict-origin" />
+    <!-- theme-init.js and lib/theme.ts keep this in step with the saved theme. -->
+    <meta name="theme-color" content="#f6f5f1" />
+    <!-- First script on the page: applies the saved theme and moves a sign-in return's ?code= out of the URL before anything else loads. Synchronous (no async/defer) so there is no theme flash; external because the CSP blocks inline scripts. -->
+    <script src="/theme-init.js"></script>
     <link rel="icon" type="image/webp" href="/bindit-mascot-cutout.webp" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- Non-blocking font load: system fonts render first, then Inter swaps in. Instrument Serif and Caveat are only used on the landing and auth screens. -->
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" />
@@ -13,10 +19,6 @@
     <noscript><link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
     <!-- viewport-fit=cover lets the phone bars reach under the notch and home bar (they pad themselves with env(safe-area-inset-*)); resizes-content shrinks the layout above the on-screen keyboard so message boxes stay in view. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <!-- theme-init.js and lib/theme.ts keep this in step with the saved theme. -->
-    <meta name="theme-color" content="#f6f5f1" />
-    <!-- Applies the saved theme before first paint. Synchronous (no async/defer) so there is no flash; external because the CSP blocks inline scripts. -->
-    <script src="/theme-init.js"></script>
     <meta name="description" content="bindit turns your class notes into flashcards, quizzes, and a mastery map for every course, then lets you study with friends." />
     <title>bindit — Keep your learning together</title>
   </head>
