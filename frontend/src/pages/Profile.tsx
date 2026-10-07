@@ -764,7 +764,7 @@ export function Profile({ session, onError }: ProfileProps) {
             </div>
             <div className="ui-panel">
               {unitStats.length === 0 ? (
-                <p className="profile__empty">Take a quiz in Tools to track unit accuracy here.</p>
+                <p className="profile__empty">Take a quiz in Study to track unit accuracy here.</p>
               ) : (
                 <ul className="ui-list">
                   {unitStats.map((unit) => (
@@ -967,11 +967,11 @@ export function Profile({ session, onError }: ProfileProps) {
           <section className="ui-section" aria-labelledby="studying-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="studying-title">Currently studying</h2>
-              {courses.length ? <a className="ui-link" href="#tools">Open Tools</a> : null}
+              {courses.length ? <a className="ui-link" href="#tools">Open Study</a> : null}
             </div>
             <div className="ui-panel ui-panel--padded">
               {courses.length === 0 ? (
-                <p className="profile__empty profile__empty--flush">Add courses in Tools to see them here.</p>
+                <p className="profile__empty profile__empty--flush">Add courses in Study to see them here.</p>
               ) : (
                 <ul className="profile__courses">
                   {courses.map((course) => (

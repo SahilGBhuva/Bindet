@@ -26,7 +26,7 @@ export function More() {
       <section className="ui-section" aria-labelledby="help-plan">
         <div className="ui-section-head"><h2 className="ui-section-title" id="help-plan">Plan and study together</h2></div>
         <ol className="ui-panel placeholder__steps">
-          <li><span><b>Track assignments.</b> <a href="#goals">Assignments</a> holds what is due, with a board and a list view.</span></li>
+          <li><span><b>Track tasks.</b> <a href="#goals">Tasks</a> holds what is due, with a board and a list view.</span></li>
           <li><span><b>Join a study group.</b> In <a href="#profile">Friends &amp; groups</a>, create a group or join one with its invite code.</span></li>
           <li><span><b>Message your group.</b> Each group has a private chat in <a href="#chat">Messages</a>. Only its members can read the messages and images.</span></li>
           <li><span><b>Make it yours.</b> Change your name, daily goal, theme, and privacy in <a href="#settings">Settings</a>.</span></li>

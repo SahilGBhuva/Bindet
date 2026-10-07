@@ -6,13 +6,13 @@ import './CommandPalette.css'
 type Command = { id: string; screen: Screen; href: string; label: string; detail: string; keywords: string; group: 'Go to' | 'Do' }
 
 const COMMANDS: Command[] = [
-  { id: 'new-assignment', screen: 'goals', href: '#goals?new', label: 'New assignment', detail: 'Add something with a due date', keywords: 'task todo homework create add', group: 'Do' },
+  { id: 'new-task', screen: 'goals', href: '#goals?new', label: 'New task', detail: 'Add something with a due date', keywords: 'task todo homework assignment create add', group: 'Do' },
   { id: 'ask-tutor', screen: 'tutor', href: '#tutor', label: 'Ask the tutor', detail: 'Get an explanation grounded in your notes', keywords: 'ai help explain question chat', group: 'Do' },
   { id: 'upload', screen: 'tools', href: '#tools', label: 'Add notes', detail: 'Upload a PDF, photo, or document to a unit', keywords: 'upload notes pdf photo image file', group: 'Do' },
   { id: 'home', screen: 'home', href: '#home', label: 'Home', detail: 'Your next step and what is due', keywords: 'dashboard overview today', group: 'Go to' },
   { id: 'tools', screen: 'tools', href: '#tools', label: 'Study', detail: 'Courses, units, notes, flashcards, and quizzes', keywords: 'courses units flashcards quiz practice tools', group: 'Go to' },
   { id: 'tutor', screen: 'tutor', href: '#tutor', label: 'Tutor', detail: 'Conversations with your AI tutor', keywords: 'ai chat', group: 'Go to' },
-  { id: 'goals', screen: 'goals', href: '#goals', label: 'Assignments', detail: 'Everything due, by status', keywords: 'tasks board todo due', group: 'Go to' },
+  { id: 'goals', screen: 'goals', href: '#goals', label: 'Tasks', detail: 'Everything due, by status', keywords: 'tasks assignments homework board todo due', group: 'Go to' },
   { id: 'progress', screen: 'progress', href: '#progress', label: 'Progress', detail: 'Mastery, XP, and streaks', keywords: 'stats xp streak mastery', group: 'Go to' },
   { id: 'chat', screen: 'chat', href: '#chat', label: 'Messages', detail: 'Study group conversations', keywords: 'groups friends messages chat', group: 'Go to' },
   { id: 'profile', screen: 'profile', href: '#profile', label: 'Friends & groups', detail: 'People, groups, and your profile', keywords: 'social account groups friends', group: 'Go to' },
