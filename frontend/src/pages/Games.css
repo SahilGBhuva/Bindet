@@ -1,0 +1,275 @@
+/* Practice lab: setup sheet, personal bests, challenge inbox, the round itself and its results. */
+
+.practice .ui-section { max-width: none; }
+.practice__section { margin-top: var(--space-8); }
+.practice__layout + .practice__section,
+.practice__section + .practice__layout { margin-top: var(--space-8); }
+.practice__section + .practice__layout { margin-bottom: 0; }
+
+.practice__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.practice__setup,
+.practice__side { display: grid; gap: var(--space-4); padding: var(--space-6); }
+
+.practice__setup-head,
+.practice__side-head { display: flex; align-items: flex-start; gap: var(--space-3); }
+.practice__side-head { align-items: center; }
+.practice__setup-title { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-tight); }
+.practice__setup-copy { margin: 2px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+.practice__skeleton { height: 18px; }
+.practice__skeleton--short { width: 45%; }
+
+.practice__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.practice__options { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); }
+.practice__option { display: grid; gap: 6px; }
+.practice__option-label {
+  padding: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+.practice__option .ui-segmented__item:disabled { opacity: .45; cursor: not-allowed; }
+.practice__hint { margin: calc(var(--space-2) * -1) 0 0; color: var(--color-text-tertiary); font-size: var(--text-xs); }
+
+.practice__best-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--tone-tint);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+.practice__best-line b { color: var(--tone-text); }
+.practice__best-icon { display: inline-grid; flex: none; color: var(--tone-text); }
+.practice__best-icon svg,
+.practice__title-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.practice__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.practice__no-cards { display: grid; justify-items: start; gap: var(--space-3); }
+.practice__no-cards p { max-width: 54ch; margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.practice__no-cards b { color: var(--color-text); }
+
+/* Rows shared by the inbox, bests and recent rounds */
+
+.practice__row-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.practice__row-title { overflow: hidden; color: var(--color-text); font-size: var(--text-base); text-overflow: ellipsis; }
+.practice__row-title b { font-weight: var(--weight-semibold); }
+.practice__row-meta { color: var(--color-text-tertiary); font-size: var(--text-xs); }
+.practice__row-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
+
+.practice__challenge-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-5); }
+.practice__to-beat { color: var(--color-orange-text); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+
+.practice__versus { display: inline-flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.practice__versus b { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.practice__versus small { color: var(--color-text-tertiary); font-size: var(--text-xs); }
+
+.practice__bests { display: grid; margin: 0; padding: 0; list-style: none; }
+.practice__bests li { display: flex; align-items: center; gap: var(--space-3); padding: 10px 0; }
+.practice__bests li + li { border-top: 1px solid var(--color-border); }
+.practice__best-score { display: grid; flex: none; justify-items: end; font-variant-numeric: tabular-nums; }
+.practice__best-score b { font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: 1.1; }
+.practice__best-score small { color: var(--color-text-tertiary); font-size: var(--text-xs); }
+.practice__side-empty { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+.practice__recent li { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+.practice__recent-score { flex: none; color: var(--color-text-secondary); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.practice__recent-score b { color: var(--color-text); }
+
+/* The round */
+
+.practice__play { display: grid; justify-items: center; gap: var(--space-4); max-width: 760px; margin: 0 auto; }
+
+.practice__hud { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-5); width: 100%; }
+.practice__hud-scope { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.practice__hud-stats { display: flex; align-items: center; gap: var(--space-4); }
+.practice__hud-stat { display: grid; justify-items: center; min-width: 52px; font-variant-numeric: tabular-nums; }
+.practice__hud-stat small { color: var(--color-text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.practice__hud-stat b { color: var(--tone-text, var(--color-text)); font-size: var(--text-xl); font-weight: var(--weight-semibold); line-height: 1.15; }
+.practice__hud-stat em { margin-left: 3px; font-size: var(--text-sm); font-style: normal; }
+.practice__hud-stat.is-hot b { animation: practice-pop var(--duration-base) var(--ease-out); }
+.practice__timer.is-low b { color: var(--color-danger); }
+
+.practice__time { width: 100%; height: 4px; overflow: hidden; border-radius: var(--radius-full); background: var(--color-surface-active); }
+.practice__time span {
+  display: block;
+  height: 100%;
+  background: var(--course, var(--color-accent));
+  transform-origin: left center;
+  transition: transform .2s linear;
+}
+
+.practice__card {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-height: 260px;
+  padding: 40px clamp(20px, 5vw, 48px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--course, var(--color-accent)) 4%, var(--color-surface));
+  box-shadow: inset 0 3px 0 var(--course, var(--color-accent));
+  text-align: center;
+  outline: none;
+  animation: practice-in var(--duration-base) var(--ease-out);
+}
+.practice__card-label {
+  color: color-mix(in srgb, var(--course, var(--color-accent)) 70%, var(--color-text));
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.practice__card-text { max-width: 54ch; margin: 0; color: var(--color-text); font-size: clamp(18px, 2.4vw, 22px); line-height: 1.4; overflow-wrap: anywhere; }
+.practice__answer { display: grid; justify-items: center; gap: var(--space-2); width: 100%; padding-top: var(--space-4); border-top: 1px dashed var(--color-border-strong); animation: practice-in var(--duration-base) var(--ease-out); }
+.practice__card-text--answer { font-size: clamp(16px, 2vw, 19px); }
+
+.practice__grade { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); width: 100%; }
+.practice__grade .ui-button { height: 44px; padding: 0 20px; font-size: var(--text-base); }
+.practice__grade-button { min-width: 160px; }
+.practice__grade-button.is-right { border-color: color-mix(in srgb, var(--color-green) 55%, var(--color-border)); background: var(--color-green-tint); color: var(--color-green-text); }
+.practice__grade-button.is-wrong { border-color: color-mix(in srgb, var(--color-pink) 45%, var(--color-border)); background: var(--color-pink-tint); color: var(--color-pink-text); }
+.practice__grade-button.is-right:hover { border-color: var(--color-green); background: var(--color-green-tint); }
+.practice__grade-button.is-wrong:hover { border-color: var(--color-pink); background: var(--color-pink-tint); }
+
+.practice kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  opacity: .7;
+}
+
+.practice__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); width: 100%; }
+.practice__choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard), opacity var(--duration-fast) var(--ease-standard);
+}
+.practice__choice:hover:not(:disabled) { border-color: var(--course, var(--color-accent)); background: var(--color-surface-hover); }
+.practice__choice:disabled { cursor: default; }
+.practice__choice > span { min-width: 0; overflow-wrap: anywhere; }
+.practice__choice kbd { flex: none; color: var(--color-text-tertiary); }
+.practice__choice.is-right { border-color: var(--color-green); background: var(--color-green-tint); color: var(--color-green-text); }
+.practice__choice.is-wrong { border-color: var(--color-pink); background: var(--color-pink-tint); color: var(--color-pink-text); }
+.practice__choice.is-dim { opacity: .5; }
+
+.practice__keys { margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); text-align: center; }
+
+/* Results */
+
+.practice__title--best { display: flex; align-items: center; gap: var(--space-3); }
+.practice__title-icon { width: 44px; height: 44px; }
+.practice__title-icon svg { width: 22px; height: 22px; }
+.practice__stats .ui-stat__value.practice__stat-value { color: var(--tone-text, var(--color-text)); }
+.practice__stat-skeleton { display: inline-block; width: 48px; height: 24px; vertical-align: middle; }
+.practice__lede { max-width: 62ch; margin: var(--space-3) 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.practice__summary > .ui-alert { margin-top: var(--space-4); }
+.practice__summary-actions { margin-top: var(--space-5); }
+
+.practice__missed-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.practice__missed li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); padding: var(--space-3) var(--space-5); font-size: var(--text-sm); }
+.practice__missed-front { color: var(--color-text); font-weight: var(--weight-medium); }
+.practice__missed-back { color: var(--color-text-secondary); }
+
+.practice__result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+}
+.practice__result-side { display: grid; justify-items: center; gap: 2px; padding: var(--space-4); border: 1px solid transparent; border-radius: var(--radius-md); background: var(--tone-tint); text-align: center; }
+.practice__result-side.is-winner { border-color: var(--tone); }
+.practice__result-name { color: var(--tone-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.practice__result-score { color: var(--tone-text); font-size: 36px; font-weight: var(--weight-semibold); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.practice__result-vs { color: var(--color-text-tertiary); font-family: var(--font-serif); font-size: var(--text-xl); }
+.practice__result-verdict { grid-column: 1 / -1; margin: 0; color: var(--color-text); font-size: var(--text-md); text-align: center; }
+
+/* Challenge dialog */
+
+.practice__dialog { width: min(520px, 100%); }
+.practice__dialog-body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6); }
+.practice__dialog-lede { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.practice__share-note { align-items: flex-start; }
+.practice__people { display: grid; gap: var(--space-2); max-height: 300px; margin: 0; padding: 0; overflow: auto; border: 0; }
+.practice__person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.practice__person:hover { background: var(--color-surface-hover); }
+.practice__person.is-chosen { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface)); }
+.practice__person input { flex: none; accent-color: var(--color-accent); }
+
+@keyframes practice-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes practice-pop { 50% { transform: scale(1.12); } }
+
+@media (max-width: 900px) {
+  .practice__layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 560px) {
+  .practice__setup,
+  .practice__side { padding: var(--space-4); }
+  .practice__fields { grid-template-columns: minmax(0, 1fr); }
+  .practice__options .ui-segmented { display: flex; }
+  .practice__options .ui-segmented__item { flex: 1; justify-content: center; }
+  .practice__option { flex: 1 1 100%; }
+  .practice__actions .ui-button { flex: 1 1 auto; height: 44px; }
+  .practice__challenge-row { flex-wrap: wrap; padding: var(--space-3) var(--space-4); }
+  .practice__challenge-row .practice__row-text { flex: 1 1 calc(100% - 50px); }
+  .practice__challenge-row .practice__row-actions { width: 100%; justify-content: flex-end; }
+  .practice__recent li { flex-wrap: wrap; gap: var(--space-1); padding: var(--space-3) var(--space-4); }
+  .practice__hud-stats { width: 100%; justify-content: space-between; gap: var(--space-2); }
+  .practice__card { min-height: 220px; padding: 32px 18px; }
+  .practice__choices { grid-template-columns: minmax(0, 1fr); }
+  .practice__grade-button { flex: 1 1 0; min-width: 0; }
+  .practice__grade kbd,
+  .practice__keys { display: none; }
+  .practice__missed li { grid-template-columns: minmax(0, 1fr); gap: 2px; padding: var(--space-3) var(--space-4); }
+  .practice__result { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); }
+  .practice__result-vs { justify-self: center; }
+  .practice__dialog-body { padding: var(--space-4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .practice__card,
+  .practice__answer,
+  .practice__hud-stat.is-hot b { animation: none; }
+  .practice__time span { transition: none; }
+}

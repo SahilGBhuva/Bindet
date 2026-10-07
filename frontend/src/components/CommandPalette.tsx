@@ -16,7 +16,7 @@ const COMMANDS: Command[] = [
   { id: 'progress', screen: 'progress', href: '#progress', label: 'Progress', detail: 'Mastery, XP, and streaks', keywords: 'stats xp streak mastery', group: 'Go to' },
   { id: 'chat', screen: 'chat', href: '#chat', label: 'Messages', detail: 'Study group conversations', keywords: 'groups friends messages chat', group: 'Go to' },
   { id: 'profile', screen: 'profile', href: '#profile', label: 'Friends & groups', detail: 'People, groups, and your profile', keywords: 'social account groups friends', group: 'Go to' },
-  { id: 'games', screen: 'games', href: '#games', label: 'Practice lab', detail: 'Study games (coming soon)', keywords: 'play arcade games', group: 'Go to' },
+  { id: 'games', screen: 'games', href: '#games', label: 'Practice lab', detail: 'Timed rounds, personal bests and challenges', keywords: 'play games quick round challenge friends personal best practice', group: 'Go to' },
   { id: 'settings', screen: 'settings', href: '#settings', label: 'Settings', detail: 'Account, theme, and preferences', keywords: 'account preferences theme dark light', group: 'Go to' },
   { id: 'more', screen: 'more', href: '#more', label: 'Help', detail: 'Guides and feedback', keywords: 'help about feedback', group: 'Go to' },
 ]

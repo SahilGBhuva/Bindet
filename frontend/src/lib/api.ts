@@ -251,7 +251,7 @@ export function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
-async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
   const { timeoutMs, signal: callerSignal, ...init } = options ?? {}
   const headers = new Headers(init.headers)
   if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
