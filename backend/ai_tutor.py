@@ -277,7 +277,9 @@ def math_spans(text: str) -> list[tuple[int, int]]:
         i += 1
     return spans
 _LATEX_TEXT_COMMAND = re.compile(r"\\(?:text|mathrm|textbf|mathbf|mathit|operatorname|textit)\s*\{([^{}]*)\}")
-_LATEX_FRACTION = re.compile(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
+# Each \frac argument is a {group} or, as in TeX, a single token: \frac12, \frac1{2}, \frac\pi2.
+_FRACTION_ARG = r"(?:\{([^{}]*)\}|(\\[a-zA-Z]+|[^\s{}\\]))"
+_LATEX_FRACTION = re.compile(r"\\[dt]?frac\s*" + _FRACTION_ARG + r"\s*" + _FRACTION_ARG)
 _LATEX_ROOT = re.compile(r"\\sqrt\s*\{([^{}]*)\}")
 
 
@@ -295,8 +297,16 @@ def without_math(text: str) -> str:
 
 
 def _simple(value: str) -> str:
+    """A fraction part as it can be written without brackets: a (signed) number or word, a
+    command or sqrt(...); anything else is bracketed."""
     value = value.strip()
-    return value if re.fullmatch(r"[\w.]+|\\[a-zA-Z]+|sqrt\([\w.]+\)", value) else f"({value})"
+    return value if re.fullmatch(r"[-+]?(?:[\w.]+|\\[a-zA-Z]+|sqrt\([\w.]+\))", value) else f"({value})"
+
+
+def _fraction(match: re.Match) -> str:
+    numerator = match.group(1) if match.group(1) is not None else match.group(2)
+    denominator = match.group(3) if match.group(3) is not None else match.group(4)
+    return f"{_simple(numerator)}/{_simple(denominator)}"
 
 
 def latex_to_plain(text: str) -> str:
@@ -311,7 +321,7 @@ def latex_to_plain(text: str) -> str:
         value = _LATEX_TEXT_COMMAND.sub(lambda match: match.group(1), value)
         value = _LATEX_ROOT.sub(lambda match: f"sqrt({match.group(1).strip()})", value)
         value = re.sub(r"\\sqrt\s*(\w)", r"sqrt(\1)", value)
-        value = _LATEX_FRACTION.sub(lambda match: f"{_simple(match.group(1))}/{_simple(match.group(2))}", value)
+        value = _LATEX_FRACTION.sub(_fraction, value)
     value = re.sub(r"\\sqrt\s*(\w)", r"sqrt(\1)", value)
     value = re.sub(r"\\(?:cdot|times)\b", "*", value)
     value = re.sub(r"\\div\b", "/", value)

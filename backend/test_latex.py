@@ -88,5 +88,19 @@ class LatexTests(unittest.TestCase):
         self.assertEqual(ai_tutor.without_math("$x$5"), "$x$5")  # a closing $ before a digit is money, not math
 
 
+    def test_brace_less_and_signed_fractions_grade_deterministically(self):
+        """S-L1: \\frac12, \\frac1{2}, \\frac{-1}{2} and -\\frac12 are ordinary fractions."""
+        for student, reference in [
+            ("\\frac12", "1/2"), ("\\frac12", "0.5"), ("$\\frac1{2}$", "1/2"), ("\\frac{1}2", "0.5"),
+            ("\\frac{-1}{2}", "-1/2"), ("\\frac{-1}{2}", "-0.5"), ("-\\frac12", "-0.5"), ("1/2", "$\\frac12$"),
+            ("\\dfrac34", "0.75"),
+        ]:
+            with self.subTest(student=student, reference=reference):
+                self.assertTrue(main.deterministic_verdict(student, reference, "Fractions"))
+        self.assertNotEqual(main.deterministic_verdict("\\frac{-1}{2}", "1/2", "Fractions"), True)
+        self.assertEqual(ai_tutor.latex_to_plain("\\frac\\pi2"), "pi/2")
+        self.assertEqual(ai_tutor.latex_to_plain("\\frac{a+b}{c}"), "(a+b)/c")
+
+
 if __name__ == "__main__":
     unittest.main()
