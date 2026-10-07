@@ -288,6 +288,91 @@ class ExtractionCacheTests(CacheTestCase):
             self.assertNotEqual(ai_cache.extraction_key(PNG_BYTES, "image/png"), key)
 
 
+GRADE = {"correct": True, "score": 90, "mistake_type": None, "misconception": None, "explanation": "Yes: ATP is made there.", "hint": None}
+
+
+class GradingCacheTests(CacheTestCase):
+    def ask(self, student_id, question="Which organelle makes most of a cell's ATP?", reference="Mitochondria", topic="Cells", difficulty=2):
+        return questions.save_question(student_id, question, reference, topic, difficulty)
+
+    def answer(self, student_id, question_id, text="the powerhouse of the cell"):
+        with self.as_user(student_id):
+            return main.analyze_answer(main.AnswerRequest(question_id=question_id, student_answer=text), "Bearer t")
+
+    def test_the_same_answer_is_graded_once(self):
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)) as grader:
+            first = self.answer("alex", self.ask("alex"))
+        grader.assert_called_once()
+        _, budget = self.no_quota_or_budget()
+        with patch.object(ai_tutor, "grade_answer") as grader, patch.object(main.database, "check_social_rate_limit") as limits, budget, \
+                self.assertLogs("bindit.ai", "INFO") as logs:
+            second = self.answer("sam", self.ask("sam"), "  the  powerhouse of the cell ")
+        grader.assert_not_called()
+        limits.assert_not_called()  # no ai_grading quota on a hit
+        self.assertTrue(any('"op":"grade_answer","outcome":"cache_hit"' in line for line in logs.output))
+        for field in ("correct", "score", "explanation", "grading_source"):
+            self.assertEqual(getattr(second, field), getattr(first, field))
+        self.assertEqual(second.grading_source, "ai")
+
+    def test_xp_and_attempts_are_unchanged_by_a_hit(self):
+        wrong = dict(GRADE, correct=False, score=20, mistake_type="concept", explanation="Not the nucleus.", hint="Think energy.")
+        question_id = self.ask("alex")
+        with patch.object(ai_tutor, "grade_answer", return_value=wrong):
+            self.answer("alex", question_id, "the nucleus")
+        with patch.object(ai_tutor, "grade_answer") as grader:
+            retried = self.answer("alex", question_id, "the nucleus")  # retrying the same wrong answer
+        grader.assert_not_called()
+        self.assertFalse(retried.correct)
+        self.assertEqual(retried.xp_earned, 0)
+        self.assertEqual(questions.get_question("alex", question_id)["completed"], questions.MISSED)
+        self.assertEqual(database.get_progress("alex")["attempts"], 2)
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)):
+            right = self.answer("alex", question_id)
+        self.assertEqual(right.xp_earned, main.RETRY_XP)
+        with patch.object(ai_tutor, "grade_answer") as grader, self.assertRaises(HTTPException) as caught:
+            self.answer("alex", question_id)  # a cached grade never reopens a completed question
+        self.assertEqual(caught.exception.status_code, 409)
+        grader.assert_not_called()
+
+    def test_any_change_to_question_reference_answer_topic_or_difficulty_is_a_miss(self):
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)):
+            self.answer("alex", self.ask("alex"))
+        variants = [
+            {"question": "Which organelle makes ATP in plants?"},
+            {"reference": "The mitochondrion"},
+            {"topic": "Respiration"},
+            {"difficulty": 3},
+        ]
+        for variant in variants:
+            with self.subTest(**variant):
+                with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)) as grader:
+                    self.answer("sam", self.ask("sam", **variant))
+                grader.assert_called_once()
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)) as grader:
+            self.answer("sam", self.ask("sam"), "The powerhouse of the cell")  # case is kept
+        grader.assert_called_once()
+
+    def test_failed_grading_is_not_cached(self):
+        question_id = self.ask("alex")
+        with patch.object(ai_tutor, "grade_answer", side_effect=ai_tutor.AITutorError("down")), self.assertRaises(HTTPException):
+            self.answer("alex", question_id)
+        self.assertEqual(self.rows("grading_cache"), [])
+
+    def test_guests_never_use_the_cache(self):
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)):
+            self.answer("alex", self.ask("alex"))
+        question_id = self.ask(main.guest_student_id("guest-1"))
+        result = main.analyze_answer(main.AnswerRequest(question_id=question_id, student_answer="the powerhouse of the cell", student_id="guest-1"))
+        self.assertEqual(result.grading_source, "fallback")
+
+    def test_the_cache_stores_a_hash_and_the_grade_only(self):
+        with patch.object(ai_tutor, "grade_answer", return_value=dict(GRADE)):
+            self.answer("alex", self.ask("alex"), "a distinctive answer about mitochondria")
+        [row] = self.rows("grading_cache")
+        self.assertRegex(row["key"], r"^[0-9a-f]{64}$")
+        self.assertNotIn("distinctive", json.dumps(row, default=str))
+
+
 class CacheLockdownTests(unittest.TestCase):
     def test_cache_tables_are_backend_only(self):
         for name in ai_cache.RETENTION:

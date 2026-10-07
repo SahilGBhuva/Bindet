@@ -197,6 +197,14 @@ extraction_cache = Table(
     Column("hits", Integer, nullable=False, default=0),
 )
 
+grading_cache = Table(
+    "grading_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("result", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("hits", Integer, nullable=False, default=0),
+)
+
 progress_claims = Table(
     "progress_claims", metadata,
     Column("guest_id", String(100), primary_key=True),
@@ -233,6 +241,7 @@ RLS_TABLES = (
     "friend_quests",
     "friendships",
     "generated_questions",
+    "grading_cache",
     "profiles",
     "progress_claims",
     "question_bank",
@@ -268,6 +277,7 @@ CLIENT_REVOKED_TABLES = (
     "flashcard_cache",
     "flashcard_jobs",
     "flashcards",
+    "grading_cache",
     "tutor_conversations",
     "tutor_messages",
     "workspace_group_milestones",
@@ -1730,6 +1740,7 @@ def reset_db() -> None:
     with active_engine.begin() as connection:
         connection.execute(delete(flashcard_cache))
         connection.execute(delete(extraction_cache))
+        connection.execute(delete(grading_cache))
         connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))

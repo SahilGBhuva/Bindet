@@ -2300,46 +2300,68 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         explanation = "Not quite yet. Use the hint and try again."
         hint = make_hint(question["question"], mistake_type)
     else:
-        if authorization:
-            try:
-                database.check_social_rate_limit(student_id, "ai_grading", 120, 1440)
-            except ValueError as error:
-                raise social_error(error) from error
-        if authorization and not global_ai_available():
-            # The shared AI budget is used up. Grading offline would mark answers the
-            # AI might accept as wrong, so don't grade at all: the student can resubmit.
-            raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"})
-        try:
-            if not authorization:
-                raise ai_tutor.AITutorError("Sign in for AI grading")
-            ai_result = ai_tutor.grade_answer(
-                question=question["question"],
-                correct_answer=question["correct_answer"],
-                student_answer=data.student_answer,
-                topic=question["topic"],
-                difficulty=question["difficulty"],
-                session_id=ai_session_id(student_id, question["topic"], "grading"),
-            )
-            correct = ai_result["correct"]
-            score = ai_result["score"]
-            mistake_type = ai_result["mistake_type"]
-            misconception = ai_result["misconception"]
-            explanation = ai_result["explanation"]
-            hint = ai_result["hint"]
+        # The identical answer to this question was graded by the AI before: reuse that
+        # grade (no AI call, grading quota or budget). Only the model call is replaced;
+        # completion, XP and attempts below are unchanged. AI grading is for signed-in
+        # students only, so guests never read the cache.
+        grade_key = ai_cache.grading_key(
+            question=question["question"], correct_answer=question["correct_answer"], student_answer=data.student_answer,
+            topic=question["topic"], difficulty=question["difficulty"],
+        ) if authorization else None
+        cached_grade = ai_cache.cached_grade(grade_key) if grade_key else None
+        if grade_key and ai_cache.enabled():
+            ai_tutor.log_ai_event("grade_answer", outcome="cache_hit" if cached_grade else "cache_miss", student_id=student_id, tier="text")
+        if cached_grade is not None:
+            correct = cached_grade["correct"]
+            score = cached_grade["score"]
+            mistake_type = cached_grade["mistake_type"]
+            misconception = cached_grade["misconception"]
+            explanation = cached_grade["explanation"]
+            hint = cached_grade["hint"]
             grading_source = "ai"
-        except ai_tutor.AITutorError as error:
+        else:
             if authorization:
-                # The AI grader is unavailable: leave the question open and award or deny
-                # nothing, so the student can resubmit the same answer.
-                raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"}) from error
-            # Guests never get AI grading; they keep the offline fallback.
-            correct = False
-            score = 0
-            mistake_type = classify_mistake(data.student_answer, question["correct_answer"])
-            misconception = None
-            explanation = "That answer is not correct yet. Use the hint and try again."
-            hint = make_hint(question["question"], mistake_type)
-            grading_source = "fallback"
+                try:
+                    database.check_social_rate_limit(student_id, "ai_grading", 120, 1440)
+                except ValueError as error:
+                    raise social_error(error) from error
+            if authorization and not global_ai_available():
+                # The shared AI budget is used up. Grading offline would mark answers the
+                # AI might accept as wrong, so don't grade at all: the student can resubmit.
+                raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"})
+            try:
+                if not authorization:
+                    raise ai_tutor.AITutorError("Sign in for AI grading")
+                ai_result = ai_tutor.grade_answer(
+                    question=question["question"],
+                    correct_answer=question["correct_answer"],
+                    student_answer=data.student_answer,
+                    topic=question["topic"],
+                    difficulty=question["difficulty"],
+                    session_id=ai_session_id(student_id, question["topic"], "grading"),
+                )
+                if grade_key:
+                    ai_cache.store_grade(grade_key, ai_result)
+                correct = ai_result["correct"]
+                score = ai_result["score"]
+                mistake_type = ai_result["mistake_type"]
+                misconception = ai_result["misconception"]
+                explanation = ai_result["explanation"]
+                hint = ai_result["hint"]
+                grading_source = "ai"
+            except ai_tutor.AITutorError as error:
+                if authorization:
+                    # The AI grader is unavailable: leave the question open and award or deny
+                    # nothing, so the student can resubmit the same answer.
+                    raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"}) from error
+                # Guests never get AI grading; they keep the offline fallback.
+                correct = False
+                score = 0
+                mistake_type = classify_mistake(data.student_answer, question["correct_answer"])
+                misconception = None
+                explanation = "That answer is not correct yet. Use the hint and try again."
+                hint = make_hint(question["question"], mistake_type)
+                grading_source = "fallback"
 
     xp = 0
     if correct:

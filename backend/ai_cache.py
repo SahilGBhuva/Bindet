@@ -20,6 +20,7 @@ import json
 import os
 import threading
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Table, delete, select, update
@@ -34,6 +35,7 @@ import note_ingestion
 RETENTION = {
     "flashcard_cache": timedelta(days=30),
     "extraction_cache": timedelta(days=30),
+    "grading_cache": timedelta(days=30),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
@@ -182,6 +184,45 @@ def store_extraction(key: str, text: str) -> bool:
     if not text.strip():
         return False
     return store("extraction_cache", key, text=text)
+
+
+# --- Answer grading ----------------------------------------------------------------
+#
+# The grader sees the question, reference answer, student answer, topic and
+# difficulty, so all of them are in the key. Shared across students only for the
+# identical question and answer, which the requester has just typed themselves.
+
+GRADE_FIELDS = ("correct", "score", "mistake_type", "explanation", "hint", "misconception")
+
+
+def grading_version() -> str:
+    return "grade-v1:" + fingerprint(
+        ai_tutor.GRADE_PROMPT, ai_tutor.OPENROUTER_MODEL,
+        ai_tutor.OPERATIONS["grade_answer"]["max_tokens"], ai_tutor.OPERATIONS["grade_answer"]["temperature"],
+    )
+
+
+def normalize_answer(answer: str) -> str:
+    """Unicode-normalised with whitespace collapsed. Case is kept: it can matter (CO vs Co)."""
+    return " ".join(unicodedata.normalize("NFKC", answer or "").split())
+
+
+def grading_key(*, question: str, correct_answer: str, student_answer: str, topic: str, difficulty: int) -> str:
+    return make_key("grading", grading_version(), question, correct_answer, normalize_answer(student_answer), topic, int(difficulty))
+
+
+def cached_grade(key: str) -> dict | None:
+    row = lookup("grading_cache", key)
+    result = row["result"] if row is not None else None
+    if not isinstance(result, dict) or set(result) != set(GRADE_FIELDS) or not isinstance(result["correct"], bool):
+        return None
+    return result
+
+
+def store_grade(key: str, result: dict) -> bool:
+    if set(result) != set(GRADE_FIELDS) or not isinstance(result.get("correct"), bool) or not result.get("explanation"):
+        return False
+    return store("grading_cache", key, result={field: result[field] for field in GRADE_FIELDS})
 
 
 def reset_caches() -> None:
