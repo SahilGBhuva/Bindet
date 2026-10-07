@@ -38,9 +38,16 @@ function Palette({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     inputRef.current?.focus()
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
+    // Captured on window before anything else sees it, and consumed: Esc closes only the
+    // palette, not also the task panel or drawer underneath (they ignore handled keys).
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape, true)
+    return () => window.removeEventListener('keydown', closeOnEscape, true)
   }, [onClose])
 
   const go = (command: Command | undefined) => {
