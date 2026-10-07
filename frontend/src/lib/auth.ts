@@ -23,7 +23,7 @@ const DATA_OWNER_KEY = 'bindit-data-owner'
 const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
 // Purely cosmetic preferences that are safe to keep across accounts. Anything
 // that reflects account data (important items, task tabs/notices) is cleared.
-const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2'])
+const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2', 'bindit:focus-text-size'])
 // Device-level flags that aren't account data and must outlive a sign-out.
 const DEVICE_KEYS = new Set<string>(['bindit-reset-requested'])
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'

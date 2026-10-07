@@ -13,6 +13,7 @@ import {
 } from '../lib/session'
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
+import { FOCUS_SIZES, loadFocusSize, saveFocusSize } from '../lib/studyPrefs'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
@@ -110,6 +111,14 @@ function ArrowIcon({ direction }: { direction: 'left' | 'right' }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d={direction === 'left' ? 'M19 12H5m6-6-6 6 6 6' : 'M5 12h14m-6-6 6 6-6 6'} />
+    </svg>
+  )
+}
+
+function FocusIcon({ on }: { on: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d={on ? 'M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' : 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'} />
     </svg>
   )
 }
@@ -258,6 +267,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string; cardsFailed: boolean }>({ key: '', status: 'loading', error: '', cardsFailed: false })
   const [libraryRequest, setLibraryRequest] = useState(0)
   const [panelFn, setPanelFn] = useState<ToolView>('scan')
+  // Focus mode: the current card or question, large, with the panel's other controls hidden.
+  const [focusMode, setFocusMode] = useState(false)
+  const [focusSize, setFocusSize] = useState(() => (data.sandboxed ? 1 : loadFocusSize()))
   const [orderOpen, setOrderOpen] = useState(false)
   const [orderDrag, setOrderDrag] = useState('')
   const [lookCourse, setLookCourse] = useState('')
@@ -338,6 +350,18 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [orderOpen])
+
+  const focusOn = focusMode && panelFn !== 'scan'
+
+  // Esc leaves focus mode (unless a menu or dialog is open; Esc closes that first).
+  useEffect(() => {
+    if (!focusOn || orderOpen || menuCourse) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) setFocusMode(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [focusOn, orderOpen, menuCourse])
 
   useEffect(() => {
     if (!menuCourse) return
@@ -1169,6 +1193,34 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </div>
   ) : null
   const loadingQuestion = quizBusy && !quizChecking
+
+  function changeFocusSize(step: number) {
+    const next = Math.max(0, Math.min(FOCUS_SIZES.length - 1, step))
+    setFocusSize(next)
+    if (!data.sandboxed) saveFocusSize(next)
+  }
+
+  const focusControls = (
+    <div className="tools__focus-controls">
+      {focusOn ? (
+        <div className="tools__text-size" role="group" aria-label="Text size">
+          <button className="ui-button ui-button--sm ui-button--ghost" type="button" onClick={() => changeFocusSize(focusSize - 1)} disabled={focusSize === 0} aria-label="Smaller text">A−</button>
+          <span className="tools__text-size-value" aria-live="polite">{Math.round(FOCUS_SIZES[focusSize] * 100)}%</span>
+          <button className="ui-button ui-button--sm ui-button--ghost" type="button" onClick={() => changeFocusSize(focusSize + 1)} disabled={focusSize === FOCUS_SIZES.length - 1} aria-label="Larger text">A+</button>
+        </div>
+      ) : null}
+      <button
+        className={`ui-button ui-button--sm tools__focus-toggle${focusOn ? ' is-on' : ''}`}
+        type="button"
+        aria-pressed={focusOn}
+        title={focusOn ? 'Leave focus mode (Esc)' : 'Large text, fewer distractions'}
+        onClick={() => setFocusMode((on) => !on)}
+      >
+        <FocusIcon on={focusOn} />Focus
+      </button>
+    </div>
+  )
+  const focusStyle = { ['--focus-scale' as string]: String(FOCUS_SIZES[focusSize]) }
   // Pasted text is only saved by "Add typed notes"; leaving it behind would look like saved notes.
   const unsavedPaste = pastedNotes.trim() && panelFn !== 'scan' ? (
     <div className="ui-alert tools__unsaved" role="status">
@@ -1500,8 +1552,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               ) : null}
 
               {panelFn === 'cards' ? (
-                <div className="tools__cards" role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
+                <div className={`tools__cards${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
                   {unsavedPaste}
+                  {card ? <div className="tools__focus-bar">{focusControls}</div> : null}
                   {card ? (
                     <>
                       <button
@@ -1579,7 +1632,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               ) : null}
 
               {panelFn === 'quiz' ? (
-                <div className="tools__quiz" role="tabpanel" aria-label="Quiz">
+                <div className={`tools__quiz${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="tabpanel" aria-label="Quiz">
                   {unsavedPaste}
                   <div className="tools__quiz-bar">
                     <p className="tools__quiz-source">
@@ -1595,9 +1648,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       <select className="ui-select" aria-label="Level" value={quizDifficulty} onChange={(event) => setQuizDifficulty(Number(event.target.value))}>
                         {QUIZ_LEVELS.map((level) => <option key={level.id} value={level.id}>{level.label}</option>)}
                       </select>
-                      <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
+                      <button className={`ui-button${loadingQuestion ? ' is-busy' : ''}`} type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
                         {quizQuestion && !quizResult && !quizError ? 'Skip' : 'New question'}
                       </button>
+                      {focusControls}
                     </div>
                   </div>
 
