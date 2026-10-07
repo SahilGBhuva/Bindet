@@ -53,3 +53,45 @@ export function saveInstructions(key: string, value: string) {
     // Not saved; the instructions still apply until the page is closed.
   }
 }
+
+/** Keeps a unit's custom instructions when the unit (or its course) is renamed. */
+export function moveInstructions(from: { course: string; unit: string }, to: { course: string; unit: string }) {
+  for (const kind of ['quiz', 'cards'] as const) {
+    const fromKey = instructionsKey(kind, from.course, from.unit)
+    const toKey = instructionsKey(kind, to.course, to.unit)
+    if (fromKey === toKey) continue
+    const value = loadInstructions(fromKey)
+    if (!value) continue
+    if (!loadInstructions(toKey)) saveInstructions(toKey, value)
+    saveInstructions(fromKey, '')
+  }
+}
+
+/**
+ * Courses deleted from this device. Their notes stay saved on the server, so without this
+ * list the next sync (which adds every course that holds notes) would bring them back.
+ * Study data: cleared on sign-out like the instructions.
+ */
+const HIDDEN_COURSES_KEY = 'bindit:hidden-courses'
+
+export function loadHiddenCourses(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HIDDEN_COURSES_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function setCourseHidden(name: string, hidden: boolean) {
+  const key = name.trim()
+  if (!key) return
+  try {
+    const current = loadHiddenCourses().filter((item) => item.trim() !== key)
+    const next = hidden ? [...current, key] : current
+    if (next.length) localStorage.setItem(HIDDEN_COURSES_KEY, JSON.stringify(next.slice(-200)))
+    else localStorage.removeItem(HIDDEN_COURSES_KEY)
+  } catch {
+    // Not saved; the course may come back on the next sync.
+  }
+}

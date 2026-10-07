@@ -603,6 +603,7 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   justify-content: center;
   gap: var(--space-4);
   width: 100%;
+  min-width: 0;
   animation: tools-turn var(--duration-base) var(--ease-out);
 }
 
@@ -617,7 +618,8 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 .tools__card.is-flipped .tools__card-label { color: color-mix(in srgb, var(--course, var(--color-accent)) 70%, var(--color-text)); }
 
 .tools__card-text {
-  max-width: 32ch;
+  max-width: min(32ch, 100%);
+  min-width: 0;
   font-family: var(--font-serif);
   font-size: clamp(24px, 4.4cqi, 32px);
   line-height: 1.25;
@@ -748,6 +750,7 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 }
 
 .tools__question {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -767,7 +770,21 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 .tools__question-skeleton .ui-skeleton:first-child { width: 110px; height: 10px; margin-bottom: var(--space-1); }
 .tools__question-skeleton .ui-skeleton:nth-child(3) { width: 56%; }
 
+/* The server had no new question left, so it showed one the student has seen. */
+.tools__repeat-note {
+  align-self: flex-start;
+  margin: 0;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-amber-tint);
+  color: var(--color-amber-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
 .tools__prompt {
+  max-width: 100%;
+  min-width: 0;
   margin: 0;
   color: var(--color-text);
   font-size: clamp(var(--text-lg), 3.4cqi, var(--text-xl));
@@ -942,7 +959,8 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 }
 
 .tools__result-body {
-  max-width: 68ch;
+  max-width: min(68ch, 100%);
+  min-width: 0;
   margin: 0;
   color: var(--color-text);
   font-size: var(--text-base);
@@ -1320,7 +1338,7 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 }
 
 .tools__cards.is-focus .tools__card-text {
-  max-width: 36ch;
+  max-width: min(36ch, 100%);
   color: var(--color-text);
   font-size: calc(clamp(26px, 5cqi, 40px) * var(--focus-scale, 1));
   line-height: 1.5;
@@ -1346,7 +1364,7 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 }
 
 .tools__quiz.is-focus .tools__prompt {
-  max-width: 40ch;
+  max-width: min(40ch, 100%);
   color: var(--color-text);
   font-size: calc(clamp(22px, 4cqi, 32px) * var(--focus-scale, 1));
   font-weight: var(--weight-semibold);

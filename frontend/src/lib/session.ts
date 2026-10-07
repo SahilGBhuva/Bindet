@@ -221,3 +221,31 @@ export function loadSession(): Session | null {
     return null
   }
 }
+
+/*
+ * Adds every course and unit that holds saved notes (listed by the server, from any
+ * device) to this device's notebook, so no saved note is out of reach. Never removes or
+ * renames anything: a unit renamed on another device shows next to the old name here.
+ * New courses get the next free course color. Courses deleted on this device (hidden)
+ * stay deleted. Returns the same notebook when nothing was missing.
+ */
+export function mergeNoteScopes(notebook: Notebook, scopes: { course: string; unit: string }[], hidden: string[] = []): Notebook {
+  let courses = notebook.courses
+  for (const scope of scopes) {
+    const courseName = (scope.course ?? '').trim()
+    const unitName = (scope.unit ?? '').trim()
+    if (!courseName || !unitName || hidden.some((name) => sameName(name, courseName))) continue
+    const index = courses.findIndex((course) => sameName(course.name, courseName))
+    if (index === -1) {
+      courses = [...courses, { name: courseName, units: [unitName], tone: pickCourseTone(courses) }]
+    } else if (!courses[index].units.some((unit) => sameName(unit, unitName))) {
+      courses = courses.map((course, at) => (at === index ? { ...course, units: [...course.units, unitName] } : course))
+    }
+  }
+  if (courses === notebook.courses) return notebook
+  const activeCourse = courses.some((course) => course.name === notebook.activeCourse) ? notebook.activeCourse : courses[0].name
+  const activeUnit = activeCourse === notebook.activeCourse && notebook.activeUnit
+    ? notebook.activeUnit
+    : (unitsFor(courses, activeCourse)[0] ?? '')
+  return { ...notebook, courses, activeCourse, activeUnit }
+}

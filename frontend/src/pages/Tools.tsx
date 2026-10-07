@@ -1,10 +1,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { AI_BREAK_MESSAGE, ApiError, isAbortError, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
-import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, UploadedNote } from '../lib/api'
+import { AI_BREAK_MESSAGE, ApiError, isAbortError, parseServerTime, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, NoteScope, UploadedNote } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
   fileToCourseImageDataUrl,
+  mergeNoteScopes,
   notesFor,
   pickCourseTone,
   sameName,
@@ -15,12 +16,95 @@ import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
 import { prepareNotePhoto } from '../lib/notePhoto'
-import { FOCUS_SIZES, INSTRUCTIONS_MAX, instructionsKey, loadFocusSize, loadInstructions, saveFocusSize, saveInstructions } from '../lib/studyPrefs'
+import {
+  FOCUS_SIZES,
+  INSTRUCTIONS_MAX,
+  instructionsKey,
+  loadFocusSize,
+  loadHiddenCourses,
+  loadInstructions,
+  moveInstructions,
+  saveFocusSize,
+  saveInstructions,
+  setCourseHidden,
+} from '../lib/studyPrefs'
 import type { InstructionKind } from '../lib/studyPrefs'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
 type NoteSource = 'file' | 'paste' | 'photo'
+// repeat: the server had nothing new, so this is a question the student has seen before.
+type QuizQuestion = GeneratedQuestion & { repeat?: boolean }
+type Place = { course: string; unit: string }
+// A rename on this page: a whole course (no unit), or one unit of a course.
+type Rename = { course: string; unit?: string; newCourse: string; newUnit?: string }
+
+// The server's limits: notes up to 4 MB, course names up to 120 characters and unit names up to 160.
+const NOTE_MAX_BYTES = 4 * 1024 * 1024
+const COURSE_NAME_MAX = 120
+const UNIT_NAME_MAX = 160
+const NAME_TOO_LONG_MESSAGE = `Course names can be up to ${COURSE_NAME_MAX} characters and unit names up to ${UNIT_NAME_MAX}. Pick a shorter name.`
+// Photos (PNG, JPEG, WebP) are shrunk before they are sent, so their size is checked by the server.
+const SHRUNK_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+// Course and unit names holding saved notes are fetched again on focus, at most this often.
+const SCOPES_REFRESH_MS = 30_000
+
+/* A name the server rejected for its length (422), or the request otherwise invalid. */
+function nameRejected(error: unknown) {
+  return error instanceof ApiError && error.status === 422
+}
+
+/* Where a note filed under `place` is now, after the renames made since. */
+function placeAfter(place: Place, renames: Rename[]): Place {
+  let { course, unit } = place
+  for (const rename of renames) {
+    if (!sameName(course, rename.course)) continue
+    if (rename.unit === undefined) course = rename.newCourse
+    else if (sameName(unit, rename.unit)) {
+      course = rename.newCourse
+      unit = rename.newUnit ?? unit
+    }
+  }
+  return { course, unit }
+}
+
+/* Instructions being typed, moved along with renamed units. */
+function movedDrafts(drafts: Record<string, string>, moves: [Place, Place][]) {
+  let next = drafts
+  for (const [from, to] of moves) {
+    for (const kind of ['quiz', 'cards'] as const) {
+      const fromKey = instructionsKey(kind, from.course, from.unit)
+      if (!(fromKey in next)) continue
+      const { [fromKey]: value, ...rest } = next
+      next = { ...rest, [instructionsKey(kind, to.course, to.unit)]: value }
+    }
+  }
+  return next
+}
+
+/* The calendar day on this device, as YYYY-MM-DD (not the UTC day toISOString gives). */
+function localDay(time: number) {
+  const date = new Date(time)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/* A card's front without case or spacing differences, so a duplicate card shows once. */
+function cardFace(front: string) {
+  return front.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function uniqueCards(list: Flashcard[]) {
+  const seen = new Set<string>()
+  return list.filter((card) => {
+    const face = cardFace(card.front)
+    if (seen.has(face)) return false
+    seen.add(face)
+    return true
+  })
+}
+
+const collapse = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim()
+const TEXT_NOTE = /\.(txt|md|csv|json)$/i
 
 /* A camera photo of notes on its way in: prepared once, so Retry resends the same image. */
 type PhotoJob = {
@@ -83,7 +167,7 @@ function Chevron({ direction }: { direction: 'up' | 'down' }) {
 const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
 function formatDay(value: string) {
-  const time = Date.parse(value)
+  const time = parseServerTime(value)
   return Number.isNaN(time) ? '' : dayFormat.format(time)
 }
 
@@ -225,7 +309,7 @@ function noteFromServer(note: UploadedNote): NoteDeposit {
 }
 
 const RECENT_QUESTIONS = 10
-const NO_NEW_QUESTION_MESSAGE = 'Couldn’t find a new question right now. Try again in a moment.'
+const NO_NEW_QUESTION_MESSAGE = 'You’ve gone through every question I can make from these notes — add more notes or change the instructions.'
 
 /* A question's text without case, spacing or punctuation, so a reworded repeat still matches. */
 function questionFingerprint(text: string) {
@@ -235,6 +319,7 @@ function questionFingerprint(text: string) {
 /* Why a unit's notes or flashcards didn't load, in words the student can act on. */
 function libraryFailure(error: unknown, what: 'notes' | 'flashcards' = 'notes') {
   const fallback = `Couldn’t load your ${what}.`
+  if (nameRejected(error)) return `${fallback} ${NAME_TOO_LONG_MESSAGE}`
   if (error instanceof RequestTimeoutError) return `${fallback} ${error.message}`
   if (error instanceof ApiError && (error.status === 401 || error.status === 429)) return `${fallback} ${error.message}`
   return `${fallback} Check your connection and try again.`
@@ -276,13 +361,19 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [cardIndex, setCardIndex] = useState(0)
   const [cardFlipped, setCardFlipped] = useState(false)
   const [quizDifficulty, setQuizDifficulty] = useState(1)
-  const [quizQuestion, setQuizQuestion] = useState<GeneratedQuestion | null>(null)
+  const [quizQuestion, setQuizQuestion] = useState<QuizQuestion | null>(null)
   const [quizAnswer, setQuizAnswer] = useState('')
   const [quizResult, setQuizResult] = useState<AnswerResult | null>(null)
   const [quizBusy, setQuizBusy] = useState(false)
   const [quizChecking, setQuizChecking] = useState(false)
   const [quizError, setQuizError] = useState('')
   const [quizFailed, setQuizFailed] = useState<'' | 'load' | 'check'>('')
+  // The server says this question was already answered correctly (a repeated Check).
+  const [quizDone, setQuizDone] = useState(false)
+  // Every course and unit holding saved notes (null until loaded, or if the server can't say).
+  const [scopes, setScopes] = useState<NoteScope[] | null>(null)
+  // A note whose text matches one already in its unit, waiting for "Add anyway".
+  const [duplicate, setDuplicate] = useState<{ source: NoteSource; file: File; name: string; course: string; unit: string } | null>(null)
   // Saved flashcards and server notes from every unit opened so far; each view filters its own.
   const [savedCards, setSavedCards] = useState<Flashcard[]>([])
   const [serverNotes, setServerNotes] = useState<NoteDeposit[]>([])
@@ -325,6 +416,16 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   // At most one question is fetched ahead per quiz setting; leaving that setting cancels it.
   const prefetchedQuestions = useRef(new Map<string, { promise: Promise<GeneratedQuestion>; controller: AbortController; instructions: string }>())
   const intentTimer = useRef(0)
+  // The question request in flight, and the quiz setting it was for.
+  const quizRequest = useRef<{ key: string; controller: AbortController } | null>(null)
+  // Every course and unit rename made on this page, in order; a note uploaded or a deck
+  // made while one happened is moved after it lands, so it follows its unit.
+  const renameLog = useRef<Rename[]>([])
+  // Saved notes' sizes (from the server), to spot the same notes added twice.
+  const noteSizes = useRef(new Map<string, number>())
+  // Where each known note is filed now, so a check on a note follows its unit through renames.
+  const notePlaces = useRef(new Map<string, Place>())
+  const scopeRequest = useRef(0)
 
   const courses = notebook.courses
   const activeCourse = notebook.activeCourse
@@ -337,18 +438,23 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const unitNotes = [
     ...localUnitNotes,
     ...notesFor(serverNotes, activeCourse, activeUnit).filter((note) => !localUnitNotes.some((item) => item.id === note.id)),
-  ].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
-  const courseNoteCount = new Set([
-    ...notebook.deposits.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
-    ...serverNotes.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
-  ]).size
+  ].sort((a, b) => (parseServerTime(b.createdAt) || 0) - (parseServerTime(a.createdAt) || 0))
+  // Every note in the course, on any device (the server's count), or those this page has seen.
+  const courseScopes = scopes?.filter((scope) => sameName(scope.course, activeCourse))
+  const courseNoteCount = courseScopes
+    ? courseScopes.reduce((sum, scope) => sum + scope.note_count, 0)
+    : new Set([
+      ...notebook.deposits.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
+      ...serverNotes.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
+    ]).size
   const unitKey = `${activeCourse}|${activeUnit}`
   const libraryLoaded = library.key === unitKey && library.status === 'ready'
   const libraryLoading = library.key !== unitKey || library.status === 'loading'
   const libraryFailed = library.key === unitKey && library.status === 'error'
   const cardsFailed = libraryFailed || (libraryLoaded && library.cardsFailed)
   const unitNoteIds = new Set(unitNotes.map((note) => note.id))
-  const cards = savedCards.filter((item) => unitNoteIds.has(item.note_id))
+  // The same notes added twice make the same cards: each question shows once.
+  const cards = uniqueCards(savedCards.filter((item) => unitNoteIds.has(item.note_id)))
   const card = cards.length ? cards[cardIndex % cards.length] : null
   // A note the server has not reported on yet has no flashcards so far.
   const cardsFor = (note: NoteDeposit): NoteCards | undefined =>
@@ -369,6 +475,46 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   useEffect(() => {
     data.saveNotebook(notebook)
   }, [data, notebook])
+
+  useEffect(() => {
+    const places = notePlaces.current
+    for (const note of [...serverNotes, ...notebook.deposits]) places.set(note.id, { course: note.course, unit: note.unit })
+  }, [notebook.deposits, serverNotes])
+
+  // Adds every course and unit holding saved notes (from any device) to this device's
+  // notebook, and keeps the server's note counts. Nothing here is ever removed.
+  function loadScopes() {
+    const request = ++scopeRequest.current
+    const since = renameLog.current.length
+    data.listNoteScopes(accessToken).then((listed) => {
+      if (!mounted.current || request !== scopeRequest.current) return
+      // A rename made while this was loading has moved those notes already: list them under the new name.
+      const renames = renameLog.current.slice(since)
+      const list = renames.length ? listed.map((scope) => ({ ...scope, ...placeAfter(scope, renames) })) : listed
+      setScopes(list)
+      const hidden = data.sandboxed ? [] : loadHiddenCourses()
+      setNotebook((current) => {
+        const merged = mergeNoteScopes(current, list, hidden)
+        return merged === current ? current : { ...merged, courses: withCourseTones(merged.courses) }
+      })
+    }, () => undefined)
+  }
+
+  const syncScopes = useEffectEvent(() => loadScopes())
+
+  // On opening the page, and when the window comes back into focus (at most every 30 s).
+  useEffect(() => {
+    syncScopes()
+    if (data.sandboxed) return
+    let last = Date.now()
+    const onFocus = () => {
+      if (Date.now() - last < SCOPES_REFRESH_MS) return
+      last = Date.now()
+      syncScopes()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [data])
 
   // The sidebar (or another tab) can change the saved notebook, e.g. pick another course:
   // take its version so this page and the sidebar always show the same course.
@@ -442,6 +588,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   function applyLibrary(course: string, unit: string, result: FlashcardLibrary | null, notes: UploadedNote[] | null) {
     // The server matched these to the course and unit asked for, so they are filed under
     // exactly those names (the server trims names; this page's may differ only in spacing).
+    for (const note of notes ?? []) noteSizes.current.set(note.id, note.size_bytes)
     const listed = (notes ?? []).map((note) => ({ ...noteFromServer(note), course, unit }))
     const fromStates: NoteDeposit[] = (result?.notes ?? [])
       .filter((state) => !listed.some((note) => note.id === state.note_id))
@@ -499,15 +646,41 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setLibraryRequest((count) => count + 1)
   }
 
+  /* Where a note is filed now: it may have moved with a rename since `note` was read. */
+  function placeOf(note: NoteRef): Place {
+    return notePlaces.current.get(note.id) ?? { course: note.course, unit: note.unit }
+  }
+
+  /*
+   * The server files a new note, or a note's new cards, under the names it had when the
+   * request started. If its course or unit was renamed meanwhile, the rename's move has
+   * already run, so they are moved after it here: the note and its cards follow their unit.
+   */
+  function followRenames(from: Place, since: number): Place {
+    const to = placeAfter(from, renameLog.current.slice(since))
+    if (to.course === from.course && to.unit === from.unit) return to
+    void data.moveNotes({ course: from.course, unit: from.unit, newCourse: to.course, newUnit: to.unit }, accessToken)
+      .then(() => { if (mounted.current) { reloadLibrary(); loadScopes() } })
+      .catch(() => {
+        if (!mounted.current) return
+        setNotice(`Couldn’t move your latest notes to “${to.unit}”. They’re saved in “${from.unit}” in ${from.course}.`)
+        loadScopes()
+      })
+    return to
+  }
+
   // Writes and saves one note's flashcards. New cards join the deck as soon as they arrive.
   async function makeFlashcards(note: NoteRef, retry = false) {
     if (generatingNotes.current.has(note.id)) return
     generatingNotes.current.add(note.id)
+    const origin = placeOf(note)
+    const since = renameLog.current.length
     setNoteCards((current) => ({ ...current, [note.id]: { status: 'generating', count: 0, error: '', retry: false } }))
     let stillWorking = false
     try {
       const result = await data.generateNoteFlashcards(note.id, retry ? { retry: true } : undefined, accessToken)
       if (!mounted.current) return
+      followRenames(origin, since)
       setSavedCards((current) => mergeCards(current, result.cards))
       setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
     } catch (error) {
@@ -518,18 +691,20 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     } finally {
       if (!stillWorking) generatingNotes.current.delete(note.id)
     }
-    if (stillWorking) await watchFlashcards(note)
+    if (stillWorking) await watchFlashcards(note, origin, since)
   }
 
   // Checks the saved flashcards every few seconds, for about a minute, until the note's cards are done.
-  async function watchFlashcards(note: NoteRef) {
+  // The note is found by its id wherever it is filed now, so a rename meanwhile doesn't lose it.
+  async function watchFlashcards(note: NoteRef, origin: Place, since: number) {
     try {
       for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
         await wait(POLL_INTERVAL_MS)
         if (!mounted.current) return
         let state: NoteFlashcardState | undefined
         try {
-          const result = await data.listFlashcards({ course: note.course, unit: note.unit }, accessToken)
+          const place = placeOf(note)
+          const result = await data.listFlashcards(place, accessToken)
           if (!mounted.current) return
           setSavedCards((current) => mergeCards(current, result.cards))
           state = result.notes.find((item) => item.note_id === note.id)
@@ -537,6 +712,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           continue
         }
         if (!state || state.status === 'generating') continue
+        followRenames(origin, since)
         const settled: NoteCards = state.status === 'none'
           ? { status: 'failed', count: 0, error: FLASHCARD_FAILED_MESSAGE, retry: true }
           : noteCardsFromServer(state)
@@ -572,11 +748,38 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     void loadQuizQuestion()
   })
 
+  // A question fetched for another course, unit or level is no longer wanted: cancel it and
+  // clear the old question, so the new setting starts from a clean slate.
+  const leaveQuizSetting = useEffectEvent((key: string) => {
+    const pending = quizRequest.current
+    if (pending && pending.key !== key) {
+      pending.controller.abort()
+      quizRequest.current = null
+    }
+    if (loadedQuizKey.current === key || !loadedQuizKey.current) return
+    quizSequence.current += 1
+    loadedQuizKey.current = ''
+    setQuizQuestion(null)
+    setQuizResult(null)
+    setQuizAnswer('')
+    setQuizError('')
+    setQuizFailed('')
+    setQuizDone(false)
+    setQuizBusy(false)
+    setQuizChecking(false)
+  })
+
   useEffect(() => {
-    if (panelFn !== 'quiz' || loadedQuizKey.current === quizKey) return
+    leaveQuizSetting(quizKey)
+  }, [quizKey])
+
+  // A question is asked for only once the unit's notes have loaded (or failed to): asking
+  // earlier would ask again as soon as they arrive, since the notes are part of the setting.
+  useEffect(() => {
+    if (panelFn !== 'quiz' || libraryLoading || loadedQuizKey.current === quizKey) return
     loadedQuizKey.current = quizKey
     loadQuizForKey()
-  }, [panelFn, quizKey])
+  }, [panelFn, quizKey, libraryLoading])
 
   // A question fetched ahead for another course, unit or level is no longer wanted.
   useEffect(() => {
@@ -593,6 +796,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const prefetched = prefetchedQuestions.current
     return () => {
       window.clearTimeout(intentTimer.current)
+      quizRequest.current?.controller.abort()
       prefetched.forEach((entry) => entry.controller.abort())
       prefetched.clear()
     }
@@ -602,6 +806,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     event.preventDefault()
     const name = newCourse.trim()
     if (!name) return
+    if (!data.sandboxed) setCourseHidden(name, false)
     setNotebook((current) => {
       if (current.courses.some((course) => course.name === name)) {
         return { ...current, activeCourse: name, activeUnit: unitsFor(current.courses, name)[0] ?? '' }
@@ -678,6 +883,15 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   function renameCourseLocally(from: string, to: string) {
+    const rename: Rename = { course: from, newCourse: to }
+    renameLog.current.push(rename)
+    setScopes((current) => current?.map((scope) => ({ ...scope, ...placeAfter(scope, [rename]) })) ?? null)
+    // The course's units keep their custom instructions.
+    if (!data.sandboxed) {
+      setCourseHidden(to, false)
+      for (const unit of unitsFor(courses, from)) moveInstructions({ course: from, unit }, { course: to, unit })
+    }
+    setInstructionDrafts((current) => movedDrafts(current, unitsFor(courses, from).map((unit) => [{ course: from, unit }, { course: to, unit }])))
     setNotebook((current) => ({
       ...current,
       courses: current.courses.map((course) => (course.name === from ? { ...course, name: to } : course)),
@@ -696,12 +910,17 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   async function moveServerNotes(scope: { course: string; unit?: string; newCourse: string; newUnit?: string }, undo: () => void) {
     try {
       await data.moveNotes(scope, accessToken)
-      if (mounted.current) reloadLibrary()
+      if (mounted.current) {
+        reloadLibrary()
+        loadScopes()
+      }
     } catch (error) {
       if (!mounted.current) return
       undo()
       const what = scope.unit ?? scope.course
-      setNotice(`Couldn’t rename “${what}”${error instanceof ApiError && error.message ? `: ${error.message}` : '. Check your connection and try again.'}`)
+      const reason = nameRejected(error) ? ` ${NAME_TOO_LONG_MESSAGE}`
+        : error instanceof ApiError && error.message ? `: ${error.message}` : '. Check your connection and try again.'
+      setNotice(`Couldn’t rename “${what}”${reason}`)
     }
   }
 
@@ -749,6 +968,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           : (unitsFor(courses, activeCourse)[0] ?? '')
       return { ...current, courses, deposits, activeCourse, activeUnit }
     })
+    // Its notes stay saved on the server: keep the course from coming back on the next sync.
+    if (!data.sandboxed) setCourseHidden(name, true)
     setNotice(`Removed “${name}”.`)
     setLookCourse((current) => (current === name ? '' : current))
   }
@@ -832,6 +1053,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   function renameUnitLocally(courseName: string, from: string, to: string) {
+    const rename: Rename = { course: courseName, unit: from, newCourse: courseName, newUnit: to }
+    renameLog.current.push(rename)
+    setScopes((current) => current?.map((scope) => ({ ...scope, ...placeAfter(scope, [rename]) })) ?? null)
+    if (!data.sandboxed) moveInstructions({ course: courseName, unit: from }, { course: courseName, unit: to })
+    setInstructionDrafts((current) => movedDrafts(current, [[{ course: courseName, unit: from }, { course: courseName, unit: to }]]))
     setNotebook((current) => {
       const courses = current.courses.map((course) =>
         course.name === courseName
@@ -883,21 +1109,28 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     const prefetched = stored && stored.instructions === quizInstructions.trim() ? stored : undefined
     // The question on screen is never shown again as the "new" one; the last few are avoided when possible.
     const onScreen = quizQuestion ? questionFingerprint(quizQuestion.question) : ''
-    const repeats = (question: GeneratedQuestion) => {
+    const repeats = (question: QuizQuestion) => {
+      // The server marks a repeat it chose because nothing new was left: asking again won't help.
+      if (question.repeat) return false
       const fingerprint = questionFingerprint(question.question)
       return fingerprint === onScreen || shownQuestions.current.includes(fingerprint)
     }
+    // Only one question request at a time; leaving this quiz setting cancels it.
+    quizRequest.current?.controller.abort()
+    const controller = new AbortController()
+    quizRequest.current = { key: quizKey, controller }
     setQuizBusy(true)
     setQuizChecking(false)
     setQuizError('')
     setQuizFailed('')
     setQuizResult(null)
+    setQuizDone(false)
     setQuizAnswer('')
     try {
       if (prefetched) prefetchedQuestions.current.delete(quizKey)
-      let next = await (prefetched?.promise ?? requestQuizQuestion())
+      let next: QuizQuestion = await (prefetched?.promise ?? requestQuizQuestion(controller.signal))
       // A question fetched ahead can go stale; a repeat is replaced by asking once more.
-      if (repeats(next)) next = await requestQuizQuestion()
+      if (sequence === quizSequence.current && repeats(next)) next = await requestQuizQuestion(controller.signal)
       if (sequence !== quizSequence.current) return
       if (onScreen && questionFingerprint(next.question) === onScreen) {
         setQuizError(NO_NEW_QUESTION_MESSAGE)
@@ -910,7 +1143,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       primeNextQuestion()
     } catch (error) {
       if (sequence === quizSequence.current && !isAbortError(error)) {
-        if (error instanceof ApiError && error.code === 'instructions_rejected') {
+        if (error instanceof ApiError && error.code === 'no_new_question') {
+          setQuizError(NO_NEW_QUESTION_MESSAGE)
+        } else if (error instanceof ApiError && error.code === 'instructions_rejected') {
           // Shown under the instructions field; the question area says what to do.
           setInstructionErrors((current) => ({ ...current, [quizInstructionsKey]: error.message }))
           setQuizError('Change or clear your instructions to get a new question.')
@@ -921,10 +1156,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       }
     } finally {
       if (sequence === quizSequence.current) setQuizBusy(false)
+      if (quizRequest.current?.controller === controller) quizRequest.current = null
     }
   }
 
-  function requestQuizQuestion(signal?: AbortSignal) {
+  function requestQuizQuestion(signal?: AbortSignal): Promise<QuizQuestion> {
     // A unit always has a course and unit, so the server writes the question from its
     // notes (or, without notes, from the unit name); the math topics are never used here.
     return data.generateQuestion(
@@ -960,7 +1196,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   function showIntent(view: ToolView) {
     window.clearTimeout(intentTimer.current)
     if (view === panelFn || !activeCourse || !activeUnit) return
-    if (view === 'quiz' && loadedQuizKey.current !== quizKey) primeNextQuestion()
+    if (view === 'quiz' && !libraryLoading && loadedQuizKey.current !== quizKey) primeNextQuestion()
   }
 
   function hoverIntent(view: ToolView) {
@@ -974,7 +1210,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   async function gradeAnswer(answer: string) {
-    if (!quizQuestion || !answer.trim() || quizBusy) return
+    if (!quizQuestion || !answer.trim() || quizBusy || quizResult?.correct || quizDone) return
     setQuizBusy(true)
     setQuizChecking(true)
     setQuizError('')
@@ -988,6 +1224,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         correct: result.correct,
       })
     } catch (error) {
+      // Already answered correctly (a second Check that crossed the first): nothing went wrong.
+      if (error instanceof ApiError && error.status === 409) {
+        setQuizDone(true)
+        return
+      }
       // A 503 means the grader is busy or offline: the answer wasn't graded, so the
       // server's message says to resubmit, and Try again sends the same answer.
       const unavailable = error instanceof ApiError && error.status === 503
@@ -1009,7 +1250,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     event.preventDefault()
     const text = pastedNotes.trim()
     if (!text || uploadBusy) return
-    const typedNote = new File([text], `typed-notes-${new Date().toISOString().slice(0, 10)}.txt`, { type: 'text/plain' })
+    // Named for the day on this device (toISOString would give the UTC day).
+    const typedNote = new File([text], `typed-notes-${localDay(data.now())}.txt`, { type: 'text/plain' })
     const saved = await ingestNote(typedNote, 'paste')
     if (saved) setPastedNotes('')
   }
@@ -1058,28 +1300,63 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setPhoto((current) => current && { ...current, stage: saved ? 'added' : 'failed' })
   }
 
-  async function ingestNote(candidate: File, source: NoteSource, onSent?: () => void): Promise<boolean> {
+  /* A note already in this unit with the same text (or, for PDFs and documents, the same file). */
+  async function sameNotes(candidate: File): Promise<NoteDeposit | undefined> {
+    const isText = TEXT_NOTE.test(candidate.name) || candidate.type.startsWith('text/')
+    let text = ''
+    if (isText) {
+      try {
+        text = collapse(await candidate.text())
+      } catch {
+        return undefined
+      }
+    }
+    return unitNotes.find((note) => {
+      const size = noteSizes.current.get(note.id)
+      if (!isText) return size === candidate.size && note.fileName.toLowerCase() === candidate.name.toLowerCase()
+      const preview = collapse(note.textPreview ?? '')
+      if (!preview) return false
+      // The preview is the start of the note's text: with the same size, the same start means the same notes.
+      return size === undefined ? preview === text : size === candidate.size && text.startsWith(preview)
+    })
+  }
+
+  async function ingestNote(candidate: File, source: NoteSource, onSent?: () => void, allowDuplicate = false): Promise<boolean> {
     if (!activeUnit) {
       setUploadError({ source, message: source === 'photo' ? 'Pick or create a unit first.' : `Create a unit in ${activeCourse} first, then send your notes there.`, retry: false })
       return false
     }
-    if (candidate.size > 10 * 1024 * 1024) {
-      setUploadError({ source, message: `“${candidate.name}” is ${formatBytes(candidate.size)}. Notes must be 10 MB or smaller.`, retry: false })
+    if (!SHRUNK_TYPES.includes(candidate.type) && candidate.size > NOTE_MAX_BYTES) {
+      setUploadError({ source, message: `“${candidate.name}” is ${formatBytes(candidate.size)}. Notes must be 4 MB or smaller. Try a smaller file, or split it into parts.`, retry: false })
       return false
     }
     // The note is filed under the course and unit it was sent to, even if the student moves on meanwhile.
     const course = activeCourse
     const unit = activeUnit
+    setDuplicate(null)
     setUploading(source)
+    if (!allowDuplicate && source !== 'photo') {
+      const twin = await sameNotes(candidate)
+      if (twin) {
+        setUploading('')
+        setUploadError(null)
+        setDuplicate({ source, file: candidate, name: twin.fileName, course, unit })
+        return false
+      }
+    }
+    const since = renameLog.current.length
     setUploadError(null)
     setNotice('')
     try {
       const uploaded = await data.uploadNote(candidate, course, unit, accessToken, onSent ? { onSent } : undefined)
+      noteSizes.current.set(uploaded.id, uploaded.size_bytes)
+      // Renamed while it uploaded: the note follows its unit (the server filed it under the old name).
+      const place = followRenames({ course, unit }, since)
       const deposit: NoteDeposit = {
         id: uploaded.id,
         // The server trims names; keep this page's spelling so the note shows in its unit.
-        course,
-        unit,
+        course: place.course,
+        unit: place.unit,
         fileName: uploaded.file_name,
         createdAt: uploaded.created_at,
         status: uploaded.status,
@@ -1090,12 +1367,20 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         setFile(null)
         if (fileInput.current) fileInput.current.value = ''
       }
-      setNotice(`Added “${deposit.fileName}” to ${course} → ${unit}.`)
+      setNotice(`Added “${deposit.fileName}” to ${place.course} → ${place.unit}.`)
+      notePlaces.current.set(deposit.id, place)
+      // (After a move, the counts are fetched once the move is done.)
+      if (place.course === course && place.unit === unit) loadScopes()
       // Flashcards are written in the background; the note's row shows how that is going.
       void makeFlashcards(deposit)
       return true
     } catch (error) {
-      setUploadError({ source, message: error instanceof Error ? error.message : 'Could not read that note.', retry: true })
+      // Too large (413) or a name too long (422): sending the same thing again won't help.
+      const tooLarge = error instanceof ApiError && error.status === 413
+      const message = nameRejected(error) ? NAME_TOO_LONG_MESSAGE
+        : tooLarge ? error.message || 'Notes must be 4 MB or smaller.'
+          : error instanceof Error ? error.message : 'Could not read that note.'
+      setUploadError({ source, message, retry: !tooLarge && !nameRejected(error) })
       return false
     } finally {
       setUploading('')
@@ -1117,6 +1402,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         return next
       })
       setNotice(`Removed “${note.fileName}”.`)
+      loadScopes()
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not remove that note.')
     } finally {
@@ -1136,12 +1422,37 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   function onCardsKey(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
     const target = event.target as HTMLElement
-    if (target.closest('input, textarea, select')) return
+    if (target.closest('input, textarea, select, [contenteditable]') || event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.key === ' ') {
+      // Space flips the card from anywhere in the deck (after Next, focus is on Next), but
+      // other buttons here (Retry, Focus, Make flashcards…) keep Space for themselves.
+      const control = target.closest('button, a')
+      if (!card || (control && !control.hasAttribute('data-card-key'))) return
+      event.preventDefault()
+      if (!event.repeat) setCardFlipped((open) => !open)
+      return
+    }
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
     event.preventDefault()
     goCard(event.key === 'ArrowRight' ? 'next' : 'prev')
   }
+
+  async function addAnyway() {
+    const pending = duplicate
+    if (!pending) return
+    setDuplicate(null)
+    const saved = await ingestNote(pending.file, pending.source, undefined, true)
+    if (saved && pending.source === 'paste') setPastedNotes('')
+  }
+
+  const duplicateAlert = (source: NoteSource) => duplicate && duplicate.source === source && duplicate.course === activeCourse && duplicate.unit === activeUnit ? (
+    <div className="ui-alert ui-alert--info" role="alert">
+      <span>You already added these notes (“{duplicate.name}”).</span>
+      <button className="ui-button ui-button--sm" type="button" onClick={() => void addAnyway()} disabled={uploadBusy}>Add anyway</button>
+      <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => setDuplicate(null)}>Cancel</button>
+    </div>
+  ) : null
 
   function retryQuiz() {
     if (quizFailed === 'check' && quizQuestion && quizAnswer.trim()) void gradeAnswer(quizAnswer)
@@ -1180,6 +1491,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         value={newCourse}
         onChange={(event) => setNewCourse(event.target.value)}
         placeholder="Course name"
+        maxLength={COURSE_NAME_MAX}
         autoComplete="off"
         autoCapitalize="words"
         enterKeyHint="done"
@@ -1226,6 +1538,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                 value={newCourse}
                 onChange={(event) => setNewCourse(event.target.value)}
                 placeholder="e.g. Biology"
+                maxLength={COURSE_NAME_MAX}
                 autoComplete="off"
                 autoCapitalize="words"
                 enterKeyHint="done"
@@ -1311,6 +1624,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </div>
   ) : null
   const loadingQuestion = quizBusy && !quizChecking
+  // A question answered correctly is done: its answer can't be changed or sent again.
+  const answered = Boolean(quizResult?.correct) || quizDone
 
   function setInstructions(key: string, value: string) {
     const next = value.slice(0, INSTRUCTIONS_MAX)
@@ -1336,11 +1651,14 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       for (const [index, note] of notes.entries()) {
         if (!mounted.current) return
         const before = noteCards[note.id]
+        const origin = placeOf(note)
+        const since = renameLog.current.length
         generatingNotes.current.add(note.id)
         setNoteCards((current) => ({ ...current, [note.id]: { status: 'generating', count: 0, error: '', retry: false } }))
         try {
           const result = await data.remakeNoteFlashcards(note.id, instructions, accessToken)
           if (!mounted.current) return
+          followRenames(origin, since)
           setSavedCards((current) => mergeCards(current.filter((item) => item.note_id !== note.id), result.cards))
           setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
           setCardIndex(0)
@@ -1465,6 +1783,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         className="ui-input"
                         value={courseRenameDraft}
                         onChange={(event) => setCourseRenameDraft(event.target.value)}
+                        maxLength={COURSE_NAME_MAX}
                         aria-label={`Rename ${course.name}`}
                         autoComplete="off"
                         autoCapitalize="words"
@@ -1522,6 +1841,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     className="ui-input"
                     value={renameDraft}
                     onChange={(event) => setRenameDraft(event.target.value)}
+                    maxLength={UNIT_NAME_MAX}
                     aria-label={`Rename ${item}`}
                     autoComplete="off"
                     autoCapitalize="words"
@@ -1563,6 +1883,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                   value={newUnit}
                   onChange={(event) => setNewUnit(event.target.value)}
                   placeholder="Unit name"
+                  maxLength={UNIT_NAME_MAX}
                   autoComplete="off"
                   autoCapitalize="words"
                   enterKeyHint="done"
@@ -1724,10 +2045,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                               ? 'Pulling out the text so flashcards and quizzes can use it.'
                               : file
                                 ? `${formatBytes(file.size)} · Choose to pick a different file`
-                                : 'PDF, DOCX, TXT, Markdown, CSV, JSON, or a photo of handwritten notes. Up to 10 MB.'}
+                                : 'PDF, DOCX, TXT, Markdown, CSV, JSON, or a photo of handwritten notes. Up to 4 MB.'}
                           </span>
                         </button>
                       </div>
+                      {duplicateAlert('file')}
                       {uploadError?.source === 'file' ? (
                         <div className="ui-alert" role="alert">
                           <span>{uploadError.message}</span>
@@ -1766,6 +2088,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         rows={6}
                         readOnly={uploading === 'paste'}
                       />
+                      {duplicateAlert('paste')}
                       {uploadError?.source === 'paste' ? (
                         <div className="ui-alert" role="alert">
                           <span>{uploadError.message}</span>
@@ -1835,6 +2158,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       <button
                         className={`tools__card${cardFlipped ? ' is-flipped' : ''}`}
                         type="button"
+                        data-card-key=""
                         onClick={() => setCardFlipped((open) => !open)}
                       >
                         <span className="tools__card-face" key={`${card.id}-${cardFlipped ? 'back' : 'front'}`} aria-live="polite">
@@ -1850,11 +2174,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         <span style={{ transform: `scaleX(${cardPosition / cards.length})` }} />
                       </div>
                       <div className="tools__card-nav">
-                        <button className="ui-button" type="button" onClick={() => goCard('prev')} disabled={cards.length < 2}>
+                        <button className="ui-button" type="button" data-card-key="" onClick={() => goCard('prev')} disabled={cards.length < 2}>
                           <ArrowIcon direction="left" />Previous
                         </button>
                         <span className="tools__card-count" aria-live="polite">{cardPosition} of {cards.length}</span>
-                        <button className="ui-button" type="button" onClick={() => goCard('next')} disabled={cards.length < 2}>
+                        <button className="ui-button" type="button" data-card-key="" onClick={() => goCard('next')} disabled={cards.length < 2}>
                           Next<ArrowIcon direction="right" />
                         </button>
                       </div>
@@ -1935,7 +2259,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         {QUIZ_LEVELS.map((level) => <option key={level.id} value={level.id}>{level.label}</option>)}
                       </select>
                       <button className={`ui-button${loadingQuestion ? ' is-busy' : ''}`} type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
-                        {quizQuestion && !quizResult && !quizError ? 'Skip' : 'New question'}
+                        {quizQuestion && !quizResult && !quizDone && !quizError ? 'Skip' : 'New question'}
                       </button>
                       {focusControls}
                     </div>
@@ -1954,6 +2278,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     ) : quizQuestion ? (
                       <>
                         <span className="ui-eyebrow">Question · Level {quizQuestion.difficulty || quizDifficulty}</span>
+                        {quizQuestion.repeat ? <p className="tools__repeat-note">You’ve seen this one before.</p> : null}
                         <p className="tools__prompt"><MathText text={quizQuestion.question} /></p>
                         {quizQuestion.choices?.length ? (
                           <div className="tools__choices" role="group" aria-label="Answer choices">
@@ -1966,7 +2291,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                                   type="button"
                                   className={`tools__choice${picked ? ' is-picked' : ''}${verdict ? ` is-${verdict}` : ''}`}
                                   aria-pressed={picked}
-                                  disabled={quizBusy || Boolean(quizResult)}
+                                  disabled={quizBusy || Boolean(quizResult) || quizDone}
                                   onClick={() => {
                                     setQuizAnswer(choice)
                                     void gradeAnswer(choice)
@@ -2000,9 +2325,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         autoCapitalize="off"
                         aria-label="Your answer"
                         autoComplete="off"
-                        disabled={quizBusy || !quizQuestion}
+                        disabled={quizBusy || !quizQuestion || answered}
                       />
-                      <button className={`ui-button ui-button--primary${quizChecking ? ' is-busy' : ''}`} type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim()}>
+                      <button className={`ui-button ui-button--primary${quizChecking ? ' is-busy' : ''}`} type="submit" disabled={quizBusy || !quizQuestion || !quizAnswer.trim() || answered}>
                         Check
                       </button>
                     </form>
@@ -2012,6 +2337,22 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     <div className="ui-alert" role="alert">
                       <span>{quizError}</span>
                       <button className="ui-button ui-button--sm" type="button" onClick={retryQuiz} disabled={quizBusy}>Try again</button>
+                    </div>
+                  ) : null}
+                  {quizDone && !quizResult ? (
+                    <div className="tools__result is-correct" role="status">
+                      <p className="tools__result-title">
+                        <span className="tools__result-icon" aria-hidden="true"><CheckIcon /></span>
+                        Already answered
+                      </p>
+                      <p className="tools__result-body">You’ve already answered this question correctly.</p>
+                      <div className="tools__result-foot">
+                        <div className="tools__quiz-controls tools__result-actions">
+                          <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
+                            Next question<ArrowIcon direction="right" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                   {quizResult ? (
@@ -2113,6 +2454,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           className="ui-input tools__order-rename"
                           value={courseRenameDraft}
                           onChange={(event) => setCourseRenameDraft(event.target.value)}
+                          maxLength={COURSE_NAME_MAX}
                           aria-label={`Rename ${course.name}`}
                           autoComplete="off"
                           autoCapitalize="words"

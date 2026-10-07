@@ -1,10 +1,24 @@
 /* KaTeX output inherits the surrounding ink, so it reads in both themes and in Focus mode. */
 .math .katex { font-size: 1.08em; color: inherit; }
 
+/*
+ * Every expression stays inside its own box: never wider than the line it sits on, and
+ * never painting over the text or controls around it (a broken or hostile expression
+ * included). Inline math clips; display math scrolls.
+ */
+.math {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: middle;
+  contain: paint;
+}
+
 /* Long display equations scroll inside their own box instead of widening the page. */
 .math--display {
   display: block;
   max-width: 100%;
+  max-height: 60vh;
   margin: .5em 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -12,6 +26,17 @@
 }
 
 .math--display .katex-display { margin: 0; }
+
+/* Source shown as text (before KaTeX loads, or when an expression isn't rendered) wraps like text. */
+.math--pending,
+.math--source {
+  display: inline;
+  overflow: visible;
+  contain: none;
+  overflow-wrap: anywhere;
+}
+
+.math--display.math--pending { display: block; }
 
 .math--source {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

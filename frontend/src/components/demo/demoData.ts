@@ -3,6 +3,7 @@ import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { COURSE_TONES } from '../../lib/session'
 import type { NoteDeposit, Notebook, UnitAttempt } from '../../lib/types'
+import type { NoteScope } from '../../lib/api'
 
 /*
  * Sandboxed data for the landing page's live demo. Everything lives in memory
@@ -447,5 +448,17 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     now: () => DEMO_NOW,
     hourOf: () => DEMO_HOUR,
     confirm: () => false,
+    // The demo's notes, counted per course and unit, in memory.
+    listNoteScopes: () => {
+      const scopes = new Map<string, NoteScope>()
+      for (const note of notebook.deposits) {
+        const key = `${note.course}|${note.unit}`
+        const scope = scopes.get(key) ?? { course: note.course, unit: note.unit, note_count: 0, last_added: null }
+        scope.note_count += 1
+        if (!scope.last_added || note.createdAt > scope.last_added) scope.last_added = note.createdAt
+        scopes.set(key, scope)
+      }
+      return wait([...scopes.values()])
+    },
   }
 }
