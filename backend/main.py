@@ -124,15 +124,22 @@ async def measure_request_time(request, call_next):
 
 # Body caps per route. Ordinary JSON routes carry a few KB at most, so they get a
 # small cap: Starlette reads and parses the whole JSON body on the event loop, and a
-# huge body would stall every other request on the instance. Only the note upload
-# (10 MB file plus form fields) and tutor messages (images up to 8.5 MB in total,
-# about 11.4 MB as base64, plus text) need more.
-MAX_REQUEST_BYTES = 12 * 1024 * 1024
+# huge body would stall every other request on the instance. Only the note upload and
+# tutor messages need more, and both stay under Vercel's ~4.5 MB request limit (a
+# bigger body is refused by the platform before it ever reaches the app):
+# - /api/notes: a file of up to 4 MB (note_ingestion.MAX_NOTE_BYTES) plus form fields.
+# - /api/tutor/messages: images of up to 3 MB in total (about 4 MB as base64) plus text.
+MAX_REQUEST_BYTES = 12 * 1024 * 1024  # the middleware's default when no cap is given
 MAX_JSON_BYTES = 64 * 1024
+NOTE_REQUEST_MAX_BYTES = int(4.5 * 1024 * 1024)
+TUTOR_REQUEST_MAX_BYTES = int(4.4 * 1024 * 1024)
 LARGE_BODY_ROUTES = {
-    "/api/notes": MAX_REQUEST_BYTES,
-    "/api/tutor/messages": MAX_REQUEST_BYTES,
+    "/api/notes": NOTE_REQUEST_MAX_BYTES,
+    "/api/tutor/messages": TUTOR_REQUEST_MAX_BYTES,
 }
+NOTE_FILE_TOO_LARGE = {"code": "file_too_large", "message": note_ingestion.NOTE_TOO_LARGE}
+# What a 413 from the body cap says on routes whose clients expect a {code, message}.
+BODY_LIMIT_DETAILS = {"/api/notes": NOTE_FILE_TOO_LARGE}
 
 
 def _size_label(limit: int) -> str:
@@ -151,21 +158,33 @@ class RequestBodyLimit:
     max_bytes applies to every path not listed in route_limits.
     """
 
-    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES, route_limits: dict[str, int] | None = None):
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BYTES, route_limits: dict[str, int] | None = None,
+                 route_details: dict[str, object] | None = None):
         self.app = app
         self.max_bytes = max_bytes
         self.route_limits = dict(route_limits or {})
+        self.route_details = dict(route_details or {})
+
+    @staticmethod
+    def _route_path(path: str, root_path: str = "") -> str:
+        root_path = root_path.rstrip("/")
+        if root_path and (path == root_path or path.startswith(root_path + "/")):
+            path = path[len(root_path):]
+        return path.rstrip("/") or "/"
 
     def limit_for(self, path: str, root_path: str = "") -> int:
         """The cap for a path, matched the way routing would: without the app's mount
         prefix (root_path, which ASGI servers may include in path) or a trailing slash."""
-        root_path = root_path.rstrip("/")
-        if root_path and (path == root_path or path.startswith(root_path + "/")):
-            path = path[len(root_path):]
-        path = path.rstrip("/") or "/"
-        return self.route_limits.get(path, self.max_bytes)
+        return self.route_limits.get(self._route_path(path, root_path), self.max_bytes)
 
-    def _response(self, status: int, detail: str) -> JSONResponse:
+    def detail_for(self, path: str, root_path: str = "") -> object:
+        """What the 413 says for this path: a route's own detail, or the generic sentence."""
+        route = self._route_path(path, root_path)
+        if route in self.route_details:
+            return self.route_details[route]
+        return f"That request is too large. Keep it under {_size_label(self.route_limits.get(route, self.max_bytes))}."
+
+    def _response(self, status: int, detail: object) -> JSONResponse:
         return JSONResponse(status_code=status, content={"detail": detail})
 
     async def __call__(self, scope, receive, send):
@@ -173,7 +192,7 @@ class RequestBodyLimit:
             await self.app(scope, receive, send)
             return
         max_bytes = self.limit_for(scope.get("path", ""), scope.get("root_path", ""))
-        too_large = f"That request is too large. Keep it under {_size_label(max_bytes)}."
+        too_large = self.detail_for(scope.get("path", ""), scope.get("root_path", ""))
         declared = dict(scope.get("headers") or []).get(b"content-length")
         if declared is not None:
             try:
@@ -215,7 +234,7 @@ class RequestBodyLimit:
 
 
 # Added last so it is the outermost middleware and runs before rate limiting or auth.
-app.add_middleware(RequestBodyLimit, max_bytes=MAX_JSON_BYTES, route_limits=LARGE_BODY_ROUTES)
+app.add_middleware(RequestBodyLimit, max_bytes=MAX_JSON_BYTES, route_limits=LARGE_BODY_ROUTES, route_details=BODY_LIMIT_DETAILS)
 
 
 @app.exception_handler(RequestValidationError)
@@ -391,9 +410,11 @@ GUEST_QUESTIONS_PER_DAY = 300
 TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
 TUTOR_IMAGE_MAX_BYTES = 4 * 1024 * 1024
 TUTOR_IMAGE_TOO_LARGE = "Images must be 4 MB or smaller"
-# All images in one message together; as base64 this still fits the 12 MB body cap.
-TUTOR_IMAGES_TOTAL_MAX_BYTES = int(8.5 * 1024 * 1024)
-TUTOR_IMAGES_TOO_LARGE = "Attached images must add up to 8.5 MB or less"
+# All images in one message together. As base64 (4/3 larger) plus the message text this
+# keeps the whole request under TUTOR_REQUEST_MAX_BYTES (4.4 MB), below Vercel's ~4.5 MB
+# request limit, so in practice this total, not the per-image cap, is what binds.
+TUTOR_IMAGES_TOTAL_MAX_BYTES = 3 * 1024 * 1024
+TUTOR_IMAGES_TOO_LARGE = "Attached images must add up to 3 MB or less. Try fewer or smaller photos."
 
 
 class TutorImage(BaseModel):
@@ -1255,6 +1276,8 @@ async def upload_note(
     user = await run_in_threadpool(auth.authenticated_user, authorization)
     await run_in_threadpool(limit_action, user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
+    if len(content) > note_ingestion.MAX_NOTE_BYTES:
+        raise HTTPException(status_code=413, detail=NOTE_FILE_TOO_LARGE)
     return await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
 
 
@@ -1273,10 +1296,10 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
     content_type = note_content_type(suffix, claimed_type)
     pages_skipped = 0
     cache_key = None  # set when the text came from (or went into) the OCR cache
+    if len(content) > note_ingestion.MAX_NOTE_BYTES:
+        raise HTTPException(status_code=413, detail=NOTE_FILE_TOO_LARGE)
     try:
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
-            if len(content) > note_ingestion.MAX_NOTE_BYTES:
-                raise note_ingestion.NoteIngestionError("Notes must be 10 MB or smaller")
             if not content:
                 raise note_ingestion.NoteIngestionError("The uploaded file is empty")
             # The bytes must really be the image type the extension claims; the

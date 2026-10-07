@@ -11,7 +11,10 @@ from zipfile import BadZipFile, ZipFile
 
 from pypdf import PdfReader, PdfWriter, apply_configuration
 
-MAX_NOTE_BYTES = 10 * 1024 * 1024
+# Vercel refuses request bodies over about 4.5 MB before they reach the app, so a note
+# file is capped at 4 MB (leaving room for the multipart form around it).
+MAX_NOTE_BYTES = 4 * 1024 * 1024
+NOTE_TOO_LARGE = 'Notes must be 4 MB or smaller. Try a smaller file or a photo.'
 MAX_STORED_CHARS = 120_000
 TEXT_EXTENSIONS = {'.txt', '.md', '.csv', '.json'}
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
@@ -30,7 +33,7 @@ PDF_TIME_LIMIT_SECONDS = 10.0
 PDF_IN_SUBPROCESS = True
 PDF_TOO_SLOW = 'That PDF took too long to read. Try exporting it again, or upload a smaller file or a DOCX.'
 PDF_UNREADABLE = 'Could not read that file. Try exporting it again.'
-# Tighter than pypdf's 75 MB defaults: a 10 MB note never needs more than this.
+# Tighter than pypdf's 75 MB defaults: a 4 MB note never needs more than this.
 PDF_LIMITS = {
     'maximum_declared_stream_length': 25_000_000,
     'array_based_stream_maximum_output_length': 25_000_000,
@@ -184,7 +187,7 @@ def extract_text(filename: str, content: bytes) -> str:
     if not content:
         raise NoteIngestionError('The uploaded file is empty')
     if len(content) > MAX_NOTE_BYTES:
-        raise NoteIngestionError('Notes must be 10 MB or smaller')
+        raise NoteIngestionError(NOTE_TOO_LARGE)
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
         raise NoteIngestionError('Use a PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG, JPEG, or WEBP file')

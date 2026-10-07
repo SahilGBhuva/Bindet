@@ -576,7 +576,10 @@ class TutorImageValidationTests(unittest.TestCase):
     def test_images_over_four_megabytes_are_refused(self):
         self.assertEqual(main.TUTOR_IMAGE_MAX_BYTES, 4 * 1024 * 1024)
         at_limit = self.data_url("image/png", b"\x89PNG\r\n\x1a\n" + b"0" * (main.TUTOR_IMAGE_MAX_BYTES - 8))
-        self.assertEqual(len(self.parts(at_limit)), 1)
+        # The 3 MB combined cap (which keeps requests under Vercel's limit) would refuse this
+        # image first; lift it here to check the per-image cap on its own.
+        with patch.object(main, "TUTOR_IMAGES_TOTAL_MAX_BYTES", 10 * 1024 * 1024):
+            self.assertEqual(len(self.parts(at_limit)), 1)
         over = self.data_url("image/png", b"\x89PNG\r\n\x1a\n" + b"0" * (main.TUTOR_IMAGE_MAX_BYTES - 7))
         with self.assertRaises(main.HTTPException) as caught:
             self.parts(over)
@@ -619,24 +622,48 @@ class RequestBodyLimitTests(unittest.TestCase):
         self.assertEqual(response.status_code, 413)
 
 
-    def test_json_routes_have_a_small_cap_and_uploads_keep_twelve_megabytes(self):
+    def test_json_routes_have_a_small_cap_and_uploads_stay_under_vercels_limit(self):
         from fastapi.testclient import TestClient
         client = TestClient(main.app)
         over_json = b"x" * (main.MAX_JSON_BYTES + 1)
         response = client.post("/api/tasks", content=over_json, headers={"Content-Type": "application/json"})
         self.assertEqual(response.status_code, 413)
         self.assertIn("64 KB", response.json()["detail"])
+        vercel_limit = int(4.5 * 1024 * 1024)
         # The same size is fine for the note upload and the tutor (they fail later, on sign-in).
-        for path in ("/api/notes", "/api/tutor/messages"):
+        for path, cap in (("/api/notes", main.NOTE_REQUEST_MAX_BYTES), ("/api/tutor/messages", main.TUTOR_REQUEST_MAX_BYTES)):
+            self.assertLessEqual(cap, vercel_limit)
             self.assertNotEqual(client.post(path, content=over_json, headers={"Content-Type": "application/json"}).status_code, 413)
-            response = client.post(path, content=b"x" * (main.MAX_REQUEST_BYTES + 1), headers={"Content-Type": "application/json"})
+            response = client.post(path, content=b"x" * (cap + 1), headers={"Content-Type": "application/json"})
             self.assertEqual(response.status_code, 413)
+        # The note upload's 413 is the friendly {code, message} the app shows.
+        response = client.post("/api/notes", content=b"x" * (main.NOTE_REQUEST_MAX_BYTES + 1), headers={"Content-Type": "application/json"})
+        self.assertEqual(response.json()["detail"], {"code": "file_too_large",
+                                                     "message": "Notes must be 4 MB or smaller. Try a smaller file or a photo."})
+
+    def test_note_files_over_four_megabytes_get_the_friendly_413(self):
+        import asyncio
+        from io import BytesIO
+        from fastapi import UploadFile
+        self.assertEqual(main.note_ingestion.MAX_NOTE_BYTES, 4 * 1024 * 1024)
+        big = b"a" * (main.note_ingestion.MAX_NOTE_BYTES + 1)
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "big-uploader"}), \
+                patch.object(main, "limit_action"):
+            with self.assertRaises(main.HTTPException) as caught:
+                asyncio.run(main.upload_note("Bio", "Cells", UploadFile(filename="notes.txt", file=BytesIO(big)), "Bearer t"))
+        self.assertEqual(caught.exception.status_code, 413)
+        self.assertEqual(caught.exception.detail, {"code": "file_too_large",
+                                                   "message": "Notes must be 4 MB or smaller. Try a smaller file or a photo."})
+        with self.assertRaises(main.HTTPException) as caught:
+            main.ingest_note("big-uploader", "Bio", "Cells", "photo.png", "image/png", b"\x89PNG\r\n\x1a\n" + big)
+        self.assertEqual(caught.exception.detail["code"], "file_too_large")
 
     def test_large_route_caps_survive_a_trailing_slash_or_mount_prefix(self):
         limit = main.RequestBodyLimit(None, max_bytes=main.MAX_JSON_BYTES, route_limits=main.LARGE_BODY_ROUTES)
         for path, root_path in (("/api/notes", ""), ("/api/notes/", ""), ("/backend/api/notes", "/backend"),
                                 ("/backend/api/tutor/messages/", "/backend/"), ("/api/notes", "/backend")):
-            self.assertEqual(limit.limit_for(path, root_path), main.MAX_REQUEST_BYTES, (path, root_path))
+            self.assertEqual(limit.limit_for(path, root_path), main.LARGE_BODY_ROUTES[limit._route_path(path, root_path)], (path, root_path))
+            self.assertGreater(limit.limit_for(path, root_path), 4 * 1024 * 1024)
         for path, root_path in (("/api/tasks", ""), ("/api/notes-extra", ""), ("/backend/api/tasks/", "/backend"),
                                 ("/backendx/api/notes", "/backend")):
             self.assertEqual(limit.limit_for(path, root_path), main.MAX_JSON_BYTES, (path, root_path))
@@ -658,7 +685,9 @@ class RequestBodyLimitTests(unittest.TestCase):
 
     def test_tutor_images_have_a_combined_cap(self):
         import base64
-        raw = b"\x89PNG\r\n\x1a\n" + b"0" * (3 * 1024 * 1024)
+        # 3 MB in total, so the base64 request stays under the 4.4 MB tutor body cap.
+        self.assertLessEqual(main.TUTOR_IMAGES_TOTAL_MAX_BYTES * 4 / 3 + 20_000, main.TUTOR_REQUEST_MAX_BYTES)
+        raw = b"\x89PNG\r\n\x1a\n" + b"0" * (1400 * 1024)
         url = "data:image/png;base64," + base64.b64encode(raw).decode()
         self.assertEqual(len(main.tutor_image_parts([main.TutorImage(data_url=url)] * 2)), 2)
         with self.assertRaises(main.HTTPException) as caught:
