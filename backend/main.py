@@ -366,6 +366,9 @@ class QuestionResponse(BaseModel):
     question: str
     topic: str
     difficulty: int
+    # True when every fresh question was one the student saw recently, so this is the one
+    # they saw longest ago (the app says "You've seen this one before").
+    repeat: bool = False
 
 
 TUTOR_HOURLY_LIMIT = 60
@@ -2061,17 +2064,39 @@ NO_NEW_QUESTION = "Couldn’t find a new question right now. Try again in a mome
 QUIZ_ATTEMPTS = 2
 
 
+def quiz_avoid_list(texts: list[str]) -> list[str]:
+    """Questions for the model to avoid: one per fingerprint (first wins), in order.
+
+    Capped at what the prompt carries (ai_tutor.AVOID_QUESTIONS_MAX), which is large
+    enough for the whole repeat window plus this request's repeats, so no entry is dropped.
+    """
+    kept: list[str] = []
+    prints: set[str] = set()
+    for text in texts:
+        fingerprint = questions.question_fingerprint(text)
+        if not fingerprint or fingerprint in prints:
+            continue
+        prints.add(fingerprint)
+        kept.append(text)
+    return kept[:ai_tutor.AVOID_QUESTIONS_MAX]
+
+
 def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], shared: bool, **request) -> dict:
     """Ask the model for a question that is not one of the student's recent ones.
 
-    The model is shown the recent questions it must not repeat. A private (note-grounded)
-    prompt may name any of them; a shared prompt (its answer is banked for every student)
-    names only ones already in that shared bank, so it never carries anything private. If
-    the model repeats one anyway, it is asked once more; a second repeat is an error.
+    The model is shown every recent question it must not repeat (the same window the
+    repeat check uses). A private (note-grounded) prompt may name any of them; a shared
+    prompt (its answer is banked for every student) names only the bank's own wording of
+    ones already in that shared bank, so it never carries anything private. If the model
+    repeats one anyway, it is asked once more. After that the student gets an unseen banked
+    question, or else the one they saw longest ago, flagged "repeat" so the app can say so.
+    Only when even that is impossible (the only candidate is the question just served) is
+    it a 503 no_new_question.
     """
     seen = questions.fingerprints(recent)
     latest = recent[:questions.AVOID_IN_PROMPT]
-    avoid = (questions.banked_among(cache_key, latest) if shared else latest) if latest else []
+    avoid = quiz_avoid_list(questions.banked_among(cache_key, latest) if shared else latest) if latest else []
+    repeats: list[dict] = []
     for _ in range(QUIZ_ATTEMPTS):
         spend_global_ai_call()
         try:
@@ -2081,9 +2106,15 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
         if not questions.same_question(questions.question_fingerprint(result["question"]), seen):
             return result
         ai_tutor.log_ai_event("generate_quiz", outcome="repeat", student_id=student_id, tier="text")
+        repeats.append(result)
         # The repeat is one the student has already seen, so naming it again shares nothing new.
-        avoid = [result["question"], *[text for text in avoid if questions.question_fingerprint(text) != questions.question_fingerprint(result["question"])]]
-    raise HTTPException(status_code=503, detail={"code": "no_new_question", "message": NO_NEW_QUESTION}, headers={"Retry-After": "5"})
+        avoid = quiz_avoid_list([result["question"], *avoid])
+    fallback = questions.fallback_question(cache_key, recent, repeats)
+    if fallback is None:
+        raise HTTPException(status_code=503, detail={"code": "no_new_question", "message": NO_NEW_QUESTION}, headers={"Retry-After": "5"})
+    question, repeat = fallback
+    ai_tutor.log_ai_event("generate_quiz", outcome="repeat_fallback" if repeat else "bank_fallback", student_id=student_id, tier="text")
+    return {**question, "repeat": repeat}
 
 
 @app.post("/api/generate-question", response_model=QuestionResponse)
@@ -2124,6 +2155,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                 personalization=personalization, source_text=source_text,
                 session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
             )
+        repeat = bool(ai_question.get("repeat"))
         question_text, correct_answer, topic = questions.clip_question(
             ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
         )
@@ -2140,6 +2172,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             difficulty=difficulty,
         )
     else:
+        repeat = False
         student_id = verified_student_id(data.student_id, authorization)
         if authorization:
             limit_action(student_id, "math_question", MATH_QUESTIONS_PER_DAY, 1440)
@@ -2165,6 +2198,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         question=generated.question,
         topic=generated.topic,
         difficulty=generated.difficulty,
+        repeat=repeat,
     )
 
 

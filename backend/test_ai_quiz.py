@@ -288,5 +288,62 @@ class PersonalizedQuizTests(unittest.TestCase):
         self.assertTrue(all('张伟' not in text for text in avoid))
 
 
+    # --- no_new_question is rare (S1) ---------------------------------------------------
+
+    def test_repeating_model_falls_back_to_the_question_seen_longest_ago(self):
+        older = self._q('What is cytokinesis?')
+        newer = self._q('What is G1 for?')
+        with patch.object(main.ai_tutor, 'generate_question', side_effect=[older, newer, older, older]):
+            self._ask('fallback')
+            self._ask('fallback')
+            third = self._ask('fallback')
+        self.assertEqual(third.question, 'What is cytokinesis?')
+        self.assertTrue(third.repeat)
+
+    def test_repeating_model_falls_back_to_an_unseen_banked_question_first(self):
+        unit_key = main.question_cache_key('x', 'Biology', 'Cell Cycle', 'mixed', 1, '')
+        main.questions.save_to_bank(unit_key, 'What is a spindle fibre?', 'A protein structure', 'Cell Cycle', 1)
+        main.questions.save_question('nocache', 'What is cytokinesis?', 'x', 'Cell Cycle', 1)
+        with patch.dict(os.environ, {'AI_CACHE_ENABLED': '0'}), \
+                patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is cytokinesis?')):
+            response = self._ask('nocache')
+        self.assertEqual(response.question, 'What is a spindle fibre?')
+        self.assertFalse(response.repeat)
+
+    def test_fresh_questions_are_not_flagged_as_repeats(self):
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is interphase?')):
+            self.assertFalse(self._ask('fresh').repeat)
+
+    def test_private_prompt_avoids_the_whole_repeat_window(self):
+        main.note_store.save_note('window', 'Biology', 'Cell Cycle', 'n.txt', 'text/plain', 'Mitosis has four phases.', 24)
+        for index in range(main.questions.RECENT_WINDOW + 5):
+            main.questions.save_question('window', f'Earlier question number {index}?', 'x', 'Other', 1)
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What are the phases of mitosis?')) as ai:
+            self._ask('window')
+        self.assertEqual(len(ai.call_args.kwargs['avoid']), main.questions.RECENT_WINDOW)
+        self.assertEqual(main.questions.AVOID_IN_PROMPT, main.questions.RECENT_WINDOW)
+
+    def test_avoid_list_dedupes_without_dropping_entries(self):
+        texts = [f'Question {index}?' for index in range(main.questions.RECENT_WINDOW)]
+        merged = main.quiz_avoid_list(['Question 3 ?', 'A new repeat?', *texts])
+        self.assertEqual(len(merged), main.questions.RECENT_WINDOW + 1)
+        self.assertEqual(merged[:2], ['Question 3 ?', 'A new repeat?'])
+        self.assertLessEqual(len(merged), main.ai_tutor.AVOID_QUESTIONS_MAX)
+
+    def test_prompt_carries_every_avoid_entry(self):
+        captured = {}
+
+        def fake_send(op, payload, **kwargs):
+            captured.update(payload)
+            return {'choices': [{'message': {'content': '{"question":"Q?","correct_answer":"A","topic":"T"}'}}]}
+
+        avoid = [f'Question {index}?' for index in range(main.questions.RECENT_WINDOW + 2)]
+        with patch.object(main.ai_tutor, '_send', side_effect=fake_send):
+            main.ai_tutor.generate_question(course='Bio', unit='Cells', source_labels=[], focus='mixed', difficulty=1,
+                                            personalization={}, avoid=avoid)
+        settings = main.json.loads(captured['messages'][1]['content'].split('Quiz settings: ', 1)[1].split('\n')[0])
+        self.assertEqual(settings['avoid'], avoid)
+
+
 if __name__ == '__main__':
     unittest.main()

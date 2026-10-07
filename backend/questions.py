@@ -91,9 +91,10 @@ def save_question(student_id: str, question: str, correct_answer: str, topic: st
 
 
 # A student is never served one of their last RECENT_WINDOW questions again, and the
-# model is shown up to AVOID_IN_PROMPT of them so it writes something new.
+# model is shown the same number of them (AVOID_IN_PROMPT) so it knows every question
+# that would be rejected as a repeat.
 RECENT_WINDOW = 20
-AVOID_IN_PROMPT = 10
+AVOID_IN_PROMPT = RECENT_WINDOW
 BANK_CANDIDATES = 60
 
 
@@ -179,6 +180,46 @@ def cached_question(cache_key: str, student_id: str, recent: list[str] | None = 
                 .values(use_count=question_bank.c.use_count + 1)
             )
     return row
+
+
+def fallback_question(cache_key: str, recent: list[str], extra: list[dict] | None = None) -> tuple[dict, bool] | None:
+    """A question to serve when the model only repeats ones the student has just seen.
+
+    Candidates are this key's banked questions plus `extra` (the model's repeats). One the
+    student has not been served recently wins (repeat=False); otherwise the one served
+    longest ago (repeat=True). The question served last is never chosen, so Skip never
+    shows the same question twice in a row. Returns (question, repeat) or None.
+    """
+    init_questions()
+    served_at: dict[str, int] = {}  # fingerprint -> position in recent (0 = newest)
+    for position, text in enumerate(recent):
+        served_at.setdefault(question_fingerprint(text), position)
+    served_at.pop("", None)
+    with database.engine().begin() as connection:
+        candidates = [{**row, "_bank": True} for row in _bank_rows(connection, cache_key)]
+        candidates += [{**item, "_bank": False} for item in (extra or [])]
+        best = None
+        best_rank = -1
+        for candidate in candidates:
+            fingerprint = question_fingerprint(candidate["question"])
+            if not fingerprint:
+                continue
+            position = served_at.get(fingerprint)
+            if position is None:
+                best, best_rank = candidate, len(recent) + 1
+                break
+            if position > 0 and position > best_rank:
+                best, best_rank = candidate, position
+        if best is None:
+            return None
+        if best["_bank"]:
+            connection.execute(
+                update(question_bank)
+                .where(question_bank.c.bank_id == best["bank_id"])
+                .values(use_count=question_bank.c.use_count + 1)
+            )
+    question = {key: best[key] for key in ("question", "correct_answer", "topic")}
+    return question, best_rank <= len(recent)
 
 
 def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int) -> None:

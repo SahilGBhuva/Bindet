@@ -411,6 +411,9 @@ QUIZ_PROMPT_GENERAL = (
 
 
 AVOID_QUESTION_CHARS = 200
+# Every recent question the server would reject as a repeat (20), plus the model's own
+# repeats from this request, so nothing the student just saw is left off the list.
+AVOID_QUESTIONS_MAX = 24
 
 
 def generate_question(*, course: str, unit: str, source_labels: list[str], focus: str, difficulty: int, personalization: dict[str, Any], source_text: str = "", session_id: str | None = None,
@@ -419,7 +422,7 @@ def generate_question(*, course: str, unit: str, source_labels: list[str], focus
     schema = {"type": "object", "additionalProperties": False, "properties": {"question": {"type": "string"}, "correct_answer": {"type": "string"}, "topic": {"type": "string"}}, "required": ["question", "correct_answer", "topic"]}
     settings = {"course": course or "General Studies", "unit": unit or "Current Unit", "sources": source_labels[:10], "focus": focus, "difficulty": difficulty, "performance": personalization}
     if avoid:
-        settings["avoid"] = [" ".join(text.split())[:AVOID_QUESTION_CHARS] for text in avoid[:10]]
+        settings["avoid"] = [" ".join(text.split())[:AVOID_QUESTION_CHARS] for text in avoid[:AVOID_QUESTIONS_MAX]]
     user_content = "Quiz settings: " + escape_delimiters(json.dumps(settings, ensure_ascii=False, separators=(",", ":")))
     if grounded:
         user_content += "\n\n" + notes_block(source_text[:12000])
