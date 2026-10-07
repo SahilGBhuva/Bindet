@@ -614,18 +614,30 @@ export async function startGoogleSignIn() {
   window.location.assign(authorizeUrl.toString())
 }
 
+const oauthExchanges = new WeakMap<object, Promise<AuthSession>>()
+
 /**
  * Trades the code from a Google sign-in for a session, using this browser's
  * verifier, then confirms the account with the auth server. The session is not
  * saved here; the caller decides (it may belong to a different account).
  */
-export async function exchangeOAuthCode(redirect: Extract<AuthRedirect, { kind: 'oauth' }>): Promise<AuthSession> {
+export function exchangeOAuthCode(redirect: Extract<AuthRedirect, { kind: 'oauth' }>): Promise<AuthSession> {
+  // A code works once; a second caller for the same redirect (a re-run effect) shares the first exchange.
+  let pending = oauthExchanges.get(redirect)
+  if (!pending) {
+    pending = runOAuthExchange(redirect)
+    oauthExchanges.set(redirect, pending)
+  }
+  return pending
+}
+
+async function runOAuthExchange(redirect: Extract<AuthRedirect, { kind: 'oauth' }>): Promise<AuthSession> {
   let data: AuthResponse
   try {
     data = await authRequest('token?grant_type=pkce', { auth_code: redirect.code, code_verifier: redirect.codeVerifier })
-  } catch (error) {
-    // Fixed text only: the server's message is not shown.
-    if (error instanceof AuthRequestError && error.status >= 400 && error.status < 500) throw new Error(OAUTH_EXPIRED)
+  } catch {
+    // Fixed text only: the server's message is not shown. A used, unknown or
+    // expired code and a verifier that doesn't match all end here.
     throw new Error(OAUTH_FAILED)
   }
   const session = asSession(data)

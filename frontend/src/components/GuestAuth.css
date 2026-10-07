@@ -141,7 +141,7 @@
 
 /* Continue with Google: a neutral button (Google's sign-in branding rules), its "G" mark the only color. */
 .auth-google { display: grid; gap: 18px; margin-top: 20px; }
-.auth-google + .auth-form { margin-top: 0; }
+.auth-google + .auth-form { margin-top: 18px; }
 
 .auth-google__btn {
   display: inline-flex;
