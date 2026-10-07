@@ -2,7 +2,14 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["pdx1"],
   "services": {
-    "frontend": { "root": "frontend/", "framework": "vite" },
+    "frontend": {
+      "root": "frontend/",
+      "framework": "vite",
+      "rewrites": [
+        { "source": "/privacy", "destination": "/privacy/index.html" },
+        { "source": "/terms", "destination": "/terms/index.html" }
+      ]
+    },
     "backend": { "root": "backend/", "entrypoint": "app:app" }
   },
   "rewrites": [
