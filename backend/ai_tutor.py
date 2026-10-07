@@ -475,7 +475,8 @@ def _plain(value: str) -> str:
 
 
 def normalize_front(front: str) -> str:
-    return " ".join(re.findall(r"[0-9a-z]+", _plain(front).casefold()))
+    # Word characters in any script, so cards written in Chinese or Greek are not all "empty".
+    return " ".join(re.findall(r"\w+", _plain(front).casefold()))
 
 
 def front_key(front: str) -> str:

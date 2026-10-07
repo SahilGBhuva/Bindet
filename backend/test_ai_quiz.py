@@ -244,5 +244,49 @@ class PersonalizedQuizTests(unittest.TestCase):
         self.assertIn('avoid', captured['messages'][0]['content'])
 
 
+    # --- Non-Latin questions (AI-F1) ---------------------------------------------------
+
+    def test_non_latin_questions_have_distinct_fingerprints(self):
+        texts = ['什么是光合作用？', '细胞核的功能是什么？', 'Что такое фотосинтез?', 'Что такое митоз?',
+                 'Τι είναι η φωτοσύνθεση;', 'Τι είναι η μίτωση;']
+        prints = [main.questions.question_fingerprint(text) for text in texts]
+        self.assertTrue(all(prints))
+        self.assertEqual(len(set(prints)), len(texts))
+        # Case and width still fold, in any script.
+        self.assertEqual(main.questions.question_fingerprint('ЧТО ТАКОЕ МИТОЗ'), main.questions.question_fingerprint('что такое митоз?'))
+
+    def test_empty_fingerprint_is_never_a_repeat(self):
+        self.assertEqual(main.questions.question_fingerprint('?? !!'), '')
+        self.assertFalse(main.questions.same_question('', {''}))
+        self.assertEqual(main.questions.fingerprints(['???', '']), set())
+
+    def test_chinese_course_serves_a_new_chinese_question(self):
+        with patch.object(main.ai_tutor, 'generate_question', side_effect=[
+            self._q('什么是光合作用？'), self._q('细胞核的功能是什么？'),
+        ]) as ai:
+            self._ask('zh', unit='第一单元')
+            second = self._ask('zh', unit='第二单元')
+        self.assertEqual(second.question, '细胞核的功能是什么？')
+        self.assertEqual(ai.call_count, 2)
+
+    def test_banked_among_returns_the_bank_wording_not_the_students(self):
+        key = main.question_cache_key('a', 'Biology', 'Cell Cycle', 'mixed', 1, '')
+        main.questions.save_to_bank(key, 'What is mitosis?', 'Cell division', 'Cell Cycle', 1)
+        result = main.questions.banked_among(key, ['  WHAT is mitosis!!  ', 'my private diary question'])
+        self.assertEqual(result, ['What is mitosis?'])
+
+    def test_private_non_latin_question_never_reaches_a_shared_prompt(self):
+        # Another student banks a shared Chinese question for this scope.
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('水的化学式是什么？')):
+            self._ask('other', unit='第三单元')
+        main.questions.save_question('zh2', '张伟的诊断是什么？', '抑郁症', '私人', 1)
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('氧气的化学式是什么？')) as ai, \
+                patch.object(main.questions, 'cached_question', return_value=None):
+            self._ask('zh2', unit='第三单元')
+        avoid = ai.call_args.kwargs['avoid']
+        self.assertNotIn('张伟的诊断是什么？', avoid)
+        self.assertTrue(all('张伟' not in text for text in avoid))
+
+
 if __name__ == '__main__':
     unittest.main()

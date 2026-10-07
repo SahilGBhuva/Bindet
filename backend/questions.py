@@ -98,8 +98,22 @@ BANK_CANDIDATES = 60
 
 
 def question_fingerprint(text: str) -> str:
-    """Case-, spacing- and punctuation-insensitive form of a question, for spotting repeats."""
-    return " ".join(re.findall(r"[0-9a-z]+", unicodedata.normalize("NFKC", text or "").casefold()))
+    """Case-, spacing- and punctuation-insensitive form of a question, for spotting repeats.
+
+    Word characters in any script count (NFKC + casefold + \\w), so questions in Chinese,
+    Cyrillic or Greek keep their own fingerprints. A question with no word characters at
+    all fingerprints to "", which never matches anything (see same_question).
+    """
+    return " ".join(re.findall(r"\w+", unicodedata.normalize("NFKC", text or "").casefold()))
+
+
+def same_question(fingerprint: str, seen: set[str]) -> bool:
+    """True when a non-empty fingerprint is in seen. An empty one is never a repeat."""
+    return bool(fingerprint) and fingerprint in seen
+
+
+def fingerprints(texts) -> set[str]:
+    return {fingerprint for fingerprint in (question_fingerprint(text) for text in texts) if fingerprint}
 
 
 def recent_questions(student_id: str, limit: int = RECENT_WINDOW) -> list[str]:
@@ -124,12 +138,25 @@ def _bank_rows(connection, cache_key: str) -> list[dict]:
 
 
 def banked_among(cache_key: str, texts: list[str]) -> list[str]:
-    """The texts (in order) that are already in this key's bank. Only these may be shown to
-    the model as questions to avoid, so a shared prompt never carries anything unshared."""
+    """For each text (in order) that is already in this key's bank, the BANKED wording of it.
+
+    Only these may be shown to the model as questions to avoid, so a shared prompt never
+    carries anything unshared: the text returned is always the bank row's own question,
+    never the student's (possibly private) text that merely fingerprints the same.
+    """
     init_questions()
     with database.engine().connect() as connection:
-        banked = {question_fingerprint(row["question"]) for row in _bank_rows(connection, cache_key)}
-    return [text for text in texts if question_fingerprint(text) in banked]
+        banked: dict[str, str] = {}
+        for row in _bank_rows(connection, cache_key):
+            fingerprint = question_fingerprint(row["question"])
+            if fingerprint:
+                banked.setdefault(fingerprint, row["question"])
+    result: list[str] = []
+    for text in texts:
+        bank_text = banked.get(question_fingerprint(text))
+        if bank_text is not None and bank_text not in result:
+            result.append(bank_text)
+    return result
 
 
 def cached_question(cache_key: str, student_id: str, recent: list[str] | None = None) -> dict | None:
@@ -141,10 +168,10 @@ def cached_question(cache_key: str, student_id: str, recent: list[str] | None = 
     init_questions()
     if recent is None:
         recent = recent_questions(student_id)
-    seen = {question_fingerprint(text) for text in recent}
+    seen = fingerprints(recent)
     with database.engine().begin() as connection:
         row = next((candidate for candidate in _bank_rows(connection, cache_key)
-                    if question_fingerprint(candidate["question"]) not in seen), None)
+                    if not same_question(question_fingerprint(candidate["question"]), seen)), None)
         if row is not None:
             connection.execute(
                 update(question_bank)
@@ -159,7 +186,7 @@ def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str,
     question, correct_answer, topic = clip_question(question, correct_answer, topic)
     with database.engine().begin() as connection:
         fingerprint = question_fingerprint(question)
-        if any(question_fingerprint(row["question"]) == fingerprint for row in _bank_rows(connection, cache_key)):
+        if fingerprint and any(question_fingerprint(row["question"]) == fingerprint for row in _bank_rows(connection, cache_key)):
             return  # already banked: a second copy would only crowd out other questions
         connection.execute(question_bank.insert().values(
             bank_id=uuid4().hex,

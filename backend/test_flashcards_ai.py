@@ -586,3 +586,17 @@ class TutorGuardTests(FlashcardTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonLatinFlashcardTests(unittest.TestCase):
+    def test_non_latin_cards_are_kept_and_deduplicated(self):
+        note = "光合作用发生在叶绿体中。线粒体产生能量。" * 10
+        raw = [
+            {"front": "光合作用发生在哪里？", "back": "叶绿体", "topic": "生物"},
+            {"front": "线粒体的作用是什么？", "back": "产生能量", "topic": "生物"},
+            {"front": "光合作用发生在哪里", "back": "叶绿体", "topic": "生物"},
+        ]
+        kept, received = ai_tutor.clean_flashcards(raw, note, 15)
+        self.assertEqual(received, 3)
+        self.assertEqual([card["front"] for card in kept], ["光合作用发生在哪里?", "线粒体的作用是什么?"])
+        self.assertNotEqual(ai_tutor.front_key("光合作用发生在哪里？"), ai_tutor.front_key("线粒体的作用是什么？"))

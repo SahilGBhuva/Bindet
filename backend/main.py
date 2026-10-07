@@ -2069,7 +2069,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
     names only ones already in that shared bank, so it never carries anything private. If
     the model repeats one anyway, it is asked once more; a second repeat is an error.
     """
-    seen = {questions.question_fingerprint(text) for text in recent}
+    seen = questions.fingerprints(recent)
     latest = recent[:questions.AVOID_IN_PROMPT]
     avoid = (questions.banked_among(cache_key, latest) if shared else latest) if latest else []
     for _ in range(QUIZ_ATTEMPTS):
@@ -2078,7 +2078,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
             result = ai_tutor.generate_question(avoid=avoid, **request)
         except ai_tutor.AITutorError as exc:
             raise HTTPException(status_code=503, detail=QUIZ_UNAVAILABLE) from exc
-        if questions.question_fingerprint(result["question"]) not in seen:
+        if not questions.same_question(questions.question_fingerprint(result["question"]), seen):
             return result
         ai_tutor.log_ai_event("generate_quiz", outcome="repeat", student_id=student_id, tier="text")
         # The repeat is one the student has already seen, so naming it again shares nothing new.
@@ -2147,10 +2147,10 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
             limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
         # Practice sums are random; draw again (a few times) rather than repeat a recent one.
-        seen = {questions.question_fingerprint(text) for text in questions.recent_questions(student_id, 10)}
+        seen = questions.fingerprints(questions.recent_questions(student_id, 10))
         for _ in range(8):
             generated = generate_math_question(data.topic, data.difficulty)
-            if questions.question_fingerprint(generated.question) not in seen:
+            if not questions.same_question(questions.question_fingerprint(generated.question), seen):
                 break
 
     question_id = questions.save_question(
