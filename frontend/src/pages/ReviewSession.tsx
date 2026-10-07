@@ -197,7 +197,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
         <h3 className="tools__review-done-title">{done ? 'All caught up' : 'Nothing to review right now'}</h3>
         <p className="tools__review-done-copy">
           {done ? `You reviewed ${plural(done, 'card')}. ` : ''}
-          {when ? `Next review ${when === 'now' ? 'is ready now' : when}.` : moreNew || moreDue ? '' : 'New cards show up here as you add notes.'}
+          {when ? `Next review ${when === 'now' ? 'is ready now' : when}.` : moreNew || moreDue ? '' : 'Cards you’ve studied come back here when they’re due.'}
         </p>
         {moreDue ? (
           <button className="ui-button ui-button--primary tools__review-more" type="button" onClick={again}>Review {plural(moreDue, 'more due card')}</button>
