@@ -199,7 +199,7 @@ function AppShell() {
   return (
     <div className={`app-shell${railCollapsed ? ' is-rail-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
-      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} />
+      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} commandOpen={commandOpen} />
       <header className="app-bar">
         <nav className="app-bar__pages" aria-label="Pages">
           {PAGE_ICONS.map((item) => {

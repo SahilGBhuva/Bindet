@@ -8,7 +8,7 @@ import type { Screen } from './screens'
 import { withCourseTones } from './session'
 import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
-import { useDrawer } from './useDrawer'
+import { useDrawer, useMediaQuery } from './useDrawer'
 import './SiteSidebar.css'
 
 type NavItem = { id: Screen; label: string; short?: string }
@@ -38,6 +38,8 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
 
 /* The phone tab bar keeps the four places students go most; everything else is one tap away in Menu. */
 const TAB_BAR: Screen[] = ['home', 'tools', 'goals', 'tutor']
+/* Matches the phone breakpoint in SiteSidebar.css, where the tab bar and Menu sheet replace the rail. */
+const PHONE_QUERY = '(max-width: 860px)'
 
 const paths: Record<Screen, ReactNode> = {
   home: <><path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z" /></>,
@@ -202,9 +204,11 @@ type SiteSidebarProps = {
   onCollapsedChange?: (collapsed: boolean) => void
   /* Lets the shell's top bar show the Messages unread dot without a second request. */
   onUnreadChange?: (total: number) => void
+  /* The search palette is open: the phone menu sheet closes so the two never stack or fight for focus. */
+  commandOpen?: boolean
 }
 
-export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onUnreadChange }: SiteSidebarProps) {
+export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onUnreadChange, commandOpen = false }: SiteSidebarProps) {
   const data = useData()
   // The landing demo has no session but a sandboxed, in-memory data source it may read from.
   const canRead = Boolean(session) || data.sandboxed
@@ -226,9 +230,16 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   // A failed refresh with nothing cached says so (the rail retries every 30 seconds) instead of looking empty.
   const [failed, setFailed] = useState({ tasks: false, groups: false })
 
+  // The Menu sheet only exists on phones. It closes when the page changes, when the search
+  // palette opens, and when the window grows past the phone layout, so its scroll lock
+  // never outlives it.
+  const isPhone = useMediaQuery(PHONE_QUERY)
+  if (menuOpen && (!isPhone || commandOpen)) setMenuOpen(false)
+
   // Courses can change on other pages, so reread the local notebook whenever the page changes.
   if (seenActive !== active) {
     setSeenActive(active)
+    setMenuOpen(false)
     setNotebook(data.loadNotebook())
     setNow(data.now())
   }
@@ -238,7 +249,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   useEffect(() => data.onNotebookChange(() => setNotebook(data.loadNotebook())), [data])
 
   useEffect(() => {
-    const sync = () => setGroupParam(readGroupParam())
+    const sync = () => {
+      setGroupParam(readGroupParam())
+      setMenuOpen(false)
+    }
     window.addEventListener('hashchange', sync)
     return () => window.removeEventListener('hashchange', sync)
   }, [])
@@ -309,7 +323,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   // The phone menu takes focus when it opens, keeps the page behind it still, closes on Esc
   // and hands focus back to the Menu button when it closes.
   const closeMenu = useCallback(() => setMenuOpen(false), [])
-  useDrawer({ open: menuOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
+  const sheetOpen = menuOpen && isPhone && !commandOpen
+  useDrawer({ open: sheetOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
 
   const displayName = profile?.display_name || accountDisplayName(session?.user) || 'Your account'
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'B'
@@ -601,7 +616,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         </button>
       </nav>
 
-      {menuOpen ? (
+      {sheetOpen ? (
         <div className="bindit-sheet" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) { setMenuOpen(false); menuButton.current?.focus({ preventScroll: true }) } }}>
           <div className="bindit-sheet__panel" id="bindit-menu" role="dialog" aria-modal="true" aria-label="All pages" ref={menuPanel}>
             {SECTIONS.map((section) => (
