@@ -426,7 +426,7 @@ class AuthConfigTests(unittest.TestCase):
     def test_config_never_exposes_server_keys(self):
         with patch.dict(os.environ, {'SUPABASE_SERVICE_ROLE_KEY': 'service-secret', 'AUTH_GOOGLE_ENABLED': 'true'}):
             result = self.config(AUTH_GOOGLE_ENABLED='true')
-        self.assertEqual(set(result), {'supabase_url', 'supabase_anon_key', 'google_enabled'})
+        self.assertEqual(set(result), {'supabase_url', 'supabase_anon_key', 'google_enabled', 'account_deletion'})
         self.assertNotIn('service-secret', str(result))
 
 

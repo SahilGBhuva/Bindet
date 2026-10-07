@@ -339,16 +339,25 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertEqual(self.delete(supabase=retry).status_code, 200)
         self.assertEqual(retry.auth_deletes, [ALEX])
 
-    def test_without_the_service_role_key_data_goes_but_login_removal_fails(self):
+    def test_without_the_service_role_key_nothing_is_deleted(self):
+        # Deleting the data while the login has to stay behind would leave half an account,
+        # so without the key the app refuses and points to email instead.
         env = {key: value for key, value in ENV.items() if key != "SUPABASE_SERVICE_ROLE_KEY"}
         supabase = FakeSupabase()
-        with self.assertLogs("bindit.account", level="WARNING") as logs:
+        with patch.dict(os.environ, {"SUPABASE_SERVICE_ROLE_KEY": ""}):
             result = self.delete(supabase=supabase, env=env)
-        self.assertEqual(result.status_code, 502)
+        self.assertEqual(result.status_code, 503)
+        self.assertEqual(result.json()["detail"]["code"], "account_deletion_unavailable")
+        self.assertIn("officialbindet@gmail.com", result.json()["detail"]["message"])
         self.assertEqual(supabase.auth_deletes, [])
-        self.assertEqual(self.rows_mentioning(ALEX), {})
-        self.assertTrue(any("service_role_key_missing" in line for line in logs.output))
-        self.assertFalse(any(ALEX in line for line in logs.output))
+        self.assertNotEqual(self.rows_mentioning(ALEX), {})
+
+    def test_config_reports_whether_account_deletion_is_available(self):
+        client = TestClient(main.app)
+        with patch.dict(os.environ, {"SUPABASE_SERVICE_ROLE_KEY": "", "SUPABASE_URL": "https://example.supabase.co", "SUPABASE_ANON_KEY": "anon"}):
+            self.assertFalse(client.get("/api/auth/config").json()["account_deletion"])
+        with patch.dict(os.environ, {"SUPABASE_SERVICE_ROLE_KEY": "service-secret", "SUPABASE_URL": "https://example.supabase.co", "SUPABASE_ANON_KEY": "anon"}):
+            self.assertTrue(client.get("/api/auth/config").json()["account_deletion"])
 
     def test_storage_failure_does_not_stop_deletion(self):
         supabase = FakeSupabase()

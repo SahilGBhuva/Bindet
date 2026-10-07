@@ -626,6 +626,7 @@ class AuthConfigResponse(BaseModel):
     supabase_url: str
     supabase_anon_key: str
     google_enabled: bool = False
+    account_deletion: bool = False
 
 
 class DailyLoginRequest(BaseModel):
@@ -1221,7 +1222,8 @@ def warm_ai():
 @app.get("/api/auth/config", response_model=AuthConfigResponse)
 def auth_config():
     url, key = auth.public_settings()
-    return {"supabase_url": url, "supabase_anon_key": key, "google_enabled": auth.google_enabled()}
+    return {"supabase_url": url, "supabase_anon_key": key, "google_enabled": auth.google_enabled(),
+            "account_deletion": auth.account_deletion_enabled()}
 
 
 def note_response(row: dict, pages_skipped: int = 0) -> NoteResponse:
@@ -2039,6 +2041,12 @@ def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
     (there is nothing left to delete) and retries the login removal."""
     user = auth.authenticated_user(authorization)
     student_id = user["id"]
+    if not auth.account_deletion_enabled():
+        # Never delete the data while the login would have to stay behind.
+        raise HTTPException(status_code=503, detail={
+            "code": "account_deletion_unavailable",
+            "message": "Account deletion isn’t available in the app yet. Email officialbindet@gmail.com and we’ll delete your account within 30 days.",
+        })
     limit_action(student_id, "account_delete", ACCOUNT_DELETE_PER_HOUR, 60)
     if data is None or data.confirm != ACCOUNT_DELETE_PHRASE:
         raise HTTPException(status_code=400, detail={

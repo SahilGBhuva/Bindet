@@ -11,7 +11,7 @@ export type AuthSession = {
   user: AuthUser
 }
 
-type AuthConfig = { supabase_url: string; supabase_anon_key: string; google_enabled?: boolean }
+type AuthConfig = { supabase_url: string; supabase_anon_key: string; google_enabled?: boolean; account_deletion?: boolean }
 type AuthResponse = Partial<AuthSession> & { expires_in?: number; user?: AuthUser }
 
 export const AUTH_SESSION_KEY = 'bindit-auth-session'
@@ -636,6 +636,15 @@ function takeOAuthRedirect(): AuthRedirect | null {
   }
   if (!code || code.length > 512) return { kind: 'error', message: OAUTH_FAILED }
   return { kind: 'oauth', code, codeVerifier: flow.verifier }
+}
+
+/** True when the server can delete an account in the app (its service key is configured). */
+export async function accountDeletionEnabled() {
+  try {
+    return (await config()).account_deletion === true
+  } catch {
+    return false
+  }
 }
 
 /** True when the server has Google sign-in turned on (AUTH_GOOGLE_ENABLED). */

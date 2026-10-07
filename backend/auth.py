@@ -33,6 +33,14 @@ def public_settings() -> tuple[str, str]:
     return url, anon_key
 
 
+def account_deletion_enabled() -> bool:
+    """True when the server can fully delete an account, including its Supabase login.
+
+    Removing the login needs the service-role key; without it the Settings page offers
+    deletion by email instead, so nobody is left with half an account."""
+    return bool(os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip() and os.getenv("SUPABASE_URL", "").strip())
+
+
 def google_enabled() -> bool:
     """True once the owner has configured the Google provider in Supabase and set AUTH_GOOGLE_ENABLED.
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, DELETE_ACCOUNT_PHRASE, getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
 import { accountDisplayName, suggestedUsername } from '../lib/accountName'
-import { requestPasswordReset, signIn, signOutAndReload, signOutWithNotice, signUp, type AuthSession } from '../lib/auth'
+import { accountDeletionEnabled, requestPasswordReset, signIn, signOutAndReload, signOutWithNotice, signUp, type AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
@@ -69,6 +69,13 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [privacyStatus, setPrivacyStatus] = useState('')
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [canDelete, setCanDelete] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let live = true
+    void accountDeletionEnabled().then((enabled) => { if (live) setCanDelete(enabled) })
+    return () => { live = false }
+  }, [])
   const theme = useThemePreference()
 
   // The saved profile belongs to whoever is signed in now; anything else is ignored.
@@ -429,7 +436,15 @@ export function Settings({ session, onSession }: SettingsProps) {
                   Study groups you own pass to the member who joined earliest, together with the group tasks you created.
                   A group where you’re the only member is deleted. This can’t be undone.
                 </p>
-                <button type="button" className="ui-button ui-button--danger settings__danger-button" onClick={() => setDeleteOpen(true)}>Delete account…</button>
+                {canDelete === false ? (
+                  <p className="settings__hint">
+                    To delete your account and all your data, email{' '}
+                    <a className="ui-link" href="mailto:officialbindet@gmail.com?subject=Delete%20my%20bindit%20account">officialbindet@gmail.com</a>{' '}
+                    from your account’s email address and we’ll do it within 30 days.
+                  </p>
+                ) : (
+                  <button type="button" className="ui-button ui-button--danger settings__danger-button" disabled={canDelete === null} onClick={() => setDeleteOpen(true)}>Delete account…</button>
+                )}
               </div>
             </div>
           </Section>
