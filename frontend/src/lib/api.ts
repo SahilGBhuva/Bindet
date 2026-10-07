@@ -908,3 +908,11 @@ export function deleteMilestone(groupId: string, milestoneId: number, accessToke
 export function notifyGroup(groupId: string, message: string, accessToken: string) {
   return request<{ notified: number }>(`/api/study-groups/${encodeURIComponent(groupId)}/notify`, { method: 'POST', body: JSON.stringify({ message }) }, accessToken)
 }
+
+/* Every course and unit that holds the student's saved notes, from any device. Never calls the AI. */
+export type NoteScope = { course: string; unit: string; note_count: number; last_added: string | null }
+
+export async function listNoteScopes(accessToken?: string, signal?: AbortSignal): Promise<NoteScope[]> {
+  const data = await request<{ scopes?: NoteScope[] }>('/api/notes/scopes', { signal }, accessToken)
+  return Array.isArray(data?.scopes) ? data.scopes : []
+}

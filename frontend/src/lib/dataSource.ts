@@ -61,6 +61,9 @@ export type DataSource = {
   now: () => number
   hourOf: (timestamp: number) => number
   confirm: (message: string) => boolean
+
+  // Server data (added later)
+  listNoteScopes: typeof api.listNoteScopes
 }
 
 export const realData: DataSource = {
@@ -108,6 +111,7 @@ export const realData: DataSource = {
   now: () => Date.now(),
   hourOf: (timestamp) => new Date(timestamp).getHours(),
   confirm: (message) => window.confirm(message),
+  listNoteScopes: api.listNoteScopes,
 }
 
 const DataContext = createContext<DataSource>(realData)
