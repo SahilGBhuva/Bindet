@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { splitMath } from './mathText'
+import { splitMath, unsafeTex } from './mathText'
 import './Math.css'
 
 /*
@@ -12,6 +12,11 @@ import './Math.css'
  * expression, with trust: false (no \href, \url, \includegraphics or \htmlClass),
  * strict: 'ignore', and caps on size and macro expansion. KaTeX escapes every
  * character of the source it emits.
+ *
+ * Layout safety: an expression that could draw outside its own box (negative kerns and
+ * spaces, overlaps, raised boxes, macro definitions that could hide them) or that is very
+ * long is not rendered; its source is shown as code instead. Math.css also clips each
+ * expression to its box, so nothing can cover the text or buttons around it.
  */
 
 type Katex = typeof import('katex')['default']
@@ -34,11 +39,12 @@ function loadKatex(): Promise<Katex> {
 
 const MAX_CACHE = 500
 
-/* KaTeX's HTML for one expression, or null when it doesn't parse. Cached: streaming re-renders a lot. */
+/* KaTeX's HTML for one expression, or null when it doesn't parse or isn't safe to lay out. Cached: streaming re-renders a lot. */
 function toHtml(katex: Katex, tex: string, display: boolean): string | null {
   const key = `${display ? 'D' : 'I'}${tex}`
   const cached = rendered.get(key)
   if (cached !== undefined) return cached
+  if (unsafeTex(tex)) return null
   let html: string | null
   try {
     html = katex.renderToString(tex, {
