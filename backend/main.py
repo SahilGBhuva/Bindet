@@ -29,6 +29,7 @@ import base64
 import binascii
 import json
 
+import ai_cache
 import ai_tutor
 import auth
 import database
@@ -2131,6 +2132,22 @@ def make_note_flashcards(
         flashcards.mark_too_short(owner, note_id)
         log("too_short")
         return _note_flashcards_result(note_id, "too_short", False, [])
+    # Identical note text (with the same course, unit and file name the prompt carries)
+    # was already turned into cards: reuse them without an AI call, AI quota or budget.
+    # Shared across students only through a hash of that full input, so a hit returns
+    # nothing the student doesn't already hold.
+    cache_key = ai_cache.flashcard_key(course=note["course"], unit=note["unit"], file_name=note["file_name"], source_text=text)
+    cached = ai_cache.cached_flashcards(cache_key)
+    if cached is not None:
+        reused, _ = ai_tutor.clean_flashcards(cached, text, ai_tutor.flashcard_target(text), default_topic=note["unit"] or note["course"])
+        if reused:
+            stored = flashcards.complete(owner, note_id, note["course"], note["unit"], reused)
+            if stored is None:
+                raise HTTPException(status_code=404, detail="Note not found")
+            log("cache_hit", cards_kept=len(reused))
+            return _note_flashcards_result(note_id, "ready", True, stored)
+    elif ai_cache.enabled():
+        log("cache_miss")
     try:
         flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
     except HTTPException:
@@ -2166,6 +2183,7 @@ def make_note_flashcards(
     stored = flashcards.complete(owner, note_id, note["course"], note["unit"], batch.cards)
     if stored is None:
         raise HTTPException(status_code=404, detail="Note not found")
+    ai_cache.store_flashcards(cache_key, batch.cards)
     log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
     return _note_flashcards_result(note_id, "ready", True, stored)
 

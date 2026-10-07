@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
+    JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
     UniqueConstraint, and_, create_engine, delete, func, inspect, literal, or_, select, text, union_all, update,
 )
 from sqlalchemy.engine import Engine, make_url
@@ -176,6 +176,19 @@ uploaded_images = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# --- AI result caches (see ai_cache.py) ---------------------------------------------
+# Backend-only. Keys are sha256 hashes that include a prompt/generator version; no
+# raw input (note text, file bytes, answers, messages) is ever stored in them.
+
+flashcard_cache = Table(
+    "flashcard_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("cards", JSON, nullable=False),
+    Column("card_count", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("hits", Integer, nullable=False, default=0),
+)
+
 progress_claims = Table(
     "progress_claims", metadata,
     Column("guest_id", String(100), primary_key=True),
@@ -205,6 +218,7 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "flashcard_cache",
     "flashcard_jobs",
     "flashcards",
     "friend_quests",
@@ -241,6 +255,7 @@ RLS_TABLES = (
 # client-facing RLS policies (study_group_members) or read by the browser
 # (study_notes) must not be listed here.
 CLIENT_REVOKED_TABLES = (
+    "flashcard_cache",
     "flashcard_jobs",
     "flashcards",
     "tutor_conversations",
@@ -1703,6 +1718,7 @@ def reset_db() -> None:
     if active_engine.dialect.name != "sqlite":
         raise RuntimeError("reset_db is only available for local SQLite databases")
     with active_engine.begin() as connection:
+        connection.execute(delete(flashcard_cache))
         connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))
