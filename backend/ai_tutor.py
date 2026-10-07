@@ -29,6 +29,14 @@ TUTOR_STREAM_IDLE_SECONDS = float(os.getenv("OPENROUTER_STREAM_IDLE_SECONDS", "2
 FLASHCARD_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_FLASHCARD_TIMEOUT_SECONDS", "25")))
 
 logger = logging.getLogger("bindit.ai")
+if not logger.handlers:
+    # One JSON line per AI operation on stdout, which Vercel keeps in its function logs.
+    # Without a handler, INFO lines would be dropped by Python's default WARNING level.
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 class AITutorError(RuntimeError):
@@ -305,7 +313,7 @@ def generate_question(*, course: str, unit: str, source_labels: list[str], focus
 
 FLASHCARD_NOTE_CHARS = 12_000       # note text sent per generation
 FLASHCARD_MAX_PER_NOTE = 15
-FLASHCARD_CHARS_PER_CARD = 350
+FLASHCARD_CHARS_PER_CARD = 250
 FLASHCARD_MIN_CHARS = 120           # non-whitespace characters
 FLASHCARD_MIN_WORDS = 20
 FRONT_MAX, BACK_MAX, TOPIC_MAX = 300, 700, 60
@@ -378,7 +386,7 @@ def note_too_short(text: str) -> bool:
 
 
 def flashcard_target(text: str) -> int:
-    """About one card per 350 characters of usable text, from 1 up to 15."""
+    """About one card per 250 characters of usable text, from 1 up to 15."""
     usable = len(" ".join((text or "").split()))
     return max(1, min(FLASHCARD_MAX_PER_NOTE, math.ceil(usable / FLASHCARD_CHARS_PER_CARD)))
 
