@@ -40,6 +40,7 @@ import questions
 import note_ingestion
 import note_store
 import rate_limit
+import review
 import storage
 import tutor
 import tasks
@@ -2663,6 +2664,61 @@ def list_flashcards(
     owner = auth.authenticated_user(authorization)["id"]
     stored, states = flashcards.list_for_unit(owner, course.strip(), unit.strip())
     return {"cards": stored, "notes": states}
+
+
+# --- Spaced-repetition review of saved flashcards (review.py). No AI. ---------------
+
+REVIEW_GRADES_PER_HOUR = 600
+REVIEW_RATE_LIMITED = "You’re grading cards very quickly. Take a short break and try again."
+REVIEW_CARD_NOT_FOUND = "That flashcard isn’t in your saved cards."
+
+
+class ReviewGradeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    grade: Literal["again", "hard", "good", "easy"]
+    tz_offset: int = 0
+
+
+def _review_scope(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value or None
+
+
+@app.get("/api/review/summary")
+def review_summary(authorization: Annotated[str | None, Header()] = None, tz_offset: int = 0):
+    """How many saved cards are due today (the student's local day) and how many new ones remain."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return review.summary(owner, tz_offset=review.clamp_offset(tz_offset))
+
+
+@app.get("/api/review/queue")
+def review_queue(
+    course: Annotated[str | None, Query(max_length=120)] = None,
+    unit: Annotated[str | None, Query(max_length=160)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    tz_offset: int = 0,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """The next cards to review: due learning cards, due reviews, then new cards (capped per day)."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return review.queue(owner, _review_scope(course), _review_scope(unit), limit, tz_offset=review.clamp_offset(tz_offset))
+
+
+@app.post("/api/review/{card_id}")
+def grade_review_card(card_id: str, data: ReviewGradeRequest, authorization: Annotated[str | None, Header()] = None):
+    """Grade one of the student's cards and schedule its next review."""
+    owner = auth.authenticated_user(authorization)["id"]
+    if not card_id or len(card_id) > 64:
+        raise HTTPException(status_code=404, detail={"code": "card_not_found", "message": REVIEW_CARD_NOT_FOUND})
+    try:
+        limit_action(owner, "review_grade", REVIEW_GRADES_PER_HOUR)
+    except HTTPException as error:
+        raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": REVIEW_RATE_LIMITED},
+                            headers=error.headers) from error
+    result = review.grade(owner, card_id, data.grade, tz_offset=review.clamp_offset(data.tz_offset))
+    if result is None:
+        raise HTTPException(status_code=404, detail={"code": "card_not_found", "message": REVIEW_CARD_NOT_FOUND})
+    return result
 
 
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)

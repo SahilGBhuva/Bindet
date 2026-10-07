@@ -10,7 +10,7 @@ safe for foreign keys:
 - Tasks: personal tasks are deleted. Group tasks the student created stay with the
   group and pass to the group's owner, so the group keeps its work. The student's
   comments, attachments, assignments and activity on any task are removed.
-- Notes, flashcards (cards, jobs, styles), tutor conversations and messages,
+- Notes, flashcards (cards, jobs, styles, review state), tutor conversations and messages,
   generated questions, private question banks and every AI cache entry tied to the
   account (ai_cache.purge_user_ai_data_in; shared entries another user's identical
   upload still references are kept).
@@ -174,6 +174,7 @@ def _settle_tasks(connection, student_id: str) -> int:
 
 def _delete_study_material(connection, student_id: str) -> int:
     notes = note_store.notes
+    connection.execute(delete(flashcards.reviews).where(flashcards.reviews.c.owner_id == student_id))
     connection.execute(delete(flashcards.cards).where(flashcards.cards.c.owner_id == student_id))
     connection.execute(delete(flashcards.jobs).where(flashcards.jobs.c.owner_id == student_id))
     connection.execute(delete(flashcards.styles).where(flashcards.styles.c.owner_id == student_id))

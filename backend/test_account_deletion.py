@@ -180,6 +180,9 @@ class AccountDeletionTests(unittest.TestCase):
                     note_id=note["id"], owner_id=owner, status="ready", card_count=1, attempts=1, updated_at=now))
                 connection.execute(insert(flashcards.styles).values(
                     note_id=note["id"], owner_id=owner, instructions_hash="h" * 64, updated_at=now))
+                connection.execute(insert(flashcards.reviews).values(
+                    owner_id=owner, card_id=f"card-{owner[:8]}", due_at=now, interval_days=1.0, ease=2.5,
+                    reps=1, lapses=0, last_grade="good", last_reviewed_at=now, created_at=now))
             connection.execute(insert(database.uploaded_images).values(
                 id="img-1", owner_id=ALEX, storage_path=f"{ALEX}/img-1.png", original_name="me.png",
                 content_type="image/png", size_bytes=10, created_at=now))
@@ -241,7 +244,7 @@ class AccountDeletionTests(unittest.TestCase):
                      "study_groups", "study_group_members", "xp_events", "social_reactions", "social_notifications",
                      "social_blocks", "social_reports", "social_action_events", "uploaded_images", "cache_refs",
                      "tutor_reply_cache", "progress_claims", "study_tasks", "study_notes", "flashcards",
-                     "flashcard_jobs", "flashcard_styles", "generated_questions", "tutor_conversations",
+                     "flashcard_jobs", "flashcard_styles", "flashcard_reviews", "generated_questions", "tutor_conversations",
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones"):
             self.assertIn(name, before, name)
@@ -265,7 +268,7 @@ class AccountDeletionTests(unittest.TestCase):
 
         # Sam still has everything that was Sam's (only rows also naming Alex went).
         sam_after = self.rows_mentioning(SAM)
-        for name in ("profiles", "student_progress", "study_notes", "flashcards", "cache_refs", "xp_events"):
+        for name in ("profiles", "student_progress", "study_notes", "flashcards", "flashcard_reviews", "cache_refs", "xp_events"):
             self.assertEqual(sam_after.get(name), sam_before.get(name), name)
         # Group A passed to Sam (who joined before Eve) and Sam was told; B is gone; C is Sam's.
         group_a = database.get_study_group(SAM, self.group_a["id"])

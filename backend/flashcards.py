@@ -21,7 +21,9 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from sqlalchemy import Column, DateTime, Index, Integer, MetaData, String, Table, UniqueConstraint, delete, func, select, update
+from sqlalchemy import (
+    Column, DateTime, Float, ForeignKey, Index, Integer, MetaData, String, Table, UniqueConstraint, delete, func, select, update,
+)
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -72,7 +74,26 @@ styles = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
-FLASHCARD_TABLES = ("flashcards", "flashcard_jobs", "flashcard_styles")
+# Spaced-repetition state for one student's card (review.py). No row: the card is new.
+# Keyed by card id, so renaming or moving a note keeps it; deleting a card removes it
+# (ON DELETE CASCADE on Postgres, and explicitly below, since SQLite does not enforce FKs).
+reviews = Table(
+    "flashcard_reviews", flashcard_metadata,
+    Column("owner_id", String(100), primary_key=True),
+    Column("card_id", String(36), ForeignKey("flashcards.id", ondelete="CASCADE"), primary_key=True),
+    Column("due_at", DateTime(timezone=True), nullable=False),
+    Column("interval_days", Float, nullable=False, default=0.0),
+    Column("ease", Float, nullable=False, default=2.5),
+    Column("reps", Integer, nullable=False, default=0),
+    Column("lapses", Integer, nullable=False, default=0),
+    Column("last_grade", String(8), nullable=True),
+    Column("last_reviewed_at", DateTime(timezone=True), nullable=True),
+    # First review: counts the card against that day's new-card allowance.
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+Index("ix_flashcard_reviews_owner_due", reviews.c.owner_id, reviews.c.due_at)
+
+FLASHCARD_TABLES = ("flashcards", "flashcard_jobs", "flashcard_styles", "flashcard_reviews")
 STATUSES = ("ready", "generating", "failed", "too_short", "none")
 # A generation that has said `generating` this long crashed or was cut off.
 STALE_SECONDS = 90
@@ -248,8 +269,15 @@ def _note_exists(connection, owner_id: str, note_id: str) -> bool:
     return connection.execute(select(notes.c.id).where(notes.c.id == note_id, notes.c.student_id == owner_id)).first() is not None
 
 
+def _delete_note_reviews(connection, owner_id: str, note_id: str) -> None:
+    """Review state of the note's cards (Postgres cascades this; SQLite needs it explicitly)."""
+    connection.execute(delete(reviews).where(reviews.c.owner_id == owner_id, reviews.c.card_id.in_(
+        select(cards.c.id).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))))
+
+
 def _drop_orphan(connection, owner_id: str, note_id: str) -> None:
     """The note was deleted while its cards were being made: remove everything kept for it."""
+    _delete_note_reviews(connection, owner_id, note_id)
     connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
     connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
     connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
@@ -326,6 +354,8 @@ def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list
             row = _job_row(connection, owner_id, note_id, for_update=True)
             if row is None or row["status"] != "generating" or int(row["attempts"] or 0) != attempt:
                 raise Superseded()
+        # New cards start fresh: the old cards' review state goes with them.
+        _delete_note_reviews(connection, owner_id, note_id)
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         _insert_ignoring_duplicates(connection, [
             {
@@ -474,6 +504,7 @@ def delete_note_and_cards(owner_id: str, note_id: str) -> bool:
         result = connection.execute(delete(notes).where(notes.c.id == note_id, notes.c.student_id == owner_id))
         if not result.rowcount:
             return False
+        _delete_note_reviews(connection, owner_id, note_id)
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
         connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
@@ -511,6 +542,7 @@ def reset_flashcards() -> None:
     """Test helper."""
     init_flashcards()
     with database.engine().begin() as connection:
+        connection.execute(delete(reviews))
         connection.execute(delete(cards))
         connection.execute(delete(jobs))
         connection.execute(delete(styles))
