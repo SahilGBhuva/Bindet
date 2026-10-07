@@ -488,15 +488,20 @@ def move_notes(owner_id: str, course: str, unit: str | None, new_course: str, ne
     init_flashcards()
     notes = note_store.notes
     note_filter = [notes.c.student_id == owner_id, notes.c.course == course]
-    card_filter = [cards.c.owner_id == owner_id, cards.c.course == course]
     values = {"course": new_course}
     if unit is not None:
         note_filter.append(notes.c.unit == unit)
-        card_filter.append(cards.c.unit == unit)
         values["unit"] = new_unit if new_unit is not None else unit
-    with database.engine().begin() as connection:
-        moved = connection.execute(update(notes).where(*note_filter).values(**values)).rowcount
-        connection.execute(update(cards).where(*card_filter).values(**values))
+    with _guard(), database.engine().begin() as connection:
+        note_ids = sorted(connection.execute(select(notes.c.id).where(*note_filter)).scalars().all())
+        # The same per-note locks complete() and replace() take, in sorted order so two
+        # renames can't deadlock: cards being stored right now land under the new name.
+        for note_id in note_ids:
+            _lock_note(connection, note_id)
+        if not note_ids:
+            return 0
+        moved = connection.execute(update(notes).where(*note_filter, notes.c.id.in_(note_ids)).values(**values)).rowcount
+        connection.execute(update(cards).where(cards.c.owner_id == owner_id, cards.c.note_id.in_(note_ids)).values(**values))
     return int(moved or 0)
 
 

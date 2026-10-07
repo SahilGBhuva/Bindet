@@ -113,5 +113,27 @@ class BinditFlashcardTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 400)
 
 
+    # --- Rename vs. card generation race (BE-L4) ---------------------------------------
+
+    def test_move_takes_each_notes_lock_in_sorted_order(self):
+        ids = [note_store.save_note('lock-student', 'Lock course', 'Logs', 'n.txt', 'text/plain', f'note {index}', 6)['id']
+               for index in range(4)]
+        locked = []
+        with patch.object(main.flashcards, '_lock_note', side_effect=lambda connection, note_id: locked.append(note_id)):
+            main.flashcards.move_notes('lock-student', 'Lock course', None, 'Locked course', None)
+        self.assertEqual(locked, sorted(ids))
+
+    def test_cards_finished_after_a_rename_are_stored_under_the_new_name(self):
+        text = 'sin squared plus cos squared equals one.'
+        note = note_store.save_note('race-student', 'Precalc', 'Trig identities', 'n.txt', 'text/plain', text, len(text))
+        card = [{'front': 'What is sin^2 + cos^2?', 'back': 'sin squared plus cos squared equals one', 'topic': 'Trig'}]
+        main.flashcards.move_notes('race-student', 'Precalc', 'Trig identities', 'Precalc', 'Trig Identities')
+        # The generation started before the rename and still carries the old names.
+        stored = main.flashcards.complete('race-student', note['id'], 'Precalc', 'Trig identities', card)
+        self.assertEqual(stored[0]['unit'], 'Trig Identities')
+        remade = main.flashcards.replace('race-student', note['id'], 'Precalc', 'Trig identities', card, 'h')
+        self.assertEqual(remade[0]['unit'], 'Trig Identities')
+
+
 if __name__ == '__main__':
     unittest.main()
