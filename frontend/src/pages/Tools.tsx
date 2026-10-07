@@ -1180,6 +1180,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         value={newCourse}
         onChange={(event) => setNewCourse(event.target.value)}
         placeholder="Course name"
+        autoComplete="off"
+        autoCapitalize="words"
+        enterKeyHint="done"
         aria-label="New course name"
         autoFocus
         onBlur={() => {
@@ -1223,6 +1226,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                 value={newCourse}
                 onChange={(event) => setNewCourse(event.target.value)}
                 placeholder="e.g. Biology"
+                autoComplete="off"
+                autoCapitalize="words"
+                enterKeyHint="done"
                 aria-label="Course name"
               />
               <button className="ui-button ui-button--primary" type="submit" disabled={!newCourse.trim()}>Add course</button>
@@ -1379,6 +1385,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
             maxLength={INSTRUCTIONS_MAX}
             onChange={(event) => setInstructions(key, event.target.value)}
             placeholder="e.g. focus on vocabulary, make them harder, use fill-in-the-blank"
+            enterKeyHint="done"
             aria-invalid={error ? true : undefined}
             aria-describedby={`${id}-meta${error ? ` ${id}-error` : ''}`}
             autoComplete="off"
@@ -1459,6 +1466,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         value={courseRenameDraft}
                         onChange={(event) => setCourseRenameDraft(event.target.value)}
                         aria-label={`Rename ${course.name}`}
+                        autoComplete="off"
+                        autoCapitalize="words"
+                        enterKeyHint="done"
                         autoFocus
                         onFocus={(event) => event.currentTarget.select()}
                         onBlur={() => commitRenameCourse()}
@@ -1513,6 +1523,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     value={renameDraft}
                     onChange={(event) => setRenameDraft(event.target.value)}
                     aria-label={`Rename ${item}`}
+                    autoComplete="off"
+                    autoCapitalize="words"
+                    enterKeyHint="done"
                     autoFocus
                     onFocus={(event) => event.currentTarget.select()}
                     onBlur={() => commitRename()}
@@ -1550,6 +1563,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                   value={newUnit}
                   onChange={(event) => setNewUnit(event.target.value)}
                   placeholder="Unit name"
+                  autoComplete="off"
+                  autoCapitalize="words"
+                  enterKeyHint="done"
                   aria-label={`New ${activeCourse} unit`}
                   autoFocus
                   onBlur={() => {
@@ -1980,6 +1996,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         value={quizAnswer}
                         onChange={(event) => setQuizAnswer(event.target.value)}
                         placeholder="Your answer"
+                        enterKeyHint="go"
+                        autoCapitalize="off"
                         aria-label="Your answer"
                         autoComplete="off"
                         disabled={quizBusy || !quizQuestion}
@@ -2096,6 +2114,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           value={courseRenameDraft}
                           onChange={(event) => setCourseRenameDraft(event.target.value)}
                           aria-label={`Rename ${course.name}`}
+                          autoComplete="off"
+                          autoCapitalize="words"
+                          enterKeyHint="done"
                           autoFocus
                           onClick={(event) => event.stopPropagation()}
                           onFocus={(event) => event.currentTarget.select()}

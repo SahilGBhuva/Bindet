@@ -549,6 +549,7 @@
   width: min(760px, 100%);
   max-height: calc(100vh - var(--space-8));
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-popover);
@@ -838,4 +839,12 @@
   .ui-input,
   .ui-select,
   .ui-textarea { font-size: 16px; }
+}
+
+/* Phones: no text below 12px (the --text-2xs step is already 12px here). */
+@media (max-width: 860px) {
+  .ui-avatar,
+  .ui-course-mark--sm { font-size: var(--text-xs); }
+  .ui-tab { min-width: 44px; justify-content: center; }
+  .ui-dialog { max-height: calc(100dvh - var(--space-8) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 }
