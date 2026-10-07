@@ -235,6 +235,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     setNow(data.now())
   }
 
+  // The Study page saves its notebook as the student works; follow it so the
+  // Directory always highlights the course that page shows.
+  useEffect(() => data.onNotebookChange(() => setNotebook(data.loadNotebook())), [data])
+
   useEffect(() => {
     const sync = () => setGroupParam(readGroupParam())
     window.addEventListener('hashchange', sync)

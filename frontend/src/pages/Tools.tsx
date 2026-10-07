@@ -342,6 +342,21 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     data.saveNotebook(notebook)
   }, [data, notebook])
 
+  // The sidebar (or another tab) can change the saved notebook, e.g. pick another course:
+  // take its version so this page and the sidebar always show the same course.
+  useEffect(() => data.onNotebookChange(() => {
+    const loaded = data.loadNotebook()
+    const next = { ...loaded, courses: withCourseTones(loaded.courses) }
+    setNotebook((current) => {
+      if (JSON.stringify(current) === JSON.stringify(next)) return current
+      if (current.activeCourse !== next.activeCourse || current.activeUnit !== next.activeUnit) {
+        setCardIndex(0)
+        setCardFlipped(false)
+      }
+      return next
+    })
+  }), [data])
+
   // A status message clears itself; errors that need a decision are shown inline instead.
   useEffect(() => {
     if (!notice) return

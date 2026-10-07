@@ -115,8 +115,28 @@ export function loadNotebook(): Notebook {
   }
 }
 
+/* Fired on this window whenever the saved notebook changes, so every open view (the
+ * Study page and the sidebar each keep a copy) can pick up the new selection. */
+export const NOTEBOOK_CHANGED_EVENT = 'bindit:notebook-changed'
+
 export function saveNotebook(notebook: Notebook): void {
-  localStorage.setItem(NOTEBOOK_KEY, JSON.stringify(notebook))
+  const raw = JSON.stringify(notebook)
+  if (localStorage.getItem(NOTEBOOK_KEY) === raw) return
+  localStorage.setItem(NOTEBOOK_KEY, raw)
+  window.dispatchEvent(new Event(NOTEBOOK_CHANGED_EVENT))
+}
+
+/* Calls listener when the notebook is saved here or in another tab. Returns the unsubscribe. */
+export function onNotebookChange(listener: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === NOTEBOOK_KEY || event.key === null) listener()
+  }
+  window.addEventListener(NOTEBOOK_CHANGED_EVENT, listener)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    window.removeEventListener(NOTEBOOK_CHANGED_EVENT, listener)
+    window.removeEventListener('storage', onStorage)
+  }
 }
 
 export function unitsFor(courses: Course[], courseName: string): string[] {

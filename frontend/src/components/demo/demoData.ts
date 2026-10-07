@@ -328,6 +328,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     return Promise.reject(new Error('Create a free account to do that.'))
   }
 
+  const notebookListeners = new Set<() => void>()
   return {
     sandboxed: true,
     getStudentId: () => DEMO_STUDENT,
@@ -336,7 +337,14 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
       // Only the selection is kept; the demo's courses, units and notes never change.
       const course = notebook.courses.find((item) => item.name === next.activeCourse)
       if (!course) return
-      notebook = { ...notebook, activeCourse: course.name, activeUnit: course.units.includes(next.activeUnit) ? next.activeUnit : course.units[0] }
+      const units = course.units.includes(next.activeUnit) ? next.activeUnit : course.units[0]
+      if (notebook.activeCourse === course.name && notebook.activeUnit === units) return
+      notebook = { ...notebook, activeCourse: course.name, activeUnit: units }
+      notebookListeners.forEach((listener) => listener())
+    },
+    onNotebookChange: (listener) => {
+      notebookListeners.add(listener)
+      return () => { notebookListeners.delete(listener) }
     },
     loadAvatar: () => '',
     saveAvatar: () => { onLocked('avatar') },

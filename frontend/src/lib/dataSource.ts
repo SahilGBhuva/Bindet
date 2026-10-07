@@ -17,6 +17,7 @@ export type DataSource = {
   getStudentId: typeof session.getStudentId
   loadNotebook: typeof session.loadNotebook
   saveNotebook: typeof session.saveNotebook
+  onNotebookChange: typeof session.onNotebookChange
   loadAvatar: typeof session.loadAvatar
   saveAvatar: typeof session.saveAvatar
   loadUnitAttempts: typeof progress.loadUnitAttempts
@@ -67,6 +68,7 @@ export const realData: DataSource = {
   getStudentId: session.getStudentId,
   loadNotebook: session.loadNotebook,
   saveNotebook: session.saveNotebook,
+  onNotebookChange: session.onNotebookChange,
   loadAvatar: session.loadAvatar,
   saveAvatar: session.saveAvatar,
   loadUnitAttempts: progress.loadUnitAttempts,
