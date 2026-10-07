@@ -35,10 +35,12 @@ import ai_cache
 import ai_tutor
 import auth
 import database
+import feedback
 import flashcards
 import questions
 import note_ingestion
 import note_store
+import practice
 import rate_limit
 import storage
 import tutor
@@ -2837,6 +2839,204 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         total_xp=record["total_xp"],
         streak=record["streak"],
     )
+
+
+# --- Practice lab -----------------------------------------------------------------------
+#
+# Quick rounds, personal bests and challenges, all on the student's saved flashcards
+# (practice.py). No AI calls. Errors carry {"code", "message"}.
+
+PRACTICE_ROUNDS_PER_HOUR = 120
+PRACTICE_CHALLENGES_PER_DAY = 20
+ChallengeId = Annotated[str, PathParam(pattern=r"^[0-9a-f]{32}$")]
+
+
+def practice_error(error: practice.PracticeError) -> HTTPException:
+    return HTTPException(status_code=error.status, detail={"code": error.code, "message": error.message})
+
+
+def practice_limit(student_id: str, action: str, limit: int, window_minutes: int, message: str) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        wait = limit_retry_after(student_id, action, window_minutes)
+        raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": message},
+                            headers={"Retry-After": str(wait)}) from error
+
+
+class PracticeAnswer(BaseModel):
+    card_id: str = Field(min_length=1, max_length=36)
+    correct: bool
+
+
+class PracticeRoundCreate(BaseModel):
+    course: str = Field(min_length=1, max_length=120)
+    unit: str = Field(default="", max_length=160)
+    length_s: int
+    mode: str = Field(max_length=8)
+    answers: list[PracticeAnswer] = Field(min_length=1, max_length=practice.MAX_ANSWERS)
+
+
+class PracticeChallengeCreate(BaseModel):
+    to_id: str = Field(min_length=1, max_length=100)
+    course: str = Field(min_length=1, max_length=120)
+    unit: str = Field(default="", max_length=160)
+    length_s: int
+    mode: str = Field(max_length=8)
+    card_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(min_length=1, max_length=practice.CHALLENGE_MAX_CARDS)
+    # The challenger's own results on these cards, from the round they just played.
+    answers: list[bool] | None = Field(default=None, max_length=practice.CHALLENGE_MAX_CARDS)
+
+
+class PracticeChallengeResult(BaseModel):
+    answers: list[bool] = Field(min_length=1, max_length=practice.CHALLENGE_MAX_CARDS)
+
+
+@app.get("/api/practice/scopes")
+def practice_scopes(authorization: Annotated[str | None, Header()] = None):
+    """Every course and unit with saved flashcards, and how many."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"scopes": practice.scopes(owner)}
+
+
+@app.get("/api/practice/cards")
+def practice_cards(
+    course: Annotated[str, Query(min_length=1, max_length=120)],
+    unit: Annotated[str, Query(max_length=160)] = "",
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """The student's saved cards for a unit, or for every unit of a course when unit is empty."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"cards": practice.cards_for(owner, course.strip(), unit.strip())}
+
+
+@app.post("/api/practice/rounds", status_code=201)
+def submit_practice_round(data: PracticeRoundCreate, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    practice_limit(owner, "practice_round", PRACTICE_ROUNDS_PER_HOUR, 60, "You’ve saved a lot of rounds this hour. Take a short break.")
+    try:
+        return practice.submit_round(owner, course=data.course.strip(), unit=data.unit.strip(), length_s=data.length_s,
+                                     mode=data.mode, answers=[(answer.card_id, answer.correct) for answer in data.answers])
+    except practice.PracticeError as error:
+        raise practice_error(error) from error
+
+
+@app.get("/api/practice/bests")
+def practice_bests(authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"bests": practice.list_bests(owner)}
+
+
+@app.get("/api/practice/rounds")
+def practice_rounds(limit: Annotated[int, Query(ge=1, le=50)] = 10, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"rounds": practice.list_rounds(owner, limit)}
+
+
+@app.post("/api/practice/challenges", status_code=201)
+def create_practice_challenge(data: PracticeChallengeCreate, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    practice_limit(owner, "practice_challenge", PRACTICE_CHALLENGES_PER_DAY, 1440, "You’ve sent 20 challenges today. Try again tomorrow.")
+    try:
+        return practice.create_challenge(owner, to_id=data.to_id, course=data.course.strip(), unit=data.unit.strip(),
+                                         length_s=data.length_s, mode=data.mode, card_ids=data.card_ids, answers=data.answers)
+    except practice.PracticeError as error:
+        raise practice_error(error) from error
+
+
+@app.get("/api/practice/challenges")
+def list_practice_challenges(authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"challenges": practice.list_challenges(owner)}
+
+
+@app.get("/api/practice/challenges/{challenge_id}")
+def get_practice_challenge(challenge_id: ChallengeId, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    try:
+        return practice.get_challenge(owner, challenge_id)
+    except practice.PracticeError as error:
+        raise practice_error(error) from error
+
+
+@app.post("/api/practice/challenges/{challenge_id}/result")
+def submit_practice_challenge(challenge_id: ChallengeId, data: PracticeChallengeResult, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    practice_limit(owner, "practice_round", PRACTICE_ROUNDS_PER_HOUR, 60, "You’ve saved a lot of rounds this hour. Take a short break.")
+    try:
+        return practice.submit_challenge_result(owner, challenge_id, data.answers)
+    except practice.PracticeError as error:
+        raise practice_error(error) from error
+
+
+@app.post("/api/practice/challenges/{challenge_id}/decline")
+def decline_practice_challenge(challenge_id: ChallengeId, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    try:
+        return practice.decline_challenge(owner, challenge_id)
+    except practice.PracticeError as error:
+        raise practice_error(error) from error
+
+
+# --- Feedback ---------------------------------------------------------------------------
+
+FEEDBACK_PER_HOUR = 5
+FEEDBACK_PER_DAY = 20
+
+
+class FeedbackDevice(BaseModel):
+    browser: str = Field(default="", max_length=60)
+    os: str = Field(default="", max_length=60)
+    screen: str = Field(default="", max_length=20)
+    viewport: str = Field(default="", max_length=20)
+
+
+class FeedbackCreate(BaseModel):
+    category: Literal["bug", "idea", "other"]
+    message: str = Field(min_length=1, max_length=feedback.MESSAGE_MAX)
+    device: FeedbackDevice | None = None
+    page: str = Field(default="", max_length=80, pattern=r"^[a-z-]*$")
+
+
+@app.post("/api/feedback", status_code=201)
+def send_feedback(data: FeedbackCreate, authorization: Annotated[str | None, Header()] = None):
+    """Signed-in only, to keep out spam. The device info and page are kept only when sent."""
+    owner = auth.authenticated_user(authorization)["id"]
+    if not data.message.strip():
+        raise HTTPException(status_code=400, detail={"code": "empty_feedback", "message": "Write a message first."})
+    practice_limit(owner, "feedback_hour", FEEDBACK_PER_HOUR, 60, "Thanks — you’ve sent a lot of feedback this hour. Try again later.")
+    practice_limit(owner, "feedback_day", FEEDBACK_PER_DAY, 1440, "Thanks — you’ve sent a lot of feedback today. Try again tomorrow.")
+    device = data.device.model_dump() if data.device else None
+    return feedback.save(owner, data.category, data.message, device, data.page)
+
+
+def admin_emails() -> set[str]:
+    """ADMIN_EMAILS: comma-separated; empty (the default) turns the admin routes off."""
+    return {email.strip().lower() for email in os.getenv("ADMIN_EMAILS", "").split(",") if email.strip()}
+
+
+def require_admin(authorization: str | None) -> dict:
+    """The verified account when its confirmed email is in ADMIN_EMAILS; otherwise a 404,
+    so the route looks like it doesn't exist."""
+    allowed = admin_emails()
+    not_found = HTTPException(status_code=404, detail="Not Found")
+    if not allowed or not authorization:
+        raise not_found
+    try:
+        user = auth.authenticated_user(authorization)
+    except HTTPException as error:
+        raise not_found from error
+    email = str(user.get("email") or "").strip().lower()
+    confirmed = user.get("email_confirmed_at") or user.get("confirmed_at")
+    if not email or not confirmed or email not in allowed:
+        raise not_found
+    return user
+
+
+@app.get("/api/admin/feedback")
+def admin_feedback(authorization: Annotated[str | None, Header()] = None):
+    require_admin(authorization)
+    return {"feedback": feedback.latest(200)}
 
 
 @app.get("/api/progress/me", response_model=ProgressResponse)

@@ -17,6 +17,8 @@ safe for foreign keys:
 - Progress (student_progress, topic_progress, xp_events, progress_claims), friends,
   friend quests, blocks and reports (both directions), reactions, notifications to
   and from the student, rate-limit events, uploaded_images rows and the profile.
+- Practice lab: rounds and personal bests, and every challenge the student sent or
+  received (the friend's copy of a received challenge goes too), and feedback they sent.
 - On Postgres, the browser-written group chat rows: messages the student sent, their
   read receipts and typing state.
 
@@ -33,8 +35,10 @@ from sqlalchemy import delete, or_, select, text, update
 
 import ai_cache
 import database
+import feedback
 import flashcards
 import note_store
+import practice
 import questions
 import tasks
 import tutor
@@ -52,6 +56,8 @@ def init_all() -> None:
     questions.init_questions()
     tutor.init_tutor()
     tasks.init_tasks()
+    practice.init_practice()
+    feedback.init_feedback()
 
 
 def _now() -> datetime:
@@ -227,6 +233,8 @@ def delete_account_data(student_id: str) -> dict:
         handed = _settle_tasks(connection, student_id)
         cache_rows = _delete_study_material(connection, student_id)
         _delete_social(connection, student_id)
+        practice.delete_for_account_in(connection, student_id)
+        feedback.delete_for_account_in(connection, student_id)
 
         if "study_group_messages" in chat_tables:
             connection.execute(text("DELETE FROM public.study_group_messages WHERE sender_id = :id"), {"id": student_id})
