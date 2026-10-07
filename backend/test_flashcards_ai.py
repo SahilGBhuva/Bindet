@@ -600,3 +600,30 @@ class NonLatinFlashcardTests(unittest.TestCase):
         self.assertEqual(received, 3)
         self.assertEqual([card["front"] for card in kept], ["光合作用发生在哪里?", "线粒体的作用是什么?"])
         self.assertNotEqual(ai_tutor.front_key("光合作用发生在哪里？"), ai_tutor.front_key("线粒体的作用是什么？"))
+
+
+class NestedSentinelTests(unittest.TestCase):
+    """AI-F4: the off-topic sentinel is removed until none is left, even when nested or split."""
+
+    @staticmethod
+    def run_guard(chunks):
+        guard = ai_tutor.ReplyGuard()
+        shown = "".join(guard.feed(chunk) for chunk in chunks) + guard.finish()
+        return shown, guard.off_topic
+
+    def test_nested_sentinel_mid_reply_never_leaks(self):
+        for chunks in (["Sure! [[OFF_[[OFF_TOPIC]]TOPIC]] done"], ["Here [[OFF_[[OFF_TOP", "IC]]TOPIC]] done"],
+                       ["a [[OFF_[[OFF_[[OFF_TOPIC]]TOPIC]]TOPIC]] b"], ["x [", "[OFF_", "[[OFF_TOPIC]]", "TOPIC]", "] y"]):
+            with self.subTest(chunks=chunks):
+                shown, _ = self.run_guard(chunks)
+                self.assertNotIn(ai_tutor.OFF_TOPIC_SENTINEL, shown)
+                self.assertNotIn("OFF_", shown)
+
+    def test_nested_sentinel_at_the_start_is_off_topic(self):
+        self.assertEqual(self.run_guard(["[[OFF_[[OFF_TOPIC]]TOPIC]] here is a poem"]), ("", True))
+
+    def test_ordinary_brackets_are_shown(self):
+        self.assertEqual(self.run_guard(["array[0] and a[i] then [", "x]"]), ("array[0] and a[i] then [x]", False))
+
+    def test_strip_sentinel_loops_until_stable(self):
+        self.assertEqual(ai_tutor.strip_sentinel("[[OFF_[[OFF_TOPIC]]TOPIC]]"), "")

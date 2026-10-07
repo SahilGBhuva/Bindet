@@ -819,9 +819,21 @@ def tutor_user_text(content: str, course: str, unit: str, source_labels: list[st
     return f"{notes_block(source_text, header=header)}\n\nStudent's message:\n{content}"
 
 
+_SENTINEL_CHARS = frozenset(OFF_TOPIC_SENTINEL)
+_SENTINEL_RUN = re.compile("[" + re.escape("".join(sorted(_SENTINEL_CHARS))) + "]+")
+
+
+def strip_sentinel(text: str) -> str:
+    """Remove the off-topic sentinel until none is left, so a nested
+    "[[OFF_[[OFF_TOPIC]]TOPIC]]" cannot leave a whole sentinel behind."""
+    while OFF_TOPIC_SENTINEL in text:
+        text = text.replace(OFF_TOPIC_SENTINEL, "")
+    return text
+
+
 class ReplyGuard:
     """Holds back the start of a tutor reply until it can't be the off-topic sentinel, and strips
-    the sentinel anywhere else, so the student never sees it."""
+    the sentinel (repeatedly, so nested copies can't leak) anywhere else, so the student never sees it."""
 
     def __init__(self) -> None:
         self.buffer = ""
@@ -829,14 +841,22 @@ class ReplyGuard:
         self.off_topic = False
 
     def _release(self) -> str:
-        text = self.buffer.replace(OFF_TOPIC_SENTINEL, "")
-        # Hold back a tail that could be the start of a sentinel split across chunks.
-        for size in range(min(len(text), len(OFF_TOPIC_SENTINEL) - 1), 0, -1):
-            if OFF_TOPIC_SENTINEL.startswith(text[-size:]):
-                self.buffer = text[-size:]
-                return text[:-size]
+        text = strip_sentinel(self.buffer)
+        # Hold back a trailing run of sentinel characters that contains "[": with later chunks
+        # (or after an inner sentinel is removed) it could still become a whole sentinel.
+        start = len(text)
+        while start > 0 and text[start - 1] in _SENTINEL_CHARS:
+            start -= 1
+        if "[" in text[start:]:
+            start += text[start:].index("[")
+            self.buffer = text[start:]
+            return text[:start]
         self.buffer = ""
         return text
+
+    def _opens_with_sentinel(self, head: str) -> bool:
+        run = _SENTINEL_RUN.match(head)
+        return bool(run) and OFF_TOPIC_SENTINEL in run.group(0)
 
     def feed(self, chunk: str) -> str:
         """Text that is safe to show now ("" while undecided or off topic)."""
@@ -845,10 +865,10 @@ class ReplyGuard:
         self.buffer += chunk
         if not self.decided:
             head = self.buffer.lstrip()
-            if head.startswith(OFF_TOPIC_SENTINEL):
+            if self._opens_with_sentinel(head):
                 self.off_topic, self.buffer = True, ""
                 return ""
-            if OFF_TOPIC_SENTINEL.startswith(head) and len(self.buffer) < REPLY_HEAD_MAX_CHARS:
+            if (not head or set(head) <= _SENTINEL_CHARS) and len(self.buffer) < REPLY_HEAD_MAX_CHARS:
                 return ""  # could still become the sentinel
             self.decided = True
         return self._release()
@@ -859,10 +879,10 @@ class ReplyGuard:
             return ""
         if not self.decided:
             head = self.buffer.strip()
-            if head and OFF_TOPIC_SENTINEL.startswith(head):
-                self.off_topic, self.buffer = True, ""  # a cut-off sentinel
+            if head and (OFF_TOPIC_SENTINEL.startswith(head) or self._opens_with_sentinel(head)):
+                self.off_topic, self.buffer = True, ""  # a (possibly cut-off) sentinel
                 return ""
-        rest, self.buffer = self.buffer.replace(OFF_TOPIC_SENTINEL, ""), ""
+        rest, self.buffer = strip_sentinel(self.buffer), ""
         return rest
 
 
