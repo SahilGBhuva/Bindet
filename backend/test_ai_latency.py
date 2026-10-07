@@ -94,5 +94,25 @@ class AILatencyTests(unittest.TestCase):
         self.assertNotIn("Someone else", text)
 
 
+
+class LoggingTests(unittest.TestCase):
+    def test_ai_events_go_to_stdout(self):
+        import sys
+        [handler] = ai_tutor.logger.handlers
+        self.assertIs(handler.stream, sys.stdout)
+
+    def test_student_hash_is_keyed_by_log_hash_salt_when_set(self):
+        with patch.dict(os.environ, {"LOG_HASH_SALT": ""}):
+            unsalted = ai_tutor.student_hash("student-1")
+        self.assertEqual(unsalted, __import__("hashlib").blake2s(b"student-1", digest_size=5).hexdigest())  # unchanged fallback
+        with patch.dict(os.environ, {"LOG_HASH_SALT": "server-secret"}):
+            salted = ai_tutor.student_hash("student-1")
+            self.assertEqual(salted, ai_tutor.student_hash("student-1"))  # stable
+        with patch.dict(os.environ, {"LOG_HASH_SALT": "another-secret"}):
+            self.assertNotEqual(ai_tutor.student_hash("student-1"), salted)
+        self.assertNotEqual(salted, unsalted)
+        self.assertEqual(len(salted), 10)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 import time
 import unicodedata
@@ -30,9 +31,10 @@ FLASHCARD_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_FLASHCAR
 
 logger = logging.getLogger("bindit.ai")
 if not logger.handlers:
-    # One JSON line per AI operation on stdout, which Vercel keeps in its function logs.
-    # Without a handler, INFO lines would be dropped by Python's default WARNING level.
-    _handler = logging.StreamHandler()
+    # One JSON line per AI operation on stdout (StreamHandler's default would be stderr),
+    # which Vercel keeps in its function logs. Without a handler, INFO lines would be
+    # dropped by Python's default WARNING level.
+    _handler = logging.StreamHandler(sys.stdout)
     _handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
@@ -92,10 +94,19 @@ def _checked_payload(op: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 # --- Structured logging (counts and class names only) ---------------------------------
 
+def _log_hash_key() -> bytes:
+    """LOG_HASH_SALT (a server secret) as a blake2s key, or b"" when it isn't set."""
+    salt = os.getenv("LOG_HASH_SALT", "")
+    return hashlib.sha256(salt.encode("utf-8")).digest() if salt else b""
+
+
 def student_hash(student_id: str | None) -> str | None:
+    """A short, stable pseudonym for a student in the logs. With LOG_HASH_SALT set it is
+    keyed by that secret, so someone holding the logs and a list of user IDs can't
+    recompute it; without it the hash is the same unkeyed one as before."""
     if not student_id:
         return None
-    return hashlib.blake2s(student_id.encode("utf-8"), digest_size=5).hexdigest()
+    return hashlib.blake2s(student_id.encode("utf-8"), digest_size=5, key=_log_hash_key()).hexdigest()
 
 
 def log_ai_event(op: str, *, outcome: str, student_id: str | None = None, note_id: str | None = None, tier: str | None = None,
