@@ -563,5 +563,62 @@ class GroupOwnershipTests(unittest.TestCase):
         self.assertIsNone(tasks.get_task("alex-id", task["id"])["group_id"])
 
 
+
+class GroupAnalyticsDateTests(unittest.TestCase):
+    """APP-M4 (the viewer's today) and APP-L5 (a new group is not stalled, joining is activity)."""
+
+    def setUp(self):
+        database.reset_db()
+        tasks.reset_tasks()
+        database.onboard_account("alex-id", "alex", "Alex", None)
+        database.onboard_account("sam-id", "sam", "Sam", None)
+        self.group = database.create_study_group("alex-id", "Bio crew")
+        database.join_study_group("sam-id", self.group["invite_code"])
+        self.client = TestClient(main.app)
+
+    def analytics(self, today=None):
+        params = {"today": today} if today is not None else {}
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+            response = self.client.get(f"/api/study-groups/{self.group['id']}/analytics", params=params,
+                                       headers={"Authorization": "Bearer test"})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_today_within_a_day_of_utc_is_used(self):
+        utc_today = datetime.now(timezone.utc).date()
+        tasks.create_task("alex-id", {"title": "Due today (UTC)", "group_id": self.group["id"], "due_date": utc_today.isoformat()})
+        tomorrow = (utc_today + timedelta(days=1)).isoformat()
+        report = self.analytics(tomorrow)
+        self.assertEqual(report["series"][-1]["date"], tomorrow)
+        self.assertEqual(report["totals"]["overdue"], 1)  # due yesterday for this viewer
+        self.assertEqual(self.analytics()["totals"]["overdue"], 0)
+
+    def test_implausible_or_invalid_today_is_ignored(self):
+        utc_today = datetime.now(timezone.utc).date().isoformat()
+        for value in ((date.today() + timedelta(days=5)).isoformat(), "2001-01-01", "not-a-date", ""):
+            with self.subTest(value=value):
+                self.assertEqual(self.analytics(value)["series"][-1]["date"], utc_today)
+        self.assertIsNone(tasks.client_today("2026-13-40"))
+
+    def test_a_brand_new_group_is_not_stalled_and_its_members_are_active(self):
+        tasks.create_task("alex-id", {"title": "Lab report", "group_id": self.group["id"]})
+        report = self.analytics()
+        self.assertEqual(report["pace"], "not_started")
+        self.assertEqual({member["student_id"]: member["active"] for member in report["members"]},
+                         {"alex-id": True, "sam-id": True})
+
+    def test_an_old_quiet_group_is_stalled_and_its_members_inactive(self):
+        tasks.create_task("alex-id", {"title": "Lab report", "group_id": self.group["id"]})
+        long_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        with database.engine().begin() as connection:
+            connection.execute(database.study_groups.update().values(created_at=long_ago))
+            connection.execute(database.study_group_members.update().values(joined_at=long_ago))
+            connection.execute(tasks.task_activity.update().values(created_at=long_ago))
+            connection.execute(tasks.tasks.update().values(created_at=long_ago))
+        report = self.analytics()
+        self.assertEqual(report["pace"], "stalled")
+        self.assertEqual({member["active"] for member in report["members"]}, {False})
+
+
 if __name__ == "__main__":
     unittest.main()

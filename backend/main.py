@@ -2110,10 +2110,13 @@ def notify_group_route(group_id: str, data: GroupNotice, authorization: Annotate
 
 
 @app.get("/api/study-groups/{group_id}/analytics")
-def group_analytics_route(group_id: str, authorization: Annotated[str | None, Header()] = None):
+def group_analytics_route(group_id: str, today: Annotated[str | None, Query(max_length=10)] = None,
+                          authorization: Annotated[str | None, Header()] = None):
+    """?today=YYYY-MM-DD is the viewer's local date, used for due / past due and the end of
+    the series. It is ignored unless it is within one day of the UTC date."""
     user = auth.authenticated_user(authorization)
     try:
-        return tasks.group_analytics(user["id"], group_id)
+        return tasks.group_analytics(user["id"], group_id, today=tasks.client_today(today))
     except ValueError as error:
         raise social_error(error) from error
 

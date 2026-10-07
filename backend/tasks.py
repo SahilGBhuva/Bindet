@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
-    UniqueConstraint, case, delete, func, or_, select, update,
+    UniqueConstraint, case, delete, func, or_, select, text, update,
 )
 
 import database
@@ -851,8 +851,42 @@ def _as_date(value) -> date | None:
     return value
 
 
+def _as_datetime(value) -> datetime:
+    return value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+
+
+def _recent_chat_senders(connection, group_id: str, since: datetime) -> set[str]:
+    """Members who wrote in the group chat since `since`. The chat lives in Supabase
+    (study_group_messages, created by migration), so there is none on SQLite or before
+    that migration ran."""
+    if connection.dialect.name != "postgresql":
+        return set()
+    if connection.execute(text("SELECT to_regclass('public.study_group_messages')")).scalar() is None:
+        return set()
+    return set(connection.execute(text(
+        "SELECT DISTINCT sender_id FROM public.study_group_messages WHERE group_id = :group_id AND created_at >= :since"
+    ), {"group_id": group_id, "since": since}).scalars().all())
+
+
+# The client may say what "today" is in its time zone; only one day either side of the
+# UTC date is believed (any time zone is within that), anything else is ignored.
+def client_today(value: str | None, now: datetime | None = None) -> date | None:
+    """The client's local date for analytics, or None to use the UTC date."""
+    if not value:
+        return None
+    try:
+        claimed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    utc_today = (now or _now()).date()
+    return claimed if abs((claimed - utc_today).days) <= 1 else None
+
+
 def group_analytics(student_id: str, group_id: str, today: date | None = None, days: int = 28) -> dict:
-    """Members, workload, milestones, a completion series and a projected finish date."""
+    """Members, workload, milestones, a completion series and a projected finish date.
+
+    today (the client's local date, see client_today) decides what is due or past due and
+    where the series ends; it defaults to the UTC date."""
     init_tasks()
     today = today or _now().date()
     with database.engine().connect() as connection:
@@ -867,7 +901,7 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
         role = group["viewer_role"]
         members = connection.execute(select(
             database.profiles.c.student_id, database.profiles.c.display_name, database.profiles.c.username,
-            database.study_group_members.c.role,
+            database.study_group_members.c.role, database.study_group_members.c.joined_at,
         ).join(database.study_group_members, database.profiles.c.student_id == database.study_group_members.c.student_id)
           .where(database.study_group_members.c.group_id == group_id)
           .order_by(database.study_group_members.c.joined_at)).mappings().all()
@@ -880,13 +914,17 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
         ).outerjoin(database.profiles, database.profiles.c.student_id == task_activity.c.actor_id).where(
             task_activity.c.group_id == group_id,
         ).order_by(task_activity.c.created_at.desc(), task_activity.c.id.desc()).limit(20)).mappings().all()
-        # Who has done anything lately: task activity or practice XP in the last 7 days.
-        # Practice is reduced to a yes/no per member; no XP amounts or times leave this function.
+        # Who has done anything lately: task activity, practice XP, creating or joining the
+        # group, or (on Postgres) writing in its chat, in the last 7 days. Practice and chat
+        # are reduced to a yes/no per member; no XP amounts, messages or times leave this function.
         week_ago = datetime.combine(today - timedelta(days=6), datetime.min.time(), tzinfo=timezone.utc)
         member_ids = [member["student_id"] for member in members]
         recent_xp = set(connection.execute(select(database.xp_events.c.student_id).where(
             database.xp_events.c.student_id.in_(member_ids), database.xp_events.c.created_at >= week_ago,
         ).distinct()).scalars().all()) if member_ids else set()
+        recent_joins = {member["student_id"] for member in members
+                        if member["joined_at"] is not None and _utc(_as_datetime(member["joined_at"])) >= week_ago}
+        recent_chat = _recent_chat_senders(connection, group_id, week_ago)
         assigned = defaultdict(set)
         for task_id, person in connection.execute(select(task_assignees.c.task_id, task_assignees.c.student_id).join(
             tasks, tasks.c.id == task_assignees.c.task_id,
@@ -944,19 +982,24 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
 
     # Pace: the projected finish against the latest milestone date, when there is one.
     target = max((date.fromisoformat(item["due_date"]) for item in milestones if item["due_date"]), default=None)
+    # A group younger than the velocity window can't have stalled for two weeks: without a
+    # completion yet it has simply not started.
+    created = _as_date(group["created_at"])
+    new_group = created is not None and created > today - timedelta(days=window)
     if not total:
         pace = "not_started"
     elif remaining == 0:
         pace = "done"
     elif projected is None:
-        pace = "stalled"
+        pace = "not_started" if new_group else "stalled"
     elif target is None:
         pace = "on_track"
     else:
         slip = (date.fromisoformat(projected) - target).days
         pace = "on_track" if slip <= 0 else "at_risk" if slip <= 3 else "behind"
 
-    active = {member["student_id"] for member in members if member["student_id"] in recent_actors or member["student_id"] in recent_xp}
+    active = {member["student_id"] for member in members
+              if member["student_id"] in recent_actors | recent_xp | recent_joins | recent_chat}
     overview = _overview(total, done, overdue, no_response, pace, projected, target, len(active), len(members))
 
     return {
@@ -999,6 +1042,8 @@ def _overview(total: int, done: int, overdue: int, no_response: int, pace: str, 
         lines.append(f"The projected finish ({date.fromisoformat(projected).strftime('%b %-d')}) is just past the final milestone.")
     elif pace == "stalled":
         lines.append("Nothing has been completed in the last two weeks, so a finish date can't be projected yet.")
+    elif pace == "not_started":
+        lines.append("Nothing has been completed yet, so a finish date can't be projected yet.")
     elif pace in ("on_track", "done"):
         lines.append("The group is on pace.")
     lines.append(f"{active} of {members} members were active this week.")
