@@ -288,13 +288,39 @@ UNTRUSTED_NOTES_RULE = (
 )
 
 
+# Characters that read as "<" or ">" (ASCII, fullwidth and small forms; NFKC folds them
+# all to ASCII) and invisible format characters that could be slipped between them.
+_ANGLE_OPEN = "<\uFF1C\uFE64"
+_ANGLE_CLOSE = ">\uFF1E\uFE65"
+_INVISIBLE = "\u200B-\u200F\u2060-\u2064\uFEFF"
+_DELIMITER_RUN = re.compile(
+    f"[{_ANGLE_OPEN}](?:[{_INVISIBLE}]*[{_ANGLE_OPEN}])+|[{_ANGLE_CLOSE}](?:[{_INVISIBLE}]*[{_ANGLE_CLOSE}])+"
+)
+
+
 def escape_delimiters(text: str) -> str:
-    """Neutralise anything in untrusted text that could open or close a delimited block."""
-    return re.sub(r"<{3,}|>{3,}", lambda match: ("‹" if match.group(0)[0] == "<" else "›") * len(match.group(0)), text or "")
+    """Neutralise anything in untrusted text that could open or close a delimited block.
+
+    Any run of two or more angle brackets (ASCII, fullwidth or small-form, even with
+    zero-width characters between them) becomes the same number of ‹ or › marks, so
+    "<<", "＜＜＜" or "<\u200b<<" can never imitate "<<<NOTES>>>". The rest of the text
+    is left as written (full NFKC would turn "x²" in math notes into "x2").
+    """
+    def replace(match: re.Match) -> str:
+        brackets = [char for char in match.group(0) if char in _ANGLE_OPEN + _ANGLE_CLOSE]
+        return ("‹" if brackets[0] in _ANGLE_OPEN else "›") * len(brackets)
+    return _DELIMITER_RUN.sub(replace, text or "")
+
+
+def _header_value(value: object) -> str:
+    """A notes-block header value (course, unit, file name): NFKC, one line, no format characters."""
+    plain = unicodedata.normalize("NFKC", str(value))
+    plain = "".join(char for char in plain if unicodedata.category(char) != "Cf")
+    return " ".join(plain.split())
 
 
 def notes_block(text: str, *, header: dict[str, str] | None = None) -> str:
-    lines = [f"{key}: {escape_delimiters(' '.join(str(value).split()))}" for key, value in (header or {}).items() if value]
+    lines = [f"{key}: {escape_delimiters(_header_value(value))}" for key, value in (header or {}).items() if value]
     if text:
         lines.append(escape_delimiters(text))
     return NOTES_OPEN + "\n" + "\n".join(lines) + "\n" + NOTES_CLOSE
@@ -325,6 +351,7 @@ _INSTRUCTION_ABUSE = re.compile(
     # Role changes and prompt override
     r"|\b(?:you\s+are|you're|your\s+are)\s+(?:now|no\s+longer|actually|a|an)\b|\bact\s+(?:as|like)\b|\bpretend\b|\brole[\s-]*play"
     r"|\b(?:new|different)\s+(?:role|persona|identity|instructions|rules|system)\b|\b(?:system|assistant|developer)\s*:"
+    r"|\bsystem\s+(?:note|message|override|instruction|update)s?\b|\b(?:answer|respond|reply|speak|talk)\s+(?:only\s+)?(?:as|like)\s+(?:a|an|if)\b"
     r"|\b(?:ignore|disregard|forget|override|bypass|skip)\b[^.\n]{0,30}\b(?:instruction|rule|prompt|system|guideline|restriction|filter|polic|safety|notes?)"
     r"|\buncensored\b|\bno\s+(?:rules|limits|restrictions|filters)\b|\bunfiltered\b"
     # Output format / schema changes
@@ -339,6 +366,80 @@ _INSTRUCTION_ABUSE = re.compile(
 )
 
 
+# Look-alike letters from Cyrillic and Greek, folded to the Latin letter they imitate
+# before screening ("іgnore" with a Cyrillic і reads as "ignore"). Screening only: the
+# model still gets the student's own text.
+_CONFUSABLES = str.maketrans({
+    "а": "a", "в": "b", "е": "e", "ё": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t",
+    "у": "y", "х": "x", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ӏ": "l", "һ": "h", "ԛ": "q", "ԝ": "w",
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X",
+    "І": "I", "Ј": "J", "Ѕ": "S", "Ү": "Y",
+    "α": "a", "ε": "e", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ϲ": "c",
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P",
+    "Τ": "T", "Υ": "Y", "Χ": "X", "ɡ": "g", "ı": "i",
+})
+# Leetspeak, applied only inside words that mix letters with these digits or symbols.
+_LEET_I = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i"})
+_LEET_L = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "l"})
+_LEET_WORD = re.compile(r"[a-z0-9@$!]+", re.I)
+
+
+def _deleet(text: str, table: dict) -> str:
+    def word(match: re.Match) -> str:
+        value = match.group(0)
+        if re.search(r"[a-z]", value, re.I) and re.search(r"[0-9@$!]", value):
+            return value.translate(table)
+        return value
+    return _LEET_WORD.sub(word, text)
+
+
+def screen_forms(text: str | None) -> list[str]:
+    """The forms of untrusted text that screens check: NFKC with format characters and accents
+    removed and look-alike letters folded to Latin, plus two leetspeak readings of that."""
+    plain = unicodedata.normalize("NFKC", text or "")
+    plain = "".join(char for char in plain if unicodedata.category(char) != "Cf")
+    plain = "".join(char for char in unicodedata.normalize("NFD", plain) if unicodedata.category(char) != "Mn")
+    plain = unicodedata.normalize("NFC", plain).translate(_CONFUSABLES)
+    forms = [plain]
+    for table in (_LEET_I, _LEET_L):
+        variant = _deleet(plain, table)
+        if variant not in forms:
+            forms.append(variant)
+    return forms
+
+
+# "Ignore the previous instructions" in Spanish, French, German and Portuguese (accents are
+# stripped before screening). Only imperative verbs with an instructions noun, so a student
+# writing "olvidé las reglas de acentuación" is not refused.
+_FOREIGN_OVERRIDE = re.compile(
+    r"\b(?:ignora|ignore[rz]?|ignoriere|ignorieren|ignorar|olvida|olvidate|olvidad|oublie[rz]?|vergiss|vergesst|vergessen\s+sie"
+    r"|esqueca|esquecam|desconsidera|desconsiderar|descarta|no\s+sigas|n'?obeis\s+pas)\b"
+    r"[^.\n]{0,40}\b(?:instrucciones|instruccion|instructions?|anweisungen|anweisung|instruktionen|instrucoes|instrucao|consignes?|indicaciones|vorgaben)\b",
+    re.I,
+)
+# Text that tries to leak or fix the answers ("every answer should be 'A'", "put the answer
+# in the question").
+_ANSWER_LEAK = re.compile(
+    r"\b(?:every|each|all)\s+(?:of\s+the\s+)?(?:correct\s+)?(?:answers?|backs?)\s+(?:should|must|will|shall|has\s+to|have\s+to)?\s*(?:be|is|are|=|equal)\s*"
+    r"(?:[\"'“‘`]|[a-d]\b|true\b|false\b|yes\b|no\b|the\s+same\b|\d)"
+    r"|\b(?:put|include|show|give|reveal|write|place|copy|add|repeat|state)\w*\b[^.\n]{0,30}\b(?:the\s+|its\s+|their\s+)?answers?\b[^.\n]{0,30}"
+    r"\b(?:in|into|on|inside|within)\s+(?:the\s+|each\s+|every\s+)?(?:questions?|fronts?|prompts?|card\s+fronts?)\b"
+    r"|\bcorrect_answer\b|\banswers?\s+(?:is\s+|are\s+)?always\b|\bsame\s+answer\b",
+    re.I,
+)
+# A long run of base64 (or similar encoded data): a way to smuggle instructions past the screen.
+_ENCODED_BLOB = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/_-]{20,}={0,2}(?![A-Za-z0-9+/=_-])")
+
+
+def _looks_encoded(text: str) -> bool:
+    for match in _ENCODED_BLOB.finditer(text):
+        blob = match.group(0)
+        classes = sum(bool(re.search(pattern, blob)) for pattern in (r"[a-z]", r"[A-Z]", r"[0-9]"))
+        if classes >= 2 and (blob.endswith("=") or re.search(r"[0-9+/]", blob) or classes == 3):
+            return True
+    return False
+
+
 def clean_instructions(text: str | None) -> str:
     """Instructions as they may be used: NFKC, no control characters, single-spaced, trimmed."""
     value = _CONTROL_CHARS.sub(" ", _plain(text or "").replace("\t", " ").replace("\n", " ").replace("\r", " "))
@@ -348,9 +449,17 @@ def clean_instructions(text: str | None) -> str:
 
 
 def instructions_rejected(text: str) -> bool:
-    """Obvious prompt-injection, links, code, format changes or non-study requests. A screen, not a guarantee:
-    the system prompt still limits what preferences can do, and output is validated as always."""
-    return bool(text) and (is_prompt_extraction(text) or bool(_INSTRUCTION_ABUSE.search(text)))
+    """Obvious prompt-injection, links, code, format changes, answer leaks, encoded blobs or
+    non-study requests. Checked on every screen form (look-alike letters, accents and
+    leetspeak folded), and in Spanish, French, German and Portuguese as well as English.
+    A screen, not a guarantee: the system prompt still limits what preferences can do,
+    and output is validated as always."""
+    if not text:
+        return False
+    if _looks_encoded(unicodedata.normalize("NFKC", text)):
+        return True
+    return any(_PROMPT_EXTRACTION.search(form) or _INSTRUCTION_ABUSE.search(form) or _FOREIGN_OVERRIDE.search(form)
+               or _ANSWER_LEAK.search(form) for form in screen_forms(text))
 
 
 def instructions_hash(text: str) -> str:
@@ -660,8 +769,10 @@ _PROMPT_EXTRACTION = re.compile(
 
 
 def is_prompt_extraction(text: str) -> bool:
-    """Obvious attempts to extract or override the tutor's instructions. A cheap filter, not a guarantee."""
-    return bool(_PROMPT_EXTRACTION.search(_plain(text)))
+    """Obvious attempts to extract or override the tutor's instructions, in English, Spanish,
+    French, German or Portuguese, with look-alike letters and leetspeak folded. A cheap
+    filter, not a guarantee."""
+    return any(_PROMPT_EXTRACTION.search(form) or _FOREIGN_OVERRIDE.search(form) for form in screen_forms(text))
 
 
 # Text in an answer that talks to the grader rather than answering the question.
