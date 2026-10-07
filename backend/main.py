@@ -2115,6 +2115,7 @@ def make_note_flashcards(
     owner = auth.authenticated_user(authorization)["id"]
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
+    flashcards.init_flashcards()  # once per process, before the two reads below run side by side
     note, state = gather((note_store.get_note, owner, note_id), (flashcards.job_state, owner, note_id))
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -2123,7 +2124,7 @@ def make_note_flashcards(
     if state["status"] == "generating":
         log("locked")
         raise ai_error(409, "generation_in_progress")
-    if state["status"] == "failed" and not retry:
+    if state["status"] == "failed" and not retry and not state["interrupted"]:
         return _note_flashcards_result(note_id, "failed", False, [], state["error"])
     text = ai_tutor.flashcard_source_text(note["text"])
     if ai_tutor.note_too_short(text):

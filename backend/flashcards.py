@@ -144,7 +144,9 @@ def job_state(owner_id: str, note_id: str) -> dict:
     with database.engine().connect() as connection:
         row = _job_row(connection, owner_id, note_id)
     status, error = _effective(row)
-    return {"status": status, "error": error, "card_count": int(row["card_count"]) if row else 0}
+    # A crashed generation (stale `generating`) may be re-attempted without ?retry=1.
+    interrupted = bool(row) and row["status"] == "generating" and status == "failed"
+    return {"status": status, "error": error, "card_count": int(row["card_count"]) if row else 0, "interrupted": interrupted}
 
 
 def note_cards(owner_id: str, note_id: str) -> list[dict]:
