@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import unittest
@@ -98,8 +99,12 @@ class AILatencyTests(unittest.TestCase):
 class LoggingTests(unittest.TestCase):
     def test_ai_events_go_to_stdout(self):
         import sys
-        [handler] = ai_tutor.logger.handlers
-        self.assertIs(handler.stream, sys.stdout)
+        # Test runners such as pytest attach their own capture handlers and swap sys.stdout,
+        # so look for our plain StreamHandler and check it doesn't write to stderr.
+        ours = [handler for handler in ai_tutor.logger.handlers if type(handler) is logging.StreamHandler]
+        self.assertEqual(len(ours), 1)
+        self.assertIsNot(ours[0].stream, sys.stderr)
+        self.assertIsNot(ours[0].stream, sys.__stderr__)
 
     def test_student_hash_is_keyed_by_log_hash_salt_when_set(self):
         with patch.dict(os.environ, {"LOG_HASH_SALT": ""}):
