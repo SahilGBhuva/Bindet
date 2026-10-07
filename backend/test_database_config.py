@@ -124,3 +124,38 @@ class EngineOptionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CreateLockedTablesConcurrencyTests(unittest.TestCase):
+    def test_concurrent_first_creation_does_not_fail(self):
+        """Parallel first requests (e.g. #games loading bests, rounds and challenges at once)
+        each create the same missing tables; none may fail with "table already exists"."""
+        import tempfile
+        import threading
+
+        from sqlalchemy import Column, Integer, MetaData, Table, create_engine, inspect
+
+        with tempfile.TemporaryDirectory() as folder:
+            for attempt in range(5):
+                engine = create_engine(f"sqlite:///{folder}/race-{attempt}.db")
+                metadata = MetaData()
+                for index in range(8):
+                    Table(f"race_table_{index}", metadata, Column("id", Integer, primary_key=True))
+                barrier = threading.Barrier(6)
+                errors: list[BaseException] = []
+
+                def create():
+                    try:
+                        barrier.wait()
+                        database.create_locked_tables(engine, metadata)
+                    except BaseException as error:  # noqa: BLE001 - collected for the assertion
+                        errors.append(error)
+
+                threads = [threading.Thread(target=create) for _ in range(6)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join()
+                self.assertEqual(errors, [])
+                self.assertEqual(len(inspect(engine).get_table_names()), 8)
+                engine.dispose()

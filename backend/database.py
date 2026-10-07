@@ -465,6 +465,9 @@ def revoke_client_access(connection, tables) -> None:
     )
 
 
+_create_tables_lock = threading.RLock()
+
+
 def create_locked_tables(active_engine, table_metadata, rls_tables=(), revoked_tables=(), extra=None) -> None:
     """Create any missing tables and lock them down in ONE transaction on Postgres.
 
@@ -475,17 +478,24 @@ def create_locked_tables(active_engine, table_metadata, rls_tables=(), revoked_t
     so here the table only becomes visible to anyone already locked. extra(connection),
     if given, runs in the same transaction (init_db uses it for added columns).
     SQLite has no client roles; tables are simply created.
+
+    Concurrent first calls (parallel requests on a cold instance, or several instances
+    after a deploy) are serialized: a process-wide lock here, and on Postgres a fixed
+    transaction-scoped advisory lock, so a second creator sees the first one's tables
+    instead of failing with "already exists".
     """
-    if active_engine.dialect.name != "postgresql":
-        table_metadata.create_all(active_engine)
-        return
-    with active_engine.begin() as connection:
-        table_metadata.create_all(connection)
-        enable_row_level_security(connection, rls_tables)
-        if revoked_tables:
-            revoke_client_access(connection, revoked_tables)
-        if extra is not None:
-            extra(connection)
+    with _create_tables_lock:
+        if active_engine.dialect.name != "postgresql":
+            table_metadata.create_all(active_engine)
+            return
+        with active_engine.begin() as connection:
+            connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('bindit:create_locked_tables'))"))
+            table_metadata.create_all(connection)
+            enable_row_level_security(connection, rls_tables)
+            if revoked_tables:
+                revoke_client_access(connection, revoked_tables)
+            if extra is not None:
+                extra(connection)
 
 
 class DatabaseConfigurationError(RuntimeError):
