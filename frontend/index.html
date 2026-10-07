@@ -9,6 +9,14 @@
     <!-- First script on the page: applies the saved theme and moves a sign-in return's ?code= out of the URL before anything else loads. Synchronous (no async/defer) so there is no theme flash; external because the CSP blocks inline scripts. -->
     <script src="/theme-init.js"></script>
     <link rel="icon" type="image/webp" href="/bindit-mascot-cutout.webp" />
+    <!-- Installable app (PWA): the manifest names bindit and its icons; public/sw.js keeps the app shell for offline use. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="bindit" />
+    <!-- "default" keeps the iOS status bar opaque above the page, so content never slides under it in either theme. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- Non-blocking font load: system fonts render first, then Inter swaps in. Instrument Serif and Caveat are only used on the landing and auth screens. -->
