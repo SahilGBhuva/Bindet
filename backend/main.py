@@ -3166,7 +3166,7 @@ def practice_limit(student_id: str, action: str, limit: int, window_minutes: int
                             headers={"Retry-After": str(wait)}) from error
 
 
-class PracticeAnswer(BaseModel):
+class RoundAnswer(BaseModel):
     card_id: str = Field(min_length=1, max_length=36)
     correct: bool
 
@@ -3176,7 +3176,7 @@ class PracticeRoundCreate(BaseModel):
     unit: str = Field(default="", max_length=160)
     length_s: int
     mode: str = Field(max_length=8)
-    answers: list[PracticeAnswer] = Field(min_length=1, max_length=practice.MAX_ANSWERS)
+    answers: list[RoundAnswer] = Field(min_length=1, max_length=practice.MAX_ANSWERS)
 
 
 class PracticeChallengeCreate(BaseModel):

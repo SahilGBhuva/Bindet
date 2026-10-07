@@ -1,5 +1,4 @@
-import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
-import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, PracticeItem, PracticeTest, PracticeTestSummary, Profile, Progress, StudyGroup, Task } from '../../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, PracticeItem, PracticeTest, PracticeTestSummary, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { nextValues, previewFor, stateName, type SchedulerState } from '../../lib/review'
@@ -264,6 +263,8 @@ function initialReviews(notebook: Notebook): Map<string, DemoReview> {
     })
   }
   return reviews
+}
+
 type DemoQuestion = { type: PracticeItem['type']; prompt: string; choices: string[]; answer: string; explanation: string; topic: string }
 
 /* A practice test from the demo unit's (or course's) own material: its quiz questions, plus short answers from its shortest cards. */
