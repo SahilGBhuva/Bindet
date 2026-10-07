@@ -198,6 +198,21 @@ function noteFromServer(note: UploadedNote): NoteDeposit {
   }
 }
 
+const RECENT_QUESTIONS = 10
+const NO_NEW_QUESTION_MESSAGE = 'Couldn’t find a new question right now. Try again in a moment.'
+
+/* A question's text without case, spacing or punctuation, so a reworded repeat still matches. */
+function questionFingerprint(text: string) {
+  return (text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ')
+}
+
+/* Why a question didn't load, in words the student can act on. */
+function quizLoadFailure(error: unknown) {
+  if (error instanceof RequestTimeoutError) return error.message
+  if (error instanceof ApiError && error.message) return error.message
+  return 'Couldn’t load a question. Try again in a moment.'
+}
+
 const wait = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
 
 export function Tools({ accessToken }: { accessToken?: string }) {
@@ -259,6 +274,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const mounted = useRef(true)
   const loadedQuizKey = useRef('')
   const quizSequence = useRef(0)
+  // Fingerprints of the questions shown most recently, newest first.
+  const shownQuestions = useRef<string[]>([])
   // At most one question is fetched ahead per quiz setting; leaving that setting cancels it.
   const prefetchedQuestions = useRef(new Map<string, { promise: Promise<GeneratedQuestion>; controller: AbortController }>())
   const intentTimer = useRef(0)
@@ -743,6 +760,12 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   async function loadQuizQuestion() {
     const sequence = ++quizSequence.current
     const prefetched = prefetchedQuestions.current.get(quizKey)
+    // The question on screen is never shown again as the "new" one; the last few are avoided when possible.
+    const onScreen = quizQuestion ? questionFingerprint(quizQuestion.question) : ''
+    const repeats = (question: GeneratedQuestion) => {
+      const fingerprint = questionFingerprint(question.question)
+      return fingerprint === onScreen || shownQuestions.current.includes(fingerprint)
+    }
     setQuizBusy(true)
     setQuizChecking(false)
     setQuizError('')
@@ -751,14 +774,22 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setQuizAnswer('')
     try {
       if (prefetched) prefetchedQuestions.current.delete(quizKey)
-      const next = await (prefetched?.promise ?? requestQuizQuestion())
+      let next = await (prefetched?.promise ?? requestQuizQuestion())
+      // A question fetched ahead can go stale; a repeat is replaced by asking once more.
+      if (repeats(next)) next = await requestQuizQuestion()
       if (sequence !== quizSequence.current) return
+      if (onScreen && questionFingerprint(next.question) === onScreen) {
+        setQuizError(NO_NEW_QUESTION_MESSAGE)
+        setQuizFailed('load')
+        return
+      }
+      shownQuestions.current = [questionFingerprint(next.question), ...shownQuestions.current].slice(0, RECENT_QUESTIONS)
       setQuizQuestion(next)
       // While the student works on this one, the next is fetched in the background.
       primeNextQuestion()
     } catch (error) {
       if (sequence === quizSequence.current && !isAbortError(error)) {
-        setQuizError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t load a question. Try again in a moment.')
+        setQuizError(quizLoadFailure(error))
         setQuizFailed('load')
       }
     } finally {

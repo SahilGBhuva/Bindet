@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from uuid import uuid4
@@ -88,33 +90,77 @@ def save_question(student_id: str, question: str, correct_answer: str, topic: st
     return question_id
 
 
-def cached_question(cache_key: str, student_id: str) -> dict | None:
-    """Return the least-used matching question not recently shown to this student."""
+# A student is never served one of their last RECENT_WINDOW questions again, and the
+# model is shown up to AVOID_IN_PROMPT of them so it writes something new.
+RECENT_WINDOW = 20
+AVOID_IN_PROMPT = 10
+BANK_CANDIDATES = 60
+
+
+def question_fingerprint(text: str) -> str:
+    """Case-, spacing- and punctuation-insensitive form of a question, for spotting repeats."""
+    return " ".join(re.findall(r"[0-9a-z]+", unicodedata.normalize("NFKC", text or "").casefold()))
+
+
+def recent_questions(student_id: str, limit: int = RECENT_WINDOW) -> list[str]:
+    """The questions most recently served to this student, newest first."""
     init_questions()
-    recent = select(generated_questions.c.question).where(
-        generated_questions.c.student_id == student_id
-    ).order_by(generated_questions.c.created_at.desc()).limit(20)
+    with database.engine().connect() as connection:
+        return list(connection.execute(
+            select(generated_questions.c.question)
+            .where(generated_questions.c.student_id == student_id)
+            .order_by(generated_questions.c.created_at.desc())
+            .limit(limit)
+        ).scalars().all())
+
+
+def _bank_rows(connection, cache_key: str) -> list[dict]:
+    return [dict(row) for row in connection.execute(
+        select(question_bank).where(
+            question_bank.c.cache_key == cache_key,
+            question_bank.c.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
+        ).order_by(question_bank.c.use_count.asc(), question_bank.c.created_at.desc()).limit(BANK_CANDIDATES)
+    ).mappings().all()]
+
+
+def banked_among(cache_key: str, texts: list[str]) -> list[str]:
+    """The texts (in order) that are already in this key's bank. Only these may be shown to
+    the model as questions to avoid, so a shared prompt never carries anything unshared."""
+    init_questions()
+    with database.engine().connect() as connection:
+        banked = {question_fingerprint(row["question"]) for row in _bank_rows(connection, cache_key)}
+    return [text for text in texts if question_fingerprint(text) in banked]
+
+
+def cached_question(cache_key: str, student_id: str, recent: list[str] | None = None) -> dict | None:
+    """Return the least-used matching question that is not one of this student's recent ones.
+
+    Repeats are matched on question_fingerprint, so a reworded copy (different case,
+    spacing or punctuation) of a question the student just saw is never served again.
+    """
+    init_questions()
+    if recent is None:
+        recent = recent_questions(student_id)
+    seen = {question_fingerprint(text) for text in recent}
     with database.engine().begin() as connection:
-        row = connection.execute(
-            select(question_bank).where(
-                question_bank.c.cache_key == cache_key,
-                question_bank.c.question.not_in(recent),
-                question_bank.c.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
-            ).order_by(question_bank.c.use_count.asc(), question_bank.c.created_at.desc()).limit(1)
-        ).mappings().first()
+        row = next((candidate for candidate in _bank_rows(connection, cache_key)
+                    if question_fingerprint(candidate["question"]) not in seen), None)
         if row is not None:
             connection.execute(
                 update(question_bank)
                 .where(question_bank.c.bank_id == row["bank_id"])
                 .values(use_count=question_bank.c.use_count + 1)
             )
-    return dict(row) if row is not None else None
+    return row
 
 
 def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int) -> None:
     init_questions()
     question, correct_answer, topic = clip_question(question, correct_answer, topic)
     with database.engine().begin() as connection:
+        fingerprint = question_fingerprint(question)
+        if any(question_fingerprint(row["question"]) == fingerprint for row in _bank_rows(connection, cache_key)):
+            return  # already banked: a second copy would only crowd out other questions
         connection.execute(question_bank.insert().values(
             bank_id=uuid4().hex,
             cache_key=cache_key,

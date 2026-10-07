@@ -2008,6 +2008,34 @@ def _rate_limited(student_id: str, action: str, limit: int, window_minutes: int)
         raise social_error(error) from error
 
 
+NO_NEW_QUESTION = "Couldn’t find a new question right now. Try again in a moment."
+# Model calls one request may make before giving up on getting a question the student hasn't just seen.
+QUIZ_ATTEMPTS = 2
+
+
+def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], **request) -> dict:
+    """Ask the model for a question that is not one of the student's recent ones.
+
+    The model is shown the recent questions it must not repeat (only ones already in this
+    key's bank, so a shared prompt never carries anything that isn't shared already). If it
+    repeats one anyway, it is asked once more; a second repeat is an error, never a repeat.
+    """
+    seen = {questions.question_fingerprint(text) for text in recent}
+    avoid = questions.banked_among(cache_key, recent[:questions.AVOID_IN_PROMPT]) if recent else []
+    for _ in range(QUIZ_ATTEMPTS):
+        spend_global_ai_call()
+        try:
+            result = ai_tutor.generate_question(avoid=avoid, **request)
+        except ai_tutor.AITutorError as exc:
+            raise HTTPException(status_code=503, detail=QUIZ_UNAVAILABLE) from exc
+        if questions.question_fingerprint(result["question"]) not in seen:
+            return result
+        ai_tutor.log_ai_event("generate_quiz", outcome="repeat", student_id=student_id, tier="text")
+        # The repeat is one the student has already seen, so naming it again shares nothing new.
+        avoid = [result["question"], *[text for text in avoid if questions.question_fingerprint(text) != questions.question_fingerprint(result["question"])]]
+    raise HTTPException(status_code=503, detail={"code": "no_new_question", "message": NO_NEW_QUESTION}, headers={"Retry-After": "5"})
+
+
 @app.post("/api/generate-question", response_model=QuestionResponse)
 def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None, background: BackgroundTasks = None):  # type: ignore[assignment]
     has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
@@ -2017,38 +2045,32 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         course, unit = data.notes.course.strip(), data.notes.unit.strip()
         target_topic = unit or course
         # The daily limit, the student's record and their notes are independent reads; fetch them together.
-        _, (difficulty, personalization), (source_labels, source_text) = gather(
+        _, (difficulty, personalization), (source_labels, source_text), recent = gather(
             (_rate_limited, student_id, "question_request", 80, 1440),
             (quiz_personalization, student_id, data.difficulty, target_topic),
             (note_store.context_for, student_id, course, unit),
+            (questions.recent_questions, student_id),
         )
-        cache_key = question_cache_key(student_id, data.notes.course, data.notes.unit, data.topic, difficulty, source_text)
+        cache_key = question_cache_key(student_id, course, unit, data.topic, difficulty, source_text)
         if question_scope_is_shared(source_text):
             # Shared bank: the model gets no student data. Only the difficulty (part of the
             # key) adapts to the student.
             personalization = neutral_personalization(target_topic)
         # A banked question costs no AI call, no ai_question quota and no global AI budget.
-        cached = questions.cached_question(cache_key, student_id) if ai_cache.enabled() else None
+        # It is never one this student was served recently (Skip must show something new).
+        cached = questions.cached_question(cache_key, student_id, recent) if ai_cache.enabled() else None
         if ai_cache.enabled():
             ai_tutor.log_ai_event("generate_quiz", outcome="cache_hit" if cached else "cache_miss", student_id=student_id, tier="text")
         if cached:
             ai_question = cached
         else:
             _rate_limited(student_id, "ai_question", 40, 1440)
-            spend_global_ai_call()
-            try:
-                ai_question = ai_tutor.generate_question(
-                    course=course,
-                    unit=unit,
-                    source_labels=source_labels,
-                    focus=data.topic,
-                    difficulty=difficulty,
-                    personalization=personalization,
-                    source_text=source_text,
-                    session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
-                )
-            except ai_tutor.AITutorError as exc:
-                raise HTTPException(status_code=503, detail=QUIZ_UNAVAILABLE) from exc
+            ai_question = fresh_quiz_question(
+                student_id=student_id, cache_key=cache_key, recent=recent,
+                course=course, unit=unit, source_labels=source_labels, focus=data.topic, difficulty=difficulty,
+                personalization=personalization, source_text=source_text,
+                session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),
+            )
         question_text, correct_answer, topic = questions.clip_question(
             ai_question["question"], ai_question["correct_answer"], ai_question["topic"] or target_topic,
         )
@@ -2071,7 +2093,12 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         else:
             # Without a sign-in the caller picks its own ID, so the limit follows the network address instead.
             limit_action(f"ip:{rate_limit.client_address.get()}", "guest_question", GUEST_QUESTIONS_PER_DAY, 1440)
-        generated = generate_math_question(data.topic, data.difficulty)
+        # Practice sums are random; draw again (a few times) rather than repeat a recent one.
+        seen = {questions.question_fingerprint(text) for text in questions.recent_questions(student_id, 10)}
+        for _ in range(8):
+            generated = generate_math_question(data.topic, data.difficulty)
+            if questions.question_fingerprint(generated.question) not in seen:
+                break
 
     question_id = questions.save_question(
         student_id,
