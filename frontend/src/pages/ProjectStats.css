@@ -625,5 +625,15 @@
   .pst-group__select,
   .pst-view { min-height: 40px; font-size: var(--text-sm); }
   .pst-group__select { padding-inline: 10px; }
-  .pst-view select { align-self: stretch; }
+  .pst-view select { align-self: stretch; min-height: 40px; }
+  /* Selects at 16px so iOS does not zoom in when one is opened. */
+  .pst-group__select,
+  .pst-view select { font-size: 16px; }
+  /* The drawn 10px labels and notes read at 12px on a phone. */
+  .pst-sublabel,
+  .pst-done-head,
+  .pst-me__sub,
+  .pst-note,
+  .pst-rtable thead th,
+  .pst-ptable thead th { font-size: var(--text-xs); }
 }

@@ -64,3 +64,8 @@
   .placeholder__steps > li,
   .coming-soon__item { gap: var(--space-3); padding: var(--space-3) var(--space-4); }
 }
+
+/* Phones: inline links get a taller tap area (vertical padding on inline text does not move the lines). */
+@media (max-width: 860px) {
+  .placeholder__steps a { padding-block: 12px; text-decoration: underline; text-underline-offset: 2px; }
+}

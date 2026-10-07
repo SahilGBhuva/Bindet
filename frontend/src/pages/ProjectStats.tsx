@@ -764,7 +764,7 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
       <p className="pst-fan__readout" aria-live="polite">
         {active ? `${active.label}: ${plural(active.value, unit)} (${active.pct}%)` : total > 0 ? `${plural(total, unit)} · hover or tap a wedge for details` : 'No tasks assigned yet'}
       </p>
-      <table className="sr-only">
+      <div className="sr-only"><table>
         <caption>{title}</caption>
         <thead><tr><th scope="col">Part</th><th scope="col">Tasks</th><th scope="col">Share</th></tr></thead>
         <tbody>
@@ -772,7 +772,7 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
             <tr key={wedge.key}><th scope="row">{wedge.label}</th><td>{wedge.value}</td><td>{wedge.pct}%</td></tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </figure>
   )
 }

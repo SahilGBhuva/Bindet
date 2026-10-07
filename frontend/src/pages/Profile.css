@@ -587,6 +587,7 @@
 }
 
 @media (max-width: 860px) {
+  .profile__code { font-size: max(12px, .92em); }
   .profile__grid { grid-template-columns: minmax(0, 1fr); }
   .profile__side { margin-top: var(--space-2); }
 }

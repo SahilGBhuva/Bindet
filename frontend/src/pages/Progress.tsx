@@ -500,7 +500,7 @@ function PulseGraph({
 function PulseTable({ pulse }: { pulse: CoursePulse }) {
   const units = pulse.series.length > 1 ? pulse.series : []
   return (
-    <table className="sr-only">
+    <div className="sr-only"><table>
       <caption>{pulse.course.name} mastery by quiz session, 0 to 100</caption>
       <thead>
         <tr>
@@ -518,7 +518,7 @@ function PulseTable({ pulse }: { pulse: CoursePulse }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   )
 }
 
@@ -726,7 +726,7 @@ function XpChart({ days }: { days: { day: string; xp: number }[] }) {
           {hover !== null && days[hover] ? `${dayLong.format(dayDate(days[hover].day))}: ${days[hover].xp} XP` : ''}
         </p>
       </div>
-      <table className="sr-only">
+      <div className="sr-only"><table>
         <caption>XP earned per day</caption>
         <thead><tr><th scope="col">Day</th><th scope="col">XP</th></tr></thead>
         <tbody>
@@ -734,7 +734,7 @@ function XpChart({ days }: { days: { day: string; xp: number }[] }) {
             <tr key={day.day}><th scope="row">{dayLong.format(dayDate(day.day))}</th><td>{day.xp}</td></tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </figure>
   )
 }

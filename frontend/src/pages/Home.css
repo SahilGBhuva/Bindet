@@ -500,8 +500,11 @@
   .home-stats { gap: 8px; }
   .home-team__icon { width: 40px; height: 40px; }
   .home-banner__theme::after { content: ""; position: absolute; inset: -8px -6px; }
-  .home-notice__title a { display: inline-block; padding-block: 10px; margin-block: -10px; }
+  .home-notice__title a { display: inline-block; padding-block: 12px; margin-block: -12px; }
   .home-row { min-height: 44px; }
+  /* No text under 12px on a phone. */
+  .home-badge,
+  .home-rule__m { font-size: var(--text-xs); }
 }
 
 @container home (max-width: 420px) {
