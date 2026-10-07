@@ -36,6 +36,7 @@ RETENTION = {
     "flashcard_cache": timedelta(days=30),
     "extraction_cache": timedelta(days=30),
     "grading_cache": timedelta(days=30),
+    "tutor_reply_cache": timedelta(days=7),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
@@ -223,6 +224,50 @@ def store_grade(key: str, result: dict) -> bool:
     if set(result) != set(GRADE_FIELDS) or not isinstance(result.get("correct"), bool) or not result.get("explanation"):
         return False
     return store("grading_cache", key, result={field: result[field] for field in GRADE_FIELDS})
+
+
+# --- Tutor replies (per account, never shared) ----------------------------------------
+#
+# Only the first message of a new conversation, without images, is cacheable: a
+# follow-up carries history that makes it unique. The key holds the owner, the
+# normalised message, a hash of the grounding the model saw (course, unit, note file
+# names and note text) and the route tier.
+
+TUTOR_REPLY_PIECE_CHARS = 48
+
+
+def tutor_version() -> str:
+    return "tutor-v1:" + fingerprint(
+        ai_tutor.TUTOR_SYSTEM_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.OPENROUTER_TUTOR_STRONG_MODEL,
+        ai_tutor.OPERATIONS["explain_material"]["max_tokens"], ai_tutor.OPERATIONS["explain_material"]["temperature"],
+        ai_tutor.OFF_TOPIC_SENTINEL, ai_tutor.NOTES_OPEN, ai_tutor.NOTES_CLOSE,
+    )
+
+
+def normalize_message(message: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", message or "").casefold().split())
+
+
+def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: list[str], source_text: str, tier: str) -> str:
+    grounding = make_key("grounding", course, unit, json.dumps(labels[:10], ensure_ascii=False), (source_text or "").strip())
+    return make_key("tutor", tutor_version(), owner_id, normalize_message(message), grounding, tier)
+
+
+def cached_tutor_reply(key: str, owner_id: str) -> str | None:
+    row = lookup("tutor_reply_cache", key, owner_id=owner_id)
+    reply = row["reply"] if row is not None else None
+    return reply if isinstance(reply, str) and reply.strip() else None
+
+
+def store_tutor_reply(key: str, owner_id: str, reply: str) -> bool:
+    if not reply or not reply.strip() or reply.strip() == ai_tutor.TUTOR_REFUSAL or ai_tutor.OFF_TOPIC_SENTINEL in reply:
+        return False
+    return store("tutor_reply_cache", key, owner_id=owner_id, reply=reply)
+
+
+def reply_pieces(reply: str) -> list[str]:
+    """A cached reply in small pieces, streamed as ordinary delta events."""
+    return [reply[index:index + TUTOR_REPLY_PIECE_CHARS] for index in range(0, len(reply), TUTOR_REPLY_PIECE_CHARS)]
 
 
 def reset_caches() -> None:

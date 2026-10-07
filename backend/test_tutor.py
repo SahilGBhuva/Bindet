@@ -195,7 +195,9 @@ class TutorTests(unittest.TestCase):
 
     def test_strong_model_is_used_a_limited_number_of_times_a_day(self):
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
-        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 1):
+        # The reply cache would answer Alex's repeated question without any model; this test is about the quota.
+        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 1), \
+                patch.dict(os.environ, {"AI_CACHE_ENABLED": "0"}):
             _, first = self.send("alex", content=hard)
             _, second = self.send("alex", content=hard)
             _, other = self.send("sam", content=hard)

@@ -1544,7 +1544,28 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     # Obvious attempts to extract or override the tutor's instructions get the fixed
     # refusal without a model call (a cheap filter, not a guarantee).
     prefiltered = ai_tutor.is_prompt_extraction(content)
-    if not prefiltered:
+    # The first message of a new conversation (no images) may have been answered for
+    # this same student, with the same grounding, in the last week: replay that reply.
+    # It still counts toward the tutor limits above, but not the global AI budget or the
+    # strong-model quota. Never shared between accounts: the owner is in the key.
+    grounding = None
+    tutor_cache_key = None
+    cached_reply = None
+    if not prefiltered and not data.conversation_id and not image_parts and ai_cache.enabled():
+        if early_context:
+            grounding = early_context.result()
+        elif requested_course or requested_unit:
+            grounding = note_store.context_for(owner, requested_course, requested_unit, limit_chars=12_000)
+        else:
+            grounding = ([], "")
+        tutor_cache_key = ai_cache.tutor_key(
+            owner_id=owner, message=content, course=requested_course, unit=requested_unit,
+            labels=grounding[0], source_text=grounding[1], tier=ai_tutor.tutor_route(content, False)["tier"],
+        )
+        cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
+        if cached_reply is None:
+            ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
+    if not prefiltered and cached_reply is None:
         spend_global_ai_call()
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
@@ -1555,7 +1576,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     history = trim_history([{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)])
     course = requested_course or conversation["course"]
     unit = requested_unit or conversation["unit"]
-    if early_context:
+    if grounding is not None:
+        labels, source_text = grounding
+    elif early_context:
         labels, source_text = early_context.result()
     else:
         labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
@@ -1566,7 +1589,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         saving.set_result(retry_of)
     else:
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
-    route = ai_tutor.tutor_route(content, bool(image_parts)) if prefiltered else capped_tutor_route(owner, content, bool(image_parts))
+    route = ai_tutor.tutor_route(content, bool(image_parts)) if prefiltered or cached_reply is not None else capped_tutor_route(owner, content, bool(image_parts))
     # The system prompt is fixed; the course, unit and notes travel in a delimited data
     # block inside the student's turn, never in the system prompt.
     turn_text = ai_tutor.tutor_user_text(content, course, unit, labels, source_text)
@@ -1583,6 +1606,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             ai_tutor.log_ai_event("explain_material", outcome="prefiltered", student_id=owner, tier=route["tier"], started=started)
             yield ai_tutor.TUTOR_REFUSAL
             return
+        if cached_reply is not None:
+            ai_tutor.log_ai_event("explain_material", outcome="cache_hit", student_id=owner, tier=route["tier"], started=started)
+            yield from ai_cache.reply_pieces(cached_reply)
+            return
+        produced: list[str] = []
         guard = ai_tutor.ReplyGuard()
         upstream = ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor"))
         try:
@@ -1591,9 +1619,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 if guard.off_topic:
                     break
                 if text:
+                    produced.append(text)
                     yield text
             tail = guard.finish()
             if tail:
+                produced.append(tail)
                 yield tail
         except ai_tutor.AITutorError as error:
             tail = guard.finish()
@@ -1610,6 +1640,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             yield ai_tutor.TUTOR_REFUSAL
         else:
             ai_tutor.log_ai_event("explain_material", outcome="ok", student_id=owner, tier=route["tier"], started=started)
+            if tutor_cache_key:
+                # Reached only when the whole reply streamed: never a refusal, error or cut-off reply.
+                ai_cache.store_tutor_reply(tutor_cache_key, owner, "".join(produced))
 
     def saved_user() -> bool:
         try:

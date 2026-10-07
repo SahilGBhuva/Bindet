@@ -205,6 +205,16 @@ grading_cache = Table(
     Column("hits", Integer, nullable=False, default=0),
 )
 
+# Per-account: the owner is part of the key and stored, and every read filters by it.
+tutor_reply_cache = Table(
+    "tutor_reply_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("owner_id", String(100), nullable=False, index=True),
+    Column("reply", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("hits", Integer, nullable=False, default=0),
+)
+
 progress_claims = Table(
     "progress_claims", metadata,
     Column("guest_id", String(100), primary_key=True),
@@ -257,6 +267,7 @@ RLS_TABLES = (
     "topic_progress",
     "tutor_conversations",
     "tutor_messages",
+    "tutor_reply_cache",
     "uploaded_images",
     "workspace_group_milestones",
     "workspace_task_activity",
@@ -280,6 +291,7 @@ CLIENT_REVOKED_TABLES = (
     "grading_cache",
     "tutor_conversations",
     "tutor_messages",
+    "tutor_reply_cache",
     "workspace_group_milestones",
     "workspace_task_activity",
     "workspace_task_assignees",
@@ -1741,6 +1753,7 @@ def reset_db() -> None:
         connection.execute(delete(flashcard_cache))
         connection.execute(delete(extraction_cache))
         connection.execute(delete(grading_cache))
+        connection.execute(delete(tutor_reply_cache))
         connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))
