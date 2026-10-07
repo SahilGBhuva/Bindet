@@ -46,7 +46,8 @@
 .lp *,
 .lp *::before,
 .lp *::after { box-sizing: border-box; }
-.lp button { font: inherit; }
+/* Not inside the live demo, so the real app's own button styles (tab bar, tabs) apply there. */
+.lp button:where(:not(.lp-demo *)) { font: inherit; }
 .lp :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
 
 /* Elements driven by scroll progress (landing/motion.ts). Without the script they rest in their final state. */
@@ -504,6 +505,23 @@
   .lp-demo > .sheet { overflow: hidden; }
   .lp-tutor { grid-template-columns: 1fr; padding-top: 88px; }
   .lp-product__otter { top: -48px; width: 76px; }
+}
+
+/*
+ * Phones: the sticky nav clears the notch, sides clear it in landscape, and every
+ * control is a 44px target (text links keep their look with invisible padding).
+ */
+@media (max-width: 860px) {
+  .lp { --lp-gutter: max(20px, env(safe-area-inset-left), env(safe-area-inset-right)); }
+  .lp-nav { height: calc(56px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .lp-nav__brand { min-height: 44px; }
+  .lp-btn--sm { height: 44px; }
+  .lp-textlink { padding-block: 12px; margin-block: -12px; }
+  .lp-nav__actions .lp-textlink { padding-inline: 4px; }
+  .lp-footer { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+  .lp-footer nav { gap: 0 8px; }
+  .lp-footer nav button { min-height: 44px; padding-inline: 6px; }
+  .lp-mark { font-size: var(--text-xs); }
 }
 
 @media (max-width: 520px) {
