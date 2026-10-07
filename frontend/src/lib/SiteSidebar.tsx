@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Profile, StudyGroup, Task } from './api'
+import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, type Profile, type StudyGroup, type Task } from './api'
 import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -274,6 +274,37 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     document.addEventListener('visibilitychange', refresh)
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [data, session, onUnreadChange])
+
+  // Changes made in this tab show at once: a task edit updates the shared cache (read it
+  // directly), and group or profile writes fetch fresh copies past the 30-second cache.
+  useEffect(() => {
+    if (!session || data.sandboxed) return
+    const token = session.access_token
+    let live = true
+    const onTasks = () => {
+      const cached = data.getCachedTasks(token)
+      if (cached) setTasks(cached)
+    }
+    const onGroups = () => {
+      void Promise.allSettled([data.getStudyGroups(token, true), data.getTasks(token, true)]).then(([nextGroups, nextTasks]) => {
+        if (!live) return
+        if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
+        if (nextTasks.status === 'fulfilled') setTasks(nextTasks.value)
+      })
+    }
+    const onProfile = () => {
+      void data.getAccountProfile(token, true).then((next) => { if (live) setProfile(next) }).catch(() => undefined)
+    }
+    window.addEventListener(TASKS_CHANGED_EVENT, onTasks)
+    window.addEventListener(GROUPS_CHANGED_EVENT, onGroups)
+    window.addEventListener(PROFILE_CHANGED_EVENT, onProfile)
+    return () => {
+      live = false
+      window.removeEventListener(TASKS_CHANGED_EVENT, onTasks)
+      window.removeEventListener(GROUPS_CHANGED_EVENT, onGroups)
+      window.removeEventListener(PROFILE_CHANGED_EVENT, onProfile)
+    }
+  }, [data, session])
 
   // The phone menu takes focus when it opens, keeps the page behind it still, closes on Esc
   // and hands focus back to the Menu button when it closes.
