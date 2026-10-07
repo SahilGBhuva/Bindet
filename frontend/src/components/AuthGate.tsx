@@ -708,6 +708,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 {busy ? (mode === 'login' ? 'Logging in…' : mode === 'reset' ? 'Sending…' : 'Creating account…') : mode === 'login' ? 'Log in' : mode === 'reset' ? 'Send reset link' : 'Create account'}
               </button>
             </form>
+            {mode !== 'reset' ? (
+              <p className="auth-legal">
+                By continuing{googleEnabled ? ', including with Google,' : ''} you agree to the <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a>.
+              </p>
+            ) : null}
             {mode === 'login' ? (
               <div className="auth-links">
                 <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode('reset')}>
