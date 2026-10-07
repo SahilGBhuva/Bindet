@@ -194,14 +194,21 @@ def purge_user_ai_data(owner_id: str) -> int:
     import questions
     database.init_db()
     questions.init_questions()
-    refs = database.cache_refs
     with database.engine().begin() as connection:
-        entries = connection.execute(select(refs.c.cache_table, refs.c.key).where(refs.c.owner_id == owner_id)).all()
-        connection.execute(delete(refs).where(refs.c.owner_id == owner_id))
-        removed = _drop_unreferenced(connection, [(name, key) for name, key in entries])
-        tutor_table = _table("tutor_reply_cache")
-        removed += connection.execute(delete(tutor_table).where(tutor_table.c.owner_id == owner_id)).rowcount or 0
-        connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
+        return purge_user_ai_data_in(connection, owner_id)
+
+
+def purge_user_ai_data_in(connection, owner_id: str) -> int:
+    """purge_user_ai_data inside the caller's transaction (account deletion runs every
+    step in one). The caller has already run database.init_db() and questions.init_questions()."""
+    import questions
+    refs = database.cache_refs
+    entries = connection.execute(select(refs.c.cache_table, refs.c.key).where(refs.c.owner_id == owner_id)).all()
+    connection.execute(delete(refs).where(refs.c.owner_id == owner_id))
+    removed = _drop_unreferenced(connection, [(name, key) for name, key in entries])
+    tutor_table = _table("tutor_reply_cache")
+    removed += connection.execute(delete(tutor_table).where(tutor_table.c.owner_id == owner_id)).rowcount or 0
+    connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
     return removed
 
 

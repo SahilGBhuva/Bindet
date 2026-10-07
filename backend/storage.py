@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -15,6 +16,12 @@ ALLOWED_IMAGE_TYPES = {
     "image/gif": ".gif",
 }
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# Private bucket for study-group chat images (supabase/migrations/20260920_chat_image_attachments.sql).
+# Object paths are <group_id>/<sender_id>/<file>, uploaded straight from the browser.
+CHAT_IMAGE_BUCKET = "study-group-images"
+LIST_PAGE = 1000
+
+logger = logging.getLogger("bindit.storage")
 
 
 def public_settings() -> tuple[str, str]:
@@ -115,3 +122,102 @@ def signed_image_url(storage_path: str) -> str:
     if not signed:
         raise HTTPException(status_code=502, detail="Supabase did not return an image link")
     return signed if signed.startswith("http") else f"{url}/storage/v1{signed}"
+
+
+# --- Deleting objects (account deletion) --------------------------------------------
+#
+# These use the service-role key, which only ever lives on the server; it is sent to
+# Supabase in headers and never logged. Without the key nothing can be deleted, and the
+# callers log a warning and carry on (see account_deletion.py).
+
+class StorageUnavailable(Exception):
+    """Storage could not be reached, or refused a list or delete."""
+
+
+def service_settings() -> tuple[str, str] | None:
+    """(Supabase URL, service-role key), or None when either is not configured."""
+    url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not service_key:
+        return None
+    return url, service_key
+
+
+def private_image_bucket() -> str:
+    return os.getenv("SUPABASE_STORAGE_BUCKET", "student-images")
+
+
+def _service_headers(service_key: str) -> dict[str, str]:
+    return {"apikey": service_key, "Authorization": f"Bearer {service_key}"}
+
+
+def _list_folder(url: str, service_key: str, bucket: str, folder: str) -> list[dict]:
+    entries: list[dict] = []
+    offset = 0
+    while True:
+        try:
+            response = httpx.post(
+                f"{url}/storage/v1/object/list/{bucket}",
+                headers=_service_headers(service_key),
+                json={"prefix": folder, "limit": LIST_PAGE, "offset": offset, "sortBy": {"column": "name", "order": "asc"}},
+                timeout=10,
+            )
+        except httpx.RequestError as error:
+            raise StorageUnavailable("list failed") from error
+        if response.status_code != 200:
+            raise StorageUnavailable(f"list returned {response.status_code}")
+        page = response.json()
+        if not isinstance(page, list):
+            raise StorageUnavailable("list returned an unexpected body")
+        entries.extend(item for item in page if isinstance(item, dict) and item.get("name"))
+        if len(page) < LIST_PAGE:
+            return entries
+        offset += LIST_PAGE
+
+
+def object_paths(bucket: str, folder: str, depth: int = 2) -> list[str]:
+    """Every object path under folder (e.g. "<group_id>/<user_id>"), descending into
+    sub-folders up to depth levels. Raises StorageUnavailable."""
+    settings = service_settings()
+    if settings is None:
+        raise StorageUnavailable("service role key not configured")
+    folder = _safe_storage_path(folder.strip("/"))
+    paths: list[str] = []
+    for entry in _list_folder(*settings, bucket, folder):
+        path = f"{folder}/{entry['name']}"
+        if entry.get("id") is None:  # a folder: Supabase lists those without an id
+            if depth > 0:
+                paths.extend(object_paths(bucket, path, depth - 1))
+        else:
+            paths.append(path)
+    return paths
+
+
+def delete_objects(bucket: str, paths: list[str]) -> int:
+    """Delete these object paths (missing ones are ignored). Raises StorageUnavailable."""
+    paths = sorted({_safe_storage_path(path) for path in paths if path})
+    if not paths:
+        return 0
+    settings = service_settings()
+    if settings is None:
+        raise StorageUnavailable("service role key not configured")
+    url, service_key = settings
+    deleted = 0
+    for start in range(0, len(paths), LIST_PAGE):
+        batch = paths[start:start + LIST_PAGE]
+        try:
+            response = httpx.request(
+                "DELETE", f"{url}/storage/v1/object/{bucket}",
+                headers=_service_headers(service_key), json={"prefixes": batch}, timeout=20,
+            )
+        except httpx.RequestError as error:
+            raise StorageUnavailable("delete failed") from error
+        if response.status_code not in (200, 204):
+            raise StorageUnavailable(f"delete returned {response.status_code}")
+        deleted += len(batch)
+    return deleted
+
+
+def delete_folder(bucket: str, folder: str) -> int:
+    """Delete every object under folder. Raises StorageUnavailable."""
+    return delete_objects(bucket, object_paths(bucket, folder))

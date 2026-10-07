@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import random
@@ -29,6 +30,7 @@ import base64
 import binascii
 import json
 
+import account_deletion
 import ai_cache
 import ai_tutor
 import auth
@@ -38,6 +40,7 @@ import questions
 import note_ingestion
 import note_store
 import rate_limit
+import storage
 import tutor
 import tasks
 
@@ -1971,6 +1974,89 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
     return profile
+
+
+ACCOUNT_DELETE_PHRASE = "DELETE MY ACCOUNT"
+ACCOUNT_DELETE_PER_HOUR = 5
+# Deleting an account needs a sign-in from the last few minutes, so a token left on a
+# shared computer (or stolen) can't be used to wipe someone's account.
+ACCOUNT_DELETE_REAUTH_SECONDS = 10 * 60
+ACCOUNT_DELETE_REAUTH = "For your safety, sign in again, then delete your account."
+ACCOUNT_AUTH_DELETE_FAILED = (
+    "Your data was deleted, but we couldn't remove your login. "
+    "Email officialbindet@gmail.com and we'll finish it."
+)
+account_logger = logging.getLogger("bindit.account")
+
+
+class AccountDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: str = Field(default="", max_length=64)
+
+
+def _storage_step(student_id: str, bucket: str, action, *args) -> None:
+    """Run one storage deletion; a failure is logged (hashed ID, bucket, error type) and skipped."""
+    try:
+        action(bucket, *args)
+    except (storage.StorageUnavailable, HTTPException) as error:
+        account_logger.warning("account_delete_storage_failed %s", json.dumps(
+            {"student": ai_tutor.student_hash(student_id), "bucket": bucket, "error": type(error).__name__}))
+
+
+def _delete_account_images(student_id: str, groups: list[str]) -> None:
+    """Best effort, before the data goes: the student's chat images in every group they
+    are in (<group_id>/<student_id>/...) and their private images (<student_id>/...).
+    Without the service-role key nothing can be deleted; that is logged and skipped."""
+    if storage.service_settings() is None:
+        account_logger.warning("account_delete_storage_skipped %s", json.dumps(
+            {"student": ai_tutor.student_hash(student_id), "reason": "service_role_key_missing"}))
+        return
+    for group_id in groups:
+        _storage_step(student_id, storage.CHAT_IMAGE_BUCKET, storage.delete_folder, f"{group_id}/{student_id}")
+    _storage_step(student_id, storage.private_image_bucket(), storage.delete_folder, student_id)
+
+
+def _delete_leftover_images(student_id: str, summary: dict) -> None:
+    """After the data is gone: private images listed in uploaded_images (normally already
+    deleted with the student's folder), and whatever is left in the chat folder of a group
+    deleted with the account (images from former members, who no longer have a group)."""
+    if storage.service_settings() is None:
+        return
+    if summary["image_paths"]:
+        _storage_step(student_id, storage.private_image_bucket(), storage.delete_objects, summary["image_paths"])
+    for group_id in summary["groups_deleted"]:
+        _storage_step(student_id, storage.CHAT_IMAGE_BUCKET, storage.delete_folder, group_id)
+
+
+@app.delete("/api/account")
+def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
+                   authorization: Annotated[str | None, Header()] = None):
+    """Permanently delete the signed-in account and all its data (account_deletion.py),
+    then its images in storage, then the Supabase Auth user.
+
+    Data goes first, in one transaction; the login last. If removing the login fails the
+    data is already gone and the answer is 502 auth_delete_failed; calling again is safe
+    (there is nothing left to delete) and retries the login removal."""
+    user = auth.authenticated_user(authorization)
+    student_id = user["id"]
+    limit_action(student_id, "account_delete", ACCOUNT_DELETE_PER_HOUR, 60)
+    if data is None or data.confirm != ACCOUNT_DELETE_PHRASE:
+        raise HTTPException(status_code=400, detail={
+            "code": "confirm_required", "message": f"Type {ACCOUNT_DELETE_PHRASE} to confirm.",
+        })
+    signed_in = auth.signed_in_at(authorization)
+    if signed_in is None or time.time() - signed_in > ACCOUNT_DELETE_REAUTH_SECONDS:
+        raise HTTPException(status_code=403, detail={"code": "reauth_required", "message": ACCOUNT_DELETE_REAUTH})
+    # Images first, while the memberships that say where they are still exist.
+    _delete_account_images(student_id, account_deletion.group_ids(student_id))
+    summary = account_deletion.delete_account_data(student_id)
+    _delete_leftover_images(student_id, summary)
+    if not auth.delete_auth_user(student_id):
+        account_logger.warning("account_delete_auth_failed %s", json.dumps({"student": ai_tutor.student_hash(student_id)}))
+        raise HTTPException(status_code=502, detail={"code": "auth_delete_failed", "message": ACCOUNT_AUTH_DELETE_FAILED})
+    auth.forget(authorization)
+    account_logger.info("account_event %s", json.dumps({"event": "account_deleted", "student": ai_tutor.student_hash(student_id)}))
+    return {"deleted": True}
 
 
 @app.get("/api/tasks")

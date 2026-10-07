@@ -33,6 +33,8 @@ MAX_ASSIGNEES = 10
 # Only the task creator or the group owner may change these. Assignees can
 # still move status, edit the description, checklist, priority and notes.
 MANAGER_FIELDS = ("title", "assignee_ids", "due_date", "due_time", "group_id", "milestone_id")
+# Shown where a person has no profile any more (they deleted their account).
+DELETED_USER = "Deleted user"
 TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 task_metadata = MetaData()
@@ -395,8 +397,8 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
             "due_date": row["due_date"].isoformat() if row["due_date"] else None,
             "due_time": row["due_time"], "milestone_id": row["milestone_id"], "sort_order": row["sort_order"],
             "group_id": row["group_id"], "group_name": row["group_name"] if row["group_id"] else None,
-            "owner": {"student_id": row["owner_id"], "display_name": row["owner_name"] or "Student"},
-            "assignees": [{"student_id": person, "display_name": name or "Student"} for person, name in task_assigned],
+            "owner": {"student_id": row["owner_id"], "display_name": row["owner_name"] or DELETED_USER},
+            "assignees": [{"student_id": person, "display_name": name or DELETED_USER} for person, name in task_assigned],
             "checklist_total": int(row["checklist_total"] or 0), "checklist_done": int(row["checklist_done"] or 0),
             "comment_count": int(row["comment_count"] or 0),
             "attachment_count": int(row["attachment_count"] or 0),
@@ -488,18 +490,18 @@ def get_task(student_id: str, task_id: str) -> dict:
                        | {row["added_by"] for row in attachments})
     summary["checklist"] = [{"id": row["id"], "text": row["text"], "done": bool(row["done"])} for row in checklist]
     summary["comments"] = [{
-        "id": row["id"], "author_id": row["author_id"], "author_name": names.get(row["author_id"], "Student"),
+        "id": row["id"], "author_id": row["author_id"], "author_name": names.get(row["author_id"], DELETED_USER),
         "body": row["body"], "created_at": _utc(row["created_at"]), "mine": row["author_id"] == student_id,
     } for row in reversed(comments)]
     summary["activity"] = [{
-        "id": row["id"], "actor_name": names.get(row["actor_id"], "Student"), "kind": row["kind"],
+        "id": row["id"], "actor_name": names.get(row["actor_id"], DELETED_USER), "kind": row["kind"],
         "detail": row["detail"], "created_at": _utc(row["created_at"]),
     } for row in activity]
     # Note attachments expose only their label; the note text stays with its owner.
     summary["attachments"] = [{
         "id": row["id"], "kind": row["kind"], "label": row["label"], "url": row["url"] if row["kind"] == "link" else "",
         "note_id": row["note_id"] if row["added_by"] == student_id else "",
-        "added_by_name": names.get(row["added_by"], "Student"), "mine": row["added_by"] == student_id,
+        "added_by_name": names.get(row["added_by"], DELETED_USER), "mine": row["added_by"] == student_id,
         "created_at": _utc(row["created_at"]),
     } for row in attachments]
     return summary
@@ -1022,7 +1024,7 @@ def group_analytics(student_id: str, group_id: str, today: date | None = None, d
         "projected_finish": projected,
         "activity": [{
             "id": row["id"], "task_id": row["task_id"], "task_title": row["title"], "kind": row["kind"],
-            "detail": row["detail"], "actor_name": row["actor_name"] or "Student", "created_at": _utc(row["created_at"]),
+            "detail": row["detail"], "actor_name": row["actor_name"] or DELETED_USER, "created_at": _utc(row["created_at"]),
         } for row in activity],
     }
 

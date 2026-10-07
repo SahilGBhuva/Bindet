@@ -78,6 +78,73 @@ def token_expiry(authorization: str) -> float | None:
     return float(expiry)
 
 
+def _token_payload(authorization: str | None) -> dict | None:
+    """The JWT payload, unverified. Only call this after authenticated_user() accepted
+    the same token: Supabase has then checked its signature."""
+    token = authorization.split(' ', 1)[1].strip() if authorization and ' ' in authorization else ''
+    parts = token.split('.')
+    if len(parts) != 3 or len(parts[1]) > 8192:
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _number(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def signed_in_at(authorization: str | None) -> float | None:
+    """When this session last signed in (Unix seconds), from the verified token, or None.
+
+    Supabase puts each sign-in method and its time in the `amr` claim, and that time is
+    kept when the access token is refreshed, so it is the real sign-in time. `iat` is
+    when this access token was issued, which a background refresh (about hourly) moves
+    forward; it is only used when the token carries no `amr` times.
+    """
+    payload = _token_payload(authorization)
+    if payload is None:
+        return None
+    amr = payload.get('amr')
+    if isinstance(amr, list):
+        times = [_number(item.get('timestamp')) for item in amr if isinstance(item, dict)]
+        times = [value for value in times if value is not None]
+        if times:
+            return max(times)
+    return _number(payload.get('iat'))
+
+
+def forget(authorization: str | None) -> None:
+    """Drop a cached verification (after the account behind it was deleted)."""
+    if not authorization:
+        return
+    with _verify_lock:
+        _verify_cache.pop(_cache_key(authorization), None)
+
+
+def delete_auth_user(user_id: str) -> bool:
+    """Delete the Supabase Auth user with the admin API. True when it is gone (a 404 means
+    an earlier attempt already deleted it). Needs SUPABASE_SERVICE_ROLE_KEY, which is sent
+    only to Supabase and never logged; without it this returns False."""
+    url = os.getenv('SUPABASE_URL', '').rstrip('/')
+    service_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
+    if not url or not service_key or not user_id or '/' in user_id:
+        return False
+    try:
+        response = httpx.delete(
+            f'{url}/auth/v1/admin/users/{user_id}',
+            headers={'apikey': service_key, 'Authorization': f'Bearer {service_key}'},
+            timeout=10,
+        )
+    except httpx.RequestError:
+        return False
+    return response.status_code in (200, 204, 404)
+
+
 def _cache_seconds(authorization: str) -> float:
     """Reuse a successful verification for at most a minute, and never past the token's exp."""
     expiry = token_expiry(authorization)

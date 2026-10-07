@@ -567,7 +567,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const lastActivity = (group: StudyGroup) => time(summaries[group.id]?.lastAt ?? getCachedGroupMessages(group.id, session)?.at(-1)?.created_at)
   const sortedGroups = [...groupList].sort((a, b) => lastActivity(b) - lastActivity(a))
   const totalUnread = groupList.reduce((sum, group) => sum + (group.id === activeId ? 0 : summaries[group.id]?.unread ?? 0), 0)
-  const memberName = (id: string, fallback?: string) => id === userId ? 'You' : fallback || activeGroup?.members.find((member) => member.student_id === id)?.display_name || 'Group member'
+  const memberName = (id: string, fallback?: string) => id === userId ? 'You' : fallback || activeGroup?.members.find((member) => member.student_id === id)?.display_name || 'Deleted user'
   const activeTyping = typingUsers.filter((item) => item.group_id === activeId && item.student_id !== userId && isTypingNow(item))
   const lastOwn = [...serverMessages].reverse().find((message) => message.sender_id === userId)
   const seenBy = lastOwn ? receipts.filter((receipt) => receipt.group_id === activeId && receipt.student_id !== userId && time(receipt.last_read_at) >= time(lastOwn.created_at)).length : 0
