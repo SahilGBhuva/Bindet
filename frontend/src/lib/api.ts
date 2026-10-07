@@ -425,6 +425,10 @@ export type CardReview = {
   state: ReviewState
   due_at: string | null
   interval_days: number
+  /* The scheduler's state (backend/review.py), so the client can compute previews itself. */
+  ease?: number
+  reps?: number
+  lapses?: number
   /* Interval in days each grade would give this card. */
   preview: Record<ReviewGrade, number>
 }

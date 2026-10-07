@@ -367,8 +367,8 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     return {
       ...card,
       review: state
-        ? { state: stateName(state.interval_days), due_at: new Date(state.due).toISOString(), interval_days: state.interval_days, preview: previewFor(state, card.id) }
-        : { state: 'new', due_at: null, interval_days: 0, preview: previewFor(null, card.id) },
+        ? { state: stateName(state.interval_days), due_at: new Date(state.due).toISOString(), interval_days: state.interval_days, ease: state.ease, reps: state.reps, lapses: state.lapses, preview: previewFor(state, card.id) }
+        : { state: 'new', due_at: null, interval_days: 0, ease: 2.5, reps: 0, lapses: 0, preview: previewFor(null, card.id) },
     }
   }
 

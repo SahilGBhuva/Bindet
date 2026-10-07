@@ -1,12 +1,12 @@
 import type { CardReview, ReviewGrade, ReviewState } from './api'
+import { previewFor as computePreview } from './reviewSchedule'
 
 /*
  * Spaced-repetition helpers shared by the Review mode, Home and the sidebar.
  *
- * The app's schedule is computed on the server (backend/review.py), which sends each
- * card's next interval per grade. nextValues() mirrors that scheduler for the landing
- * demo's in-memory sandbox only; its fuzz uses a small string hash instead of SHA-256,
- * so demo intervals of three days or more can differ from the server's by a day.
+ * The schedule is decided on the server (backend/review.py). reviewSchedule.ts ports its
+ * formulas exactly: Review mode uses them for the grade buttons' interval previews, and
+ * the landing demo's in-memory sandbox uses them to schedule cards.
  */
 
 export const GRADES: ReviewGrade[] = ['again', 'hard', 'good', 'easy']
@@ -57,56 +57,22 @@ export function relativeDue(dueAt: string | null, now: number) {
   return `in ${days} days`
 }
 
-// --- Scheduler mirror (landing demo only) ---------------------------------------------
+// --- Scheduler (an exact port of backend/review.py lives in reviewSchedule.ts) -----------
 
-export type SchedulerState = { interval_days: number; ease: number; reps: number; lapses: number }
+export { nextValues, previewFor, type SchedulerState } from './reviewSchedule'
 
-const DEFAULT_EASE = 2.5
-const MIN_EASE = 1.3
-const MAX_INTERVAL = 365
-const RELEARN_DAYS = 10 / 1440
-
-function fuzz(cardId: string, reps: number) {
-  let hash = 2166136261
-  for (const char of `${cardId}:${reps}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0
-  return 1 + ((hash / 0xffffffff) * 2 - 1) * 0.05
-}
-
-export function nextValues(state: SchedulerState | null, grade: ReviewGrade, cardId: string): SchedulerState {
-  const interval = state?.interval_days ?? 0
-  const ease = state?.ease ?? DEFAULT_EASE
-  const reps = state?.reps ?? 0
-  const lapses = state?.lapses ?? 0
-  if (grade === 'again') {
-    return { interval_days: RELEARN_DAYS, ease: Math.max(MIN_EASE, ease - 0.2), reps: 0, lapses: lapses + (interval >= 1 ? 1 : 0) }
+/* Each grade's next interval, computed here from the card's own schedule (the server's
+ * preview is used only if a response predates the scheduler fields). */
+export function gradePreview(card: { id: string; review: CardReview }): CardReview['preview'] {
+  const { review } = card
+  if (review.state === 'new') return computePreview(null, card.id)
+  if (typeof review.ease === 'number' && typeof review.reps === 'number') {
+    return computePreview({ interval_days: review.interval_days, ease: review.ease, reps: review.reps, lapses: review.lapses ?? 0 }, card.id)
   }
-  let hard = 0.5
-  let good = 1
-  let easy = 4
-  if (reps > 0) {
-    hard = Math.max(interval * 1.2, interval + 1)
-    good = Math.max(reps === 1 ? 3 : interval * ease, hard + 1)
-    easy = Math.max(interval * ease * 1.3, good + 1)
-  }
-  let chosen = { hard, good, easy }[grade]
-  if (chosen >= 1) {
-    if (chosen >= 3) chosen *= fuzz(cardId, reps)
-    chosen = Math.min(MAX_INTERVAL, Math.max(1, Math.round(chosen)))
-  }
-  const nextEase = { hard: ease - 0.15, good: ease, easy: ease + 0.15 }[grade]
-  return { interval_days: chosen, ease: Math.max(MIN_EASE, nextEase), reps: grade === 'hard' && reps === 0 ? reps : reps + 1, lapses }
+  return review.preview
 }
 
 export function stateName(intervalDays: number | null): ReviewState {
   if (intervalDays === null) return 'new'
   return intervalDays < 1 ? 'learning' : 'review'
-}
-
-export function previewFor(state: SchedulerState | null, cardId: string): CardReview['preview'] {
-  return {
-    again: nextValues(state, 'again', cardId).interval_days,
-    hard: nextValues(state, 'hard', cardId).interval_days,
-    good: nextValues(state, 'good', cardId).interval_days,
-    easy: nextValues(state, 'easy', cardId).interval_days,
-  }
 }

@@ -132,11 +132,15 @@ def is_due(row: dict, now: datetime, tomorrow: datetime) -> bool:
 
 
 def _review_public(row: dict | None, card_id: str) -> dict:
+    """A card's schedule as the client sees it. ease/reps/lapses let the client compute the same
+    previews (frontend/src/lib/reviewSchedule.ts mirrors next_values)."""
     if row is None:
-        return {"state": "new", "due_at": None, "interval_days": 0.0, "preview": preview(None, card_id)}
+        return {"state": "new", "due_at": None, "interval_days": 0.0, "ease": DEFAULT_EASE, "reps": 0, "lapses": 0,
+                "preview": preview(None, card_id)}
     return {
         "state": _state_name(float(row["interval_days"])), "due_at": _iso(row["due_at"]),
-        "interval_days": float(row["interval_days"]), "preview": preview(row, card_id),
+        "interval_days": float(row["interval_days"]), "ease": float(row["ease"]), "reps": int(row["reps"]),
+        "lapses": int(row["lapses"]), "preview": preview(row, card_id),
     }
 
 

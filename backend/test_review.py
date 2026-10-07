@@ -180,6 +180,11 @@ class QueueTests(ReviewStoreTestCase):
         result = review.queue("alex", now=NOW)
         self.assertEqual([card["id"] for card in result["cards"]], [ids[2], ids[0], ids[1], ids[4]])
         self.assertEqual([card["review"]["state"] for card in result["cards"]], ["learning", "review", "review", "new"])
+        # The scheduler state rides along so the client can compute the same previews.
+        lapsed, fresh = result["cards"][0]["review"], result["cards"][3]["review"]
+        self.assertEqual((lapsed["ease"], lapsed["reps"], lapsed["lapses"]), (2.3, 0, 0))
+        self.assertEqual((fresh["ease"], fresh["reps"], fresh["lapses"]), (2.5, 0, 0))
+        self.assertEqual(lapsed["preview"], review.preview(state(lapsed["interval_days"], 2.3, 0, 0), ids[2]))
         totals = review.summary("alex", now=NOW)
         self.assertEqual(totals["due"], 3)
         self.assertEqual(totals["next_due_at"], review._iso(review.due_at_for(4.0, NOW - timedelta(days=1))))
