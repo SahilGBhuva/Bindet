@@ -2034,15 +2034,17 @@ NO_NEW_QUESTION = "Couldn’t find a new question right now. Try again in a mome
 QUIZ_ATTEMPTS = 2
 
 
-def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], **request) -> dict:
+def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], shared: bool, **request) -> dict:
     """Ask the model for a question that is not one of the student's recent ones.
 
-    The model is shown the recent questions it must not repeat (only ones already in this
-    key's bank, so a shared prompt never carries anything that isn't shared already). If it
-    repeats one anyway, it is asked once more; a second repeat is an error, never a repeat.
+    The model is shown the recent questions it must not repeat. A private (note-grounded)
+    prompt may name any of them; a shared prompt (its answer is banked for every student)
+    names only ones already in that shared bank, so it never carries anything private. If
+    the model repeats one anyway, it is asked once more; a second repeat is an error.
     """
     seen = {questions.question_fingerprint(text) for text in recent}
-    avoid = questions.banked_among(cache_key, recent[:questions.AVOID_IN_PROMPT]) if recent else []
+    latest = recent[:questions.AVOID_IN_PROMPT]
+    avoid = (questions.banked_among(cache_key, latest) if shared else latest) if latest else []
     for _ in range(QUIZ_ATTEMPTS):
         spend_global_ai_call()
         try:
@@ -2087,7 +2089,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         else:
             _rate_limited(student_id, "ai_question", 40, 1440)
             ai_question = fresh_quiz_question(
-                student_id=student_id, cache_key=cache_key, recent=recent,
+                student_id=student_id, cache_key=cache_key, recent=recent, shared=question_scope_is_shared(source_text),
                 course=course, unit=unit, source_labels=source_labels, focus=data.topic, difficulty=difficulty,
                 personalization=personalization, source_text=source_text,
                 session_id=ai_session_id(student_id, data.notes.course, data.notes.unit, "quiz"),

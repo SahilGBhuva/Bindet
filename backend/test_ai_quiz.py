@@ -211,6 +211,14 @@ class PersonalizedQuizTests(unittest.TestCase):
         self.assertEqual(ai.call_args_list[0].kwargs['avoid'], [])
         self.assertEqual(ai.call_args_list[1].kwargs['avoid'], ['What is a centromere?'])
 
+    def test_private_prompt_avoids_all_of_the_students_recent_questions(self):
+        note_store = main.note_store
+        note_store.save_note('noter', 'Biology', 'Cell Cycle', 'n.txt', 'text/plain', 'Mitosis has four phases.', 24)
+        main.questions.save_question('noter', 'A question from another unit?', 'x', 'Other', 1)
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What are the phases of mitosis?')) as ai:
+            self._ask('noter')
+        self.assertEqual(ai.call_args.kwargs['avoid'], ['A question from another unit?'])
+
     def test_math_practice_redraws_a_recent_sum(self):
         repeat = main.GeneratedQuestion(question='What is 2 + 2?', correct_answer='4', topic='addition', difficulty=1)
         fresh = main.GeneratedQuestion(question='What is 3 + 5?', correct_answer='8', topic='addition', difficulty=1)
