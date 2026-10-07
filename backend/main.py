@@ -632,6 +632,11 @@ class StudyGroupCreate(BaseModel):
     weekly_goal_xp: int = Field(default=500, ge=100, le=10000)
 
 
+class StudyGroupTransfer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    new_owner_id: str = Field(min_length=1, max_length=100)
+
+
 class StudyGroupJoin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     invite_code: str = Field(min_length=6, max_length=10)
@@ -1009,7 +1014,6 @@ def social_error(error: ValueError) -> HTTPException:
         "already_in_group": (409, "You are already in that study group"),
         "group_full": (409, "That study group already has 20 members"),
         "group_limit_reached": (409, "You can be in up to 5 study groups. Leave one to start or join another."),
-        "group_owner_cannot_leave": (409, "Group owners cannot leave their group"),
         "task_not_found": (404, "That task could not be found"),
         "task_forbidden": (403, "Only the task creator, its assignees, or the group owner can change this task"),
         "task_manage_forbidden": (403, "Only the task creator or the group owner can change the title, due date, assignees, milestone or group"),
@@ -1441,15 +1445,58 @@ def join_study_group(data: StudyGroupJoin, authorization: Annotated[str | None, 
         raise social_error(error) from error
 
 
+GROUP_OWNERSHIP_ERRORS = {
+    "not_owner": (403, "Only the group owner can do that."),
+    "owner_must_transfer": (409, "Transfer ownership or delete the group first."),
+    "new_owner_not_member": (400, "Choose a current member of the group as the new owner."),
+}
+
+
+def group_error(error: ValueError) -> HTTPException:
+    """{code, message} for the ownership errors; the usual social errors otherwise."""
+    code = str(error)
+    if code in GROUP_OWNERSHIP_ERRORS:
+        status, message = GROUP_OWNERSHIP_ERRORS[code]
+        return HTTPException(status_code=status, detail={"code": code, "message": message})
+    return social_error(error)
+
+
 @app.delete("/api/study-groups/{group_id}/members/me")
 def leave_study_group(group_id: str, authorization: Annotated[str | None, Header()] = None):
+    """Leave a group. An owner who is its only member deletes it (like DELETE below); an
+    owner with other members gets 409 owner_must_transfer."""
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "group_leave", 20, 1440)
-        tasks.leave_group(user["id"], group_id)
+        outcome = tasks.leave_group(user["id"], group_id)
     except ValueError as error:
-        raise social_error(error) from error
-    return {"left": True}
+        raise group_error(error) from error
+    return {"left": True, "deleted": True} if outcome == "deleted" else {"left": True}
+
+
+@app.delete("/api/study-groups/{group_id}")
+def delete_study_group(group_id: str, authorization: Annotated[str | None, Header()] = None):
+    """Owner only. Deletes the group, its memberships, milestones and analytics activity
+    (and, on Postgres, its chat through ON DELETE CASCADE). Group tasks are not lost: each
+    becomes its creator's personal task (tasks.release_group_work)."""
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "group_delete", 10, 1440)
+        tasks.delete_group(user["id"], group_id)
+    except ValueError as error:
+        raise group_error(error) from error
+    return {"deleted": True}
+
+
+@app.post("/api/study-groups/{group_id}/transfer")
+def transfer_study_group(group_id: str, data: StudyGroupTransfer, authorization: Annotated[str | None, Header()] = None):
+    """Owner only: make another current member the owner. Returns the updated group."""
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "group_transfer", 20, 1440)
+        return database.transfer_study_group(user["id"], group_id, data.new_owner_id.strip())
+    except ValueError as error:
+        raise group_error(error) from error
 
 
 @app.get("/api/tutor/conversations")

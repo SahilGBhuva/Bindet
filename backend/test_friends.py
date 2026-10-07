@@ -222,13 +222,18 @@ class FriendsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "group_not_found"):
             database.get_study_group("kim-id", bio["id"])
 
-    def test_group_members_can_leave_but_owner_cannot(self):
+    def test_group_members_can_leave_and_an_owner_only_when_alone(self):
         group = database.create_study_group("alex-id", "Exam week")
         database.join_study_group("sam-id", group["invite_code"])
-        self.assertTrue(database.leave_study_group("sam-id", group["id"]))
-        self.assertEqual(len(database.get_study_group("alex-id", group["id"])["members"]), 1)
-        with self.assertRaisesRegex(ValueError, "group_owner_cannot_leave"):
+        # An owner with other members must transfer ownership or delete the group first.
+        with self.assertRaisesRegex(ValueError, "owner_must_transfer"):
             database.leave_study_group("alex-id", group["id"])
+        self.assertEqual(database.leave_study_group("sam-id", group["id"]), "left")
+        self.assertEqual(len(database.get_study_group("alex-id", group["id"])["members"]), 1)
+        # The owner as the only member: leaving deletes the group.
+        self.assertEqual(database.leave_study_group("alex-id", group["id"]), "deleted")
+        with self.assertRaisesRegex(ValueError, "group_not_found"):
+            database.get_study_group("alex-id", group["id"])
 
     def test_group_endpoints_use_authenticated_identity(self):
         with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):

@@ -482,5 +482,86 @@ class TaskRouteTests(unittest.TestCase):
         self.assertEqual(tasks.get_task("alex-id", task["id"])["assignees"], [])
 
 
+
+class GroupOwnershipTests(unittest.TestCase):
+    """APP-H1: delete, transfer and the owner's leave."""
+
+    def setUp(self):
+        database.reset_db()
+        tasks.reset_tasks()
+        for student in ("alex", "sam", "eve"):
+            database.onboard_account(f"{student}-id", student, student.title(), None)
+        self.group = database.create_study_group("alex-id", "Bio crew")
+        database.join_study_group("sam-id", self.group["invite_code"])
+        self.client = TestClient(main.app)
+
+    def call(self, student, method, path, **kwargs):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": student}):
+            return self.client.request(method, path, headers={"Authorization": "Bearer test"}, **kwargs)
+
+    def test_only_the_owner_can_delete(self):
+        response = self.call("sam-id", "DELETE", f"/api/study-groups/{self.group['id']}")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["code"], "not_owner")
+        self.assertEqual(self.call("eve-id", "DELETE", f"/api/study-groups/{self.group['id']}").status_code, 404)
+
+    def test_delete_hands_group_tasks_back_to_their_creators(self):
+        group_id = self.group["id"]
+        milestone = tasks.create_milestone("alex-id", group_id, "Draft")
+        alex_task = tasks.create_task("alex-id", {"title": "Lab report", "group_id": group_id, "assignee_ids": ["sam-id"],
+                                                   "milestone_id": milestone["id"]})
+        sam_task = tasks.create_task("sam-id", {"title": "Slides", "group_id": group_id})
+        tasks.add_comment("sam-id", alex_task["id"], "I'll do the graphs")
+        tasks.add_comment("alex-id", alex_task["id"], "Thanks")
+        response = self.call("alex-id", "DELETE", f"/api/study-groups/{group_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"deleted": True})
+        self.assertEqual(database.list_study_groups("alex-id"), [])
+        self.assertEqual(database.list_study_groups("sam-id"), [])
+        mine = tasks.get_task("alex-id", alex_task["id"])
+        self.assertIsNone(mine["group_id"])
+        self.assertIsNone(mine["milestone_id"])
+        self.assertEqual(mine["assignees"], [])  # Sam is dropped from Alex's now-personal task
+        self.assertEqual([comment["body"] for comment in mine["comments"]], ["Thanks"])
+        self.assertIsNone(tasks.get_task("sam-id", sam_task["id"])["group_id"])
+        with self.assertRaisesRegex(ValueError, "task_not_found"):
+            tasks.get_task("sam-id", alex_task["id"])
+        with database.engine().connect() as connection:
+            self.assertEqual(connection.execute(main.select(tasks.group_milestones)).all(), [])
+            self.assertEqual(connection.execute(main.select(tasks.task_activity).where(tasks.task_activity.c.group_id == group_id)).all(), [])
+        notices = [item["kind"] for item in database.notifications_for("sam-id")]
+        self.assertIn("group_deleted", notices)
+
+    def test_transfer_makes_a_member_the_owner(self):
+        response = self.call("alex-id", "POST", f"/api/study-groups/{self.group['id']}/transfer", json={"new_owner_id": "sam-id"})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["role"], "member")
+        roles = {member["student_id"]: member["role"] for member in body["members"]}
+        self.assertEqual(roles, {"alex-id": "member", "sam-id": "owner"})
+        # The old owner can now leave; the new one can't while others remain.
+        self.assertEqual(self.call("sam-id", "DELETE", f"/api/study-groups/{self.group['id']}/members/me").status_code, 409)
+        self.assertEqual(self.call("alex-id", "DELETE", f"/api/study-groups/{self.group['id']}/members/me").json(), {"left": True})
+
+    def test_transfer_rules(self):
+        path = f"/api/study-groups/{self.group['id']}/transfer"
+        self.assertEqual(self.call("sam-id", "POST", path, json={"new_owner_id": "sam-id"}).json()["detail"]["code"], "not_owner")
+        outsider = self.call("alex-id", "POST", path, json={"new_owner_id": "eve-id"})
+        self.assertEqual(outsider.status_code, 400)
+        self.assertEqual(outsider.json()["detail"]["code"], "new_owner_not_member")
+        self.assertEqual(self.call("alex-id", "POST", path, json={"new_owner_id": "sam-id", "extra": 1}).status_code, 422)
+
+    def test_owner_leave_needs_transfer_unless_alone(self):
+        path = f"/api/study-groups/{self.group['id']}/members/me"
+        response = self.call("alex-id", "DELETE", path)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], {"code": "owner_must_transfer", "message": "Transfer ownership or delete the group first."})
+        task = tasks.create_task("alex-id", {"title": "Notes", "group_id": self.group["id"]})
+        self.call("sam-id", "DELETE", path)
+        self.assertEqual(self.call("alex-id", "DELETE", path).json(), {"left": True, "deleted": True})
+        self.assertEqual(database.list_study_groups("alex-id"), [])
+        self.assertIsNone(tasks.get_task("alex-id", task["id"])["group_id"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1457,22 +1457,103 @@ def list_study_groups(student_id: str) -> list[dict]:
         return _study_group_results(connection, student_id, groups, {group["id"]: group["viewer_role"] for group in groups})
 
 
-def leave_study_group(student_id: str, group_id: str, on_leave=None) -> bool:
-    """Remove the student from the group. on_leave(connection) runs in the same
-    transaction (tasks.leave_group uses it to unassign the student's open tasks)."""
+def _group_membership(connection, student_id: str, group_id: str):
+    membership = connection.execute(select(study_group_members).where(
+        study_group_members.c.group_id == group_id, study_group_members.c.student_id == student_id,
+    )).mappings().first()
+    if not membership:
+        raise ValueError("group_not_found")
+    return membership
+
+
+def _delete_group(connection, student_id: str, group_id: str, on_delete=None) -> None:
+    """Delete the group, its memberships and (through on_delete) the backend's group data,
+    inside the caller's transaction. On Postgres the group chat tables cascade with it."""
+    group = connection.execute(select(study_groups.c.name).where(study_groups.c.id == group_id)).first()
+    others = connection.execute(select(study_group_members.c.student_id).where(
+        study_group_members.c.group_id == group_id, study_group_members.c.student_id != student_id,
+    )).scalars().all()
+    if on_delete is not None:
+        on_delete(connection)
+    # SQLite does not enforce ON DELETE CASCADE by default, so memberships go explicitly.
+    connection.execute(delete(study_group_members).where(study_group_members.c.group_id == group_id))
+    connection.execute(delete(study_groups).where(study_groups.c.id == group_id))
+    if others and group is not None:
+        display_name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+        connection.execute(social_notifications.insert(), [{
+            "recipient_id": member_id, "actor_id": student_id, "kind": "group_deleted",
+            "message": f"{display_name or 'The owner'} deleted {group[0]}."[:240], "is_read": False, "created_at": now,
+        } for member_id in sorted(others)])
+
+
+def delete_study_group(student_id: str, group_id: str, on_delete=None) -> bool:
+    """The owner deletes the group. on_delete(connection) runs first in the same transaction
+    (tasks.delete_group uses it to hand group tasks back to their creators)."""
     init_db()
     with engine().begin() as connection:
-        membership = connection.execute(select(study_group_members).where(
-            study_group_members.c.group_id == group_id, study_group_members.c.student_id == student_id,
-        )).mappings().first()
-        if not membership:
-            raise ValueError("group_not_found")
+        _advisory_lock(connection, f"groups:group:{group_id}")
+        if _group_membership(connection, student_id, group_id)["role"] != "owner":
+            raise ValueError("not_owner")
+        _delete_group(connection, student_id, group_id, on_delete)
+    return True
+
+
+def transfer_study_group(student_id: str, group_id: str, new_owner_id: str) -> dict:
+    """The owner hands the group to another current member, and becomes a member."""
+    init_db()
+    with engine().begin() as connection:
+        _advisory_lock(connection, f"groups:group:{group_id}")
+        if _group_membership(connection, student_id, group_id)["role"] != "owner":
+            raise ValueError("not_owner")
+        if new_owner_id != student_id:
+            try:
+                _group_membership(connection, new_owner_id, group_id)
+            except ValueError:
+                raise ValueError("new_owner_not_member") from None
+            connection.execute(update(study_group_members).where(
+                study_group_members.c.group_id == group_id, study_group_members.c.student_id == student_id,
+            ).values(role="member"))
+            connection.execute(update(study_group_members).where(
+                study_group_members.c.group_id == group_id, study_group_members.c.student_id == new_owner_id,
+            ).values(role="owner"))
+            connection.execute(update(study_groups).where(study_groups.c.id == group_id).values(owner_id=new_owner_id))
+            name = connection.execute(select(study_groups.c.name).where(study_groups.c.id == group_id)).scalar_one()
+            display_name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
+            connection.execute(social_notifications.insert().values(
+                recipient_id=new_owner_id, actor_id=student_id, kind="group_owner",
+                message=f"{display_name or 'The owner'} made you the owner of {name}."[:240], is_read=False,
+                created_at=datetime.now(timezone.utc),
+            ))
+    return get_study_group(student_id, group_id)
+
+
+def leave_study_group(student_id: str, group_id: str, on_leave=None, on_delete=None) -> str:
+    """Remove the student from the group. Returns "left", or "deleted" when the owner was
+    the only member (the group is deleted, exactly like delete_study_group). An owner with
+    other members must transfer ownership or delete the group first ("owner_must_transfer").
+
+    on_leave(connection) runs in the same transaction after a member leaves
+    (tasks.leave_group uses it to unassign the student's open tasks); on_delete(connection)
+    runs before a group is deleted."""
+    init_db()
+    with engine().begin() as connection:
+        # The group lock (taken by join too) keeps someone from joining a group as its last
+        # member leaves and deletes it.
+        _advisory_lock(connection, f"groups:group:{group_id}")
+        membership = _group_membership(connection, student_id, group_id)
         if membership["role"] == "owner":
-            raise ValueError("group_owner_cannot_leave")
-        result = connection.execute(delete(study_group_members).where(study_group_members.c.id == membership["id"]))
+            member_count = connection.execute(select(func.count()).select_from(study_group_members).where(
+                study_group_members.c.group_id == group_id,
+            )).scalar_one()
+            if member_count > 1:
+                raise ValueError("owner_must_transfer")
+            _delete_group(connection, student_id, group_id, on_delete)
+            return "deleted"
+        connection.execute(delete(study_group_members).where(study_group_members.c.id == membership["id"]))
         if on_leave is not None:
             on_leave(connection)
-    return bool(result.rowcount)
+    return "left"
 
 
 def _between(first_id: str, second_id: str):

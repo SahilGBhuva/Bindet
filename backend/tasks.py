@@ -1050,11 +1050,47 @@ def drop_member_assignments(connection, student_id: str, group_id: str) -> int:
     return len(open_ids)
 
 
-def leave_group(student_id: str, group_id: str) -> bool:
-    """Leave a study group and drop the student from its open tasks in one transaction."""
+def release_group_work(connection, group_id: str) -> int:
+    """Before a group is deleted (inside that transaction): every group task becomes its
+    creator's personal task, so nobody loses work, and the group's milestones and analytics
+    activity are deleted.
+
+    Converting is the same as the creator moving the task to personal tasks: other
+    members' comments and attachments and the task's group activity history are removed
+    (_clear_for_move), other assignees are dropped (a personal task is its creator's
+    alone) and the milestone link is cleared. Status, checklist, due dates and the
+    creator's own comments and attachments are kept. Returns how many tasks were converted.
+    """
+    rows = connection.execute(select(tasks.c.id, tasks.c.owner_id, tasks.c.title).where(
+        tasks.c.group_id == group_id)).mappings().all()
+    now = _now()
+    for row in rows:
+        _clear_for_move(connection, row["id"], row["owner_id"], row["owner_id"])
+        connection.execute(delete(task_assignees).where(
+            task_assignees.c.task_id == row["id"], task_assignees.c.student_id != row["owner_id"],
+        ))
+        connection.execute(update(tasks).where(tasks.c.id == row["id"]).values(group_id=None, milestone_id=None, updated_at=now))
+        _log(connection, {"id": row["id"], "group_id": None}, row["owner_id"], "moved", "Moved to personal tasks (the group was deleted)")
+    connection.execute(delete(task_activity).where(task_activity.c.group_id == group_id))
+    connection.execute(delete(group_milestones).where(group_milestones.c.group_id == group_id))
+    return len(rows)
+
+
+def delete_group(student_id: str, group_id: str) -> bool:
+    """The owner deletes a study group: memberships and milestones go, group tasks become
+    their creators' personal tasks (release_group_work), all in one transaction."""
+    init_tasks()
+    return database.delete_study_group(student_id, group_id, on_delete=lambda connection: release_group_work(connection, group_id))
+
+
+def leave_group(student_id: str, group_id: str) -> str:
+    """Leave a study group and drop the student from its open tasks in one transaction.
+    Returns "left", or "deleted" when the owner was its only member (see delete_group)."""
     init_tasks()
     return database.leave_study_group(
-        student_id, group_id, on_leave=lambda connection: drop_member_assignments(connection, student_id, group_id),
+        student_id, group_id,
+        on_leave=lambda connection: drop_member_assignments(connection, student_id, group_id),
+        on_delete=lambda connection: release_group_work(connection, group_id),
     )
 
 
