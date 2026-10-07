@@ -56,6 +56,84 @@ class QuestionTableLockdownTests(unittest.TestCase):
         connection.exec_driver_sql.assert_not_called()
 
 
+class OneTransactionTableCreationTests(unittest.TestCase):
+    """BE-M1: on Postgres every new table is created, RLS-enabled and revoked in one transaction."""
+
+    def fake_postgres(self):
+        engine = MagicMock()
+        engine.dialect.name = "postgresql"
+        events = []
+        connection = engine.begin.return_value.__enter__.return_value
+        connection.execute.return_value.scalars.return_value.all.return_value = []
+        connection.exec_driver_sql.side_effect = lambda statement, *a, **k: events.append(("sql", statement))
+        return engine, connection, events
+
+    def check(self, init, table_metadata, engine_patch_target, revoked=True, extra_patches=()):
+        engine, connection, events = self.fake_postgres()
+        create_calls = []
+        with patch.object(table_metadata, "create_all", side_effect=lambda bind, **kw: create_calls.append(bind) or events.append(("create", None))), \
+                patch.object(engine_patch_target, "engine", return_value=engine):
+            for target, name in extra_patches:
+                patch.object(target, name).start()
+            try:
+                init()
+            finally:
+                patch.stopall()
+        # create_all ran on the transaction's connection (not the engine), inside the one begin().
+        self.assertEqual(create_calls, [connection])
+        self.assertEqual(engine.begin.call_count, 1)
+        self.assertEqual(events[0], ("create", None))
+        if revoked:
+            self.assertTrue(any("REVOKE" in statement for kind, statement in events if kind == "sql"))
+        return events
+
+    def test_question_tables(self):
+        self.check(lambda: questions._init_question_tables.__wrapped__(database.engine()), questions.metadata, database)
+
+    def test_flashcard_tables(self):
+        import flashcards
+        flashcards.init_flashcards.cache_clear()
+        try:
+            self.check(flashcards.init_flashcards.__wrapped__, flashcards.flashcard_metadata, database,
+                       extra_patches=[(flashcards.note_store, "init_notes")])
+        finally:
+            flashcards.init_flashcards.cache_clear()
+
+    def test_task_tables(self):
+        import tasks
+        self.check(tasks.init_tasks.__wrapped__, tasks.task_metadata, database, extra_patches=[(database, "init_db")])
+
+    def test_tutor_tables(self):
+        import tutor
+        self.check(tutor.init_tutor.__wrapped__, tutor.tutor_metadata, database, extra_patches=[(database, "init_db")])
+
+    def test_note_table_gets_rls_but_keeps_browser_grants(self):
+        import note_store
+        events = self.check(note_store.init_notes.__wrapped__, note_store.note_metadata, database, revoked=False,
+                            extra_patches=[(database, "init_db")])
+        self.assertFalse(any("REVOKE" in statement for kind, statement in events if kind == "sql"))
+
+    def test_core_tables_and_added_columns(self):
+        events = self.check(database.init_db.__wrapped__, database.metadata, database)
+        self.assertTrue(any("ADD COLUMN" in statement for kind, statement in events if kind == "sql"))
+
+    def test_sqlite_still_creates_tables_without_a_transaction_wrapper(self):
+        engine = MagicMock()
+        engine.dialect.name = "sqlite"
+        table_metadata = MagicMock()
+        database.create_locked_tables(engine, table_metadata, ("t",), ("t",))
+        table_metadata.create_all.assert_called_once_with(engine)
+        engine.begin.assert_not_called()
+
+    def test_default_privileges_migration_exists_and_is_guarded(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", "20261009_default_privileges.sql")
+        with open(path) as handle:
+            sql = handle.read().lower()
+        for kind in ("tables", "sequences", "functions"):
+            self.assertIn(f"revoke all on {kind} from anon, authenticated", sql)
+        self.assertIn("pg_roles", sql)
+
+
 class XpFarmingTests(unittest.TestCase):
     def setUp(self):
         questions.reset_questions()

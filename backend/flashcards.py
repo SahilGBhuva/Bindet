@@ -88,12 +88,9 @@ _sqlite_lock = threading.Lock()
 @lru_cache(maxsize=1)
 def init_flashcards() -> None:
     note_store.init_notes()
-    flashcard_metadata.create_all(database.engine())
-    if database.engine().dialect.name == "postgresql":
-        # Served only through the API; with RLS on, no policy and no client grants PostgREST denies access.
-        with database.engine().begin() as connection:
-            database.enable_row_level_security(connection, FLASHCARD_TABLES)
-            database.revoke_client_access(connection, FLASHCARD_TABLES)
+    # Served only through the API; with RLS on, no policy and no client grants PostgREST
+    # denies access. Created and locked in one transaction (see database.create_locked_tables).
+    database.create_locked_tables(database.engine(), flashcard_metadata, FLASHCARD_TABLES, FLASHCARD_TABLES)
 
 
 def _now() -> datetime:

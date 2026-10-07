@@ -56,12 +56,9 @@ def init_questions() -> None:
 
 @lru_cache(maxsize=4)
 def _init_question_tables(active_engine) -> None:
-    """Create the question tables once per engine and keep them closed to Supabase clients."""
-    metadata.create_all(active_engine)
-    if active_engine.dialect.name == "postgresql":
-        with active_engine.begin() as connection:
-            database.enable_row_level_security(connection, QUESTION_TABLES)
-            database.revoke_client_access(connection, QUESTION_TABLES)
+    """Create the question tables once per engine and keep them closed to Supabase clients
+    (created and locked in one transaction, see database.create_locked_tables)."""
+    database.create_locked_tables(active_engine, metadata, QUESTION_TABLES, QUESTION_TABLES)
 
 
 def save_question(student_id: str, question: str, correct_answer: str, topic: str, difficulty: int) -> str:

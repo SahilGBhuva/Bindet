@@ -26,10 +26,9 @@ notes = Table(
 @lru_cache(maxsize=1)
 def init_notes() -> None:
     database.init_db()
-    note_metadata.create_all(database.engine())
-    if database.engine().dialect.name == 'postgresql':
-        with database.engine().begin() as connection:
-            database.enable_row_level_security(connection, ('study_notes',))
+    # RLS on in the same transaction that creates the table (see database.create_locked_tables).
+    # Client grants stay: the browser reads study_notes under its RLS policies.
+    database.create_locked_tables(database.engine(), note_metadata, ('study_notes',))
 
 
 def save_note(student_id: str, course: str, unit: str, file_name: str, content_type: str, text: str, size_bytes: int) -> dict:

@@ -132,12 +132,9 @@ CHILD_TABLES = (task_assignees, task_checklist, task_comments, task_activity, ta
 @lru_cache(maxsize=1)
 def init_tasks() -> None:
     database.init_db()
-    task_metadata.create_all(database.engine())
-    if database.engine().dialect.name == "postgresql":
-        # Served only through the API; with RLS on and no policy PostgREST denies access.
-        with database.engine().begin() as connection:
-            database.enable_row_level_security(connection, TASK_TABLES)
-            database.revoke_client_access(connection, TASK_TABLES)
+    # Served only through the API; with RLS on and no policy PostgREST denies access.
+    # Created and locked in one transaction (see database.create_locked_tables).
+    database.create_locked_tables(database.engine(), task_metadata, TASK_TABLES, TASK_TABLES)
 
 
 def _now() -> datetime:

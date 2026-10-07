@@ -39,6 +39,7 @@ messages = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+TUTOR_TABLES = ("tutor_conversations", "tutor_messages")
 MAX_CONVERSATIONS = 500
 MAX_HISTORY = 12
 
@@ -46,10 +47,9 @@ MAX_HISTORY = 12
 @lru_cache(maxsize=1)
 def init_tutor() -> None:
     database.init_db()
-    tutor_metadata.create_all(database.engine())
-    if database.engine().dialect.name == "postgresql":
-        with database.engine().begin() as connection:
-            database.enable_row_level_security(connection, ("tutor_conversations", "tutor_messages"))
+    # Backend-only: RLS on and the anon/authenticated grants removed, in the same
+    # transaction that creates the tables (see database.create_locked_tables).
+    database.create_locked_tables(database.engine(), tutor_metadata, TUTOR_TABLES, TUTOR_TABLES)
 
 
 def _utc(value: datetime) -> datetime:

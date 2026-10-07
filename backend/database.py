@@ -418,6 +418,29 @@ def revoke_client_access(connection, tables) -> None:
     )
 
 
+def create_locked_tables(active_engine, table_metadata, rls_tables=(), revoked_tables=(), extra=None) -> None:
+    """Create any missing tables and lock them down in ONE transaction on Postgres.
+
+    Supabase's default privileges grant anon/authenticated access to every new table in
+    public. Creating a table and enabling RLS / revoking those grants in separate
+    transactions would leave a window where a just-created table is readable and
+    writable through PostgREST with the public anon key. Postgres DDL is transactional,
+    so here the table only becomes visible to anyone already locked. extra(connection),
+    if given, runs in the same transaction (init_db uses it for added columns).
+    SQLite has no client roles; tables are simply created.
+    """
+    if active_engine.dialect.name != "postgresql":
+        table_metadata.create_all(active_engine)
+        return
+    with active_engine.begin() as connection:
+        table_metadata.create_all(connection)
+        enable_row_level_security(connection, rls_tables)
+        if revoked_tables:
+            revoke_client_access(connection, revoked_tables)
+        if extra is not None:
+            extra(connection)
+
+
 class DatabaseConfigurationError(RuntimeError):
     """Raised instead of silently storing production data somewhere temporary."""
 
@@ -567,20 +590,19 @@ POSTGRES_ADDED_COLUMNS = (
 def init_db() -> None:
     """Create/check tables once per warm process instead of on every request."""
     active_engine = engine()
-    metadata.create_all(active_engine)
-    if active_engine.dialect.name == "postgresql":
-        with active_engine.begin() as connection:
-            enable_row_level_security(connection, RLS_TABLES)
-            revoke_client_access(connection, CLIENT_REVOKED_TABLES)
-            # Like RLS above, ADD COLUMN IF NOT EXISTS locks the table even when the
-            # column exists, so only run the ones that are actually missing.
-            existing = set(connection.execute(text(
-                "SELECT table_name || '.' || column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name IN ('profiles', 'student_progress')"
-            )).scalars().all())
-            for column, statement in POSTGRES_ADDED_COLUMNS:
-                if column not in existing:
-                    connection.exec_driver_sql(statement)
+
+    def add_missing_columns(connection) -> None:
+        # Like RLS, ADD COLUMN IF NOT EXISTS locks the table even when the
+        # column exists, so only run the ones that are actually missing.
+        existing = set(connection.execute(text(
+            "SELECT table_name || '.' || column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name IN ('profiles', 'student_progress')"
+        )).scalars().all())
+        for column, statement in POSTGRES_ADDED_COLUMNS:
+            if column not in existing:
+                connection.exec_driver_sql(statement)
+
+    create_locked_tables(active_engine, metadata, RLS_TABLES, CLIENT_REVOKED_TABLES, extra=add_missing_columns)
     if active_engine.dialect.name == "sqlite":
         columns = {column["name"] for column in inspect(active_engine).get_columns("student_progress")}
         if "last_active_date" not in columns:
