@@ -17,7 +17,7 @@ import {
   signUp,
   startGoogleSignIn,
   takeAuthRedirect,
-  takeResetRequested,
+  resetRequestedFor,
   updatePassword,
   verifyRedirectTokens,
   verifySignupCode,
@@ -174,7 +174,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             discardSession(linked)
             gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account', via: 'link' }
           } else if (redirect.type === 'recovery') {
-            gate = { kind: 'recovery', session: linked, confirmed: takeResetRequested() }
+            gate = { kind: 'recovery', session: linked, confirmed: resetRequestedFor(redirect) }
           } else if (current) {
             saveAuthSession(linked)
             next = linked
