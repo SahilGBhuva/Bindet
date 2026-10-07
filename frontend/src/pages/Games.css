@@ -273,3 +273,6 @@
   .practice__hud-stat.is-hot b { animation: none; }
   .practice__time span { transition: none; }
 }
+
+.practice__row-result { padding: 0 var(--space-5) var(--space-4); }
+.practice__row-result .practice__result { margin-top: 0; }

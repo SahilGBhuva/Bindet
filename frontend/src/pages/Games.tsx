@@ -36,6 +36,7 @@ type Game = {
   challenge?: Challenge
 }
 type Finished = { game: Game; results: boolean[] }
+type Saved = { kind: 'round'; data: RoundResult } | { kind: 'challenge'; data: { challenge: Challenge; xp_earned: number } }
 type Settings = { course: string; unit: string; length: RoundLength; mode: RoundMode }
 
 const SETTINGS_KEY = 'bindit:practice:settings'
@@ -460,6 +461,7 @@ function Lobby({ token, selfId, onStart, onNotice }: { token: string; selfId: st
 }
 
 function ChallengeRow({ challenge }: { challenge: Challenge }) {
+  const [open, setOpen] = useState(false)
   const name = challenge.opponent.display_name
   let status: { text: string; tone: string }
   if (challenge.status === 'completed') {
@@ -470,23 +472,29 @@ function ChallengeRow({ challenge }: { challenge: Challenge }) {
     status = { text: challenge.status === 'expired' ? 'Expired' : 'Declined', tone: '' }
   }
   return (
-    <div className="practice__challenge-row">
-      <Avatar name={name} />
-      <div className="practice__row-text">
-        <span className="practice__row-title">{challenge.role === 'sent' ? <>You challenged <b>{name}</b></> : <><b>{name}</b> challenged you</>}</span>
-        <span className="practice__row-meta">{scopeLabel(challenge.course, challenge.unit)} · {lengthLabel(challenge.length_s)} · {modeLabel(challenge.mode)} · {shortDate(challenge.created_at)}</span>
+    <>
+      <div className="practice__challenge-row">
+        <Avatar name={name} />
+        <div className="practice__row-text">
+          <span className="practice__row-title">{challenge.role === 'sent' ? <>You challenged <b>{name}</b></> : <><b>{name}</b> challenged you</>}</span>
+          <span className="practice__row-meta">{scopeLabel(challenge.course, challenge.unit)} · {lengthLabel(challenge.length_s)} · {modeLabel(challenge.mode)} · {shortDate(challenge.created_at)}</span>
+        </div>
+        <div className="practice__row-actions">
+          {challenge.status === 'completed' ? (
+            <span className="practice__versus" aria-label={`You ${challenge.my_score}, ${name} ${challenge.their_score}`}>
+              <b>{challenge.my_score}</b><span aria-hidden="true">–</span><b>{challenge.their_score}</b>
+            </span>
+          ) : challenge.my_score !== null ? (
+            <span className="practice__versus"><small>You</small><b>{challenge.my_score}</b></span>
+          ) : null}
+          <span className={`ui-badge${status.tone ? ` ui-badge--${status.tone}` : ''}`}>{status.text}</span>
+          {challenge.status === 'completed' ? (
+            <button type="button" className="ui-button ui-button--ghost ui-button--sm" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{open ? 'Hide' : 'Result'}</button>
+          ) : null}
+        </div>
       </div>
-      <div className="practice__row-actions">
-        {challenge.status === 'completed' ? (
-          <span className="practice__versus" aria-label={`You ${challenge.my_score}, ${name} ${challenge.their_score}`}>
-            <b>{challenge.my_score}</b><span aria-hidden="true">–</span><b>{challenge.their_score}</b>
-          </span>
-        ) : challenge.my_score !== null ? (
-          <span className="practice__versus"><small>You</small><b>{challenge.my_score}</b></span>
-        ) : null}
-        <span className={`ui-badge${status.tone ? ` ui-badge--${status.tone}` : ''}`}>{status.text}</span>
-      </div>
-    </div>
+      {open ? <div className="practice__row-result"><ChallengeResultCard challenge={challenge} /></div> : null}
+    </>
   )
 }
 
@@ -674,16 +682,27 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
   const [challengeSent, setChallengeSent] = useState(false)
   const nothing = results.length === 0
 
+  // Sent once per finished round (and again only on Try again), even if the effect runs twice.
+  const pending = useRef<{ attempt: number; promise: Promise<Saved> } | null>(null)
   useEffect(() => {
     if (nothing) return
     let live = true
-    const save = game.source === 'challenge' && game.challenge
-      ? submitChallengeResult(game.challenge.id, results, token).then((data) => { if (live) { setChallenge(data.challenge); setXp(data.xp_earned) } })
-      : submitRound({
-        course: game.course, unit: game.unit, length_s: game.length, mode: game.mode,
-        answers: results.map((correct, position) => ({ card_id: game.deck[position].id, correct })),
-      }, token).then((data) => { if (live) { setSaved(data); setXp(data.xp_earned) } })
-    save.then(() => { if (live) setSaveError('') }).catch((caught) => { if (live) setSaveError(errorText(caught, 'This round couldn’t be saved.')) })
+    if (!pending.current || pending.current.attempt !== attempt) {
+      const promise: Promise<Saved> = game.source === 'challenge' && game.challenge
+        ? submitChallengeResult(game.challenge.id, results, token).then((data) => ({ kind: 'challenge' as const, data }))
+        : submitRound({
+          course: game.course, unit: game.unit, length_s: game.length, mode: game.mode,
+          answers: results.map((correct, position) => ({ card_id: game.deck[position].id, correct })),
+        }, token).then((data) => ({ kind: 'round' as const, data }))
+      pending.current = { attempt, promise }
+    }
+    pending.current.promise.then((outcome) => {
+      if (!live) return
+      setSaveError('')
+      setXp(outcome.data.xp_earned)
+      if (outcome.kind === 'challenge') setChallenge(outcome.data.challenge)
+      else setSaved(outcome.data)
+    }).catch((caught) => { if (live) setSaveError(errorText(caught, 'This round couldn’t be saved.')) })
     return () => { live = false }
   }, [game, results, token, nothing, attempt])
 
@@ -889,7 +908,7 @@ function ChallengeDialog({ token, selfId, course, unit, length, mode, deck, answ
               <legend className="practice__option-label">Who?</legend>
               {people.map((person) => (
                 <label key={person.student_id} className={`practice__person${chosen === person.student_id ? ' is-chosen' : ''}`}>
-                  <input type="radio" name="challenge-person" value={person.student_id} checked={chosen === person.student_id} onChange={() => setChosen(person.student_id)} />
+                  <input type="radio" name="challenge-person" aria-label={`${person.display_name}, ${person.detail}`} value={person.student_id} checked={chosen === person.student_id} onChange={() => setChosen(person.student_id)} />
                   <Avatar name={person.display_name} />
                   <span className="practice__row-text">
                     <span className="practice__row-title">{person.display_name}</span>
