@@ -222,6 +222,8 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
           <button type="button" onClick={() => scrollTo('tutor-story')}>Tutor</button>
           <button type="button" onClick={onLogIn}>Log in</button>
           <button type="button" onClick={() => onSignUp()}>Create an account</button>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
         </nav>
         <p>Built for the Congressional App Challenge.</p>
       </footer>

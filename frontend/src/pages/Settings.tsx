@@ -274,6 +274,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                 </button>
                 <button className="ui-link" type="button" onClick={() => { setMode('reset'); setMessage('') }}>Forgot password</button>
               </div>
+              <p className="settings__hint">By continuing you agree to the <a className="ui-link" href="/terms">Terms of Service</a> and <a className="ui-link" href="/privacy">Privacy Policy</a>.</p>
             </form>
           </Section>
           {appearance}
@@ -398,6 +399,23 @@ export function Settings({ session, onSession }: SettingsProps) {
                   <span className="settings__hint">You’ll need to log in again to use bindit on this device.</span>
                 </div>
                 <button className="ui-button" type="button" onClick={logout}>Sign out</button>
+              </div>
+              <div className="settings__row">
+                <div className="settings__row-text">
+                  <span className="settings__label">Delete your account</span>
+                  <span className="settings__hint">Email us from this address and we’ll delete your account and data within 30 days.</span>
+                </div>
+                <a className="ui-link" href="mailto:officialbindet@gmail.com?subject=Delete%20my%20bindit%20account">officialbindet@gmail.com</a>
+              </div>
+              <div className="settings__row">
+                <div className="settings__row-text">
+                  <span className="settings__label">Privacy and terms</span>
+                  <span className="settings__hint">What bindit stores, who processes it, and the rules for using bindit.</span>
+                </div>
+                <div className="settings__legal-links">
+                  <a className="ui-link" href="/privacy">Privacy Policy</a>
+                  <a className="ui-link" href="/terms">Terms of Service</a>
+                </div>
               </div>
             </div>
           </Section>

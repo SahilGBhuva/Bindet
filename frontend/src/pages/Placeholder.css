@@ -69,3 +69,4 @@
 @media (max-width: 860px) {
   .placeholder__steps a { padding-block: 12px; text-decoration: underline; text-underline-offset: 2px; }
 }
+.more__privacy { margin: 0; }
