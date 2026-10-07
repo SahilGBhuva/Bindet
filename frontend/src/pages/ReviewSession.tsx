@@ -83,11 +83,13 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   // Keyboard focus follows the step: Show answer, then Good once the answer is showing.
   const cardId = card?.id
   useEffect(() => {
+    // Only from the page itself or from inside Review; in the landing demo, only from inside.
     const active = document.activeElement
-    if (active && active !== document.body && !root.current?.contains(active)) return
+    const inside = Boolean(active && root.current?.contains(active))
+    if (!inside && (data.sandboxed || (active && active !== document.body))) return
     if (revealed) goodButton.current?.focus({ preventScroll: true })
     else showButton.current?.focus({ preventScroll: true })
-  }, [revealed, cardId])
+  }, [revealed, cardId, data])
 
   function again() {
     setStatus('loading')
@@ -123,6 +125,10 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
       const target = event.target as HTMLElement | null
+      // Keys typed elsewhere on the landing page never reach the demo.
+      const panel = root.current?.closest('.tools__cards') ?? root.current
+      const inside = Boolean(target && panel?.contains(target))
+      if (!inside && (data.sandboxed || (target && target !== document.body))) return
       if (target?.closest('input, textarea, select, [contenteditable], dialog, [role="dialog"]')) return
       if (event.key === ' ' || event.key === 'Enter') {
         const control = target?.closest('button, a, summary')

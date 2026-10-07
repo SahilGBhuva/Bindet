@@ -36,6 +36,14 @@ const ALLOWED = [
   '.home-filter__select',
   '.home-arrow',
   '.bindit-rail__toggle',
+  // Review mode: grading only updates the sandbox's in-memory schedule (demoData.ts
+  // getReviewQueue / gradeReviewCard), with no network or storage; the rest only navigates.
+  '.tools__review-show',
+  '.tools__review-grade',
+  '.tools__review-more',
+  '.tools__review-dismiss',
+  '.tools__review-all',
+  '.tools__review-back',
 ].join(', ')
 
 const INTERACTIVE = 'a, button, input, textarea, select, summary, label, [role="tab"], [draggable="true"]'
@@ -43,7 +51,7 @@ const INTERACTIVE = 'a, button, input, textarea, select, summary, label, [role="
 type Decision =
   | { kind: 'allow' }
   | { kind: 'ignore' }
-  | { kind: 'navigate'; page: DemoPage }
+  | { kind: 'navigate'; page: DemoPage; review?: boolean }
   | { kind: 'locked'; action: string }
 
 // Friendly names for locked controls whose visible text is not a clean action label.
@@ -75,6 +83,8 @@ function decide(target: EventTarget | null, root: HTMLElement): Decision {
   const element = target.closest(INTERACTIVE)
   if (!element || !root.contains(element)) return { kind: 'allow' }
   if (element.matches(ALLOWED)) return { kind: 'allow' }
+  // "Review N flashcards" (Home, sidebar): Study in Review mode over every unit.
+  if (element.hasAttribute('data-review-link')) return { kind: 'navigate', page: 'tools', review: true }
 
   if (element instanceof HTMLAnchorElement) {
     const page = element.getAttribute('href')?.replace('#', '') as DemoPage | undefined
@@ -134,6 +144,8 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
   const root = useRef<HTMLDivElement>(null)
   const main = useRef<HTMLElement>(null)
   const [page, setPage] = useState<DemoPage>('home')
+  // Bumped by a "Review N flashcards" link: Study opens (again) in Review mode over every unit.
+  const [reviewOpen, setReviewOpen] = useState(0)
   const [generation, setGeneration] = useState(0)
   // A stable channel so the sandbox and click guard always reach the latest onLockedAction.
   const [locked] = useState(() => new LockedChannel(onLockedAction))
@@ -145,8 +157,9 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
   // One sandbox per preview (and a fresh one after any reset). It never touches storage or the network.
   const [data, setData] = useState(() => createDemoData((action) => locked.notify(action)))
 
-  const go = useCallback((next: DemoPage) => {
+  const go = useCallback((next: DemoPage, review = false) => {
     setPage(next)
+    setReviewOpen((value) => (review ? value + 1 : 0))
     if (main.current) main.current.scrollTop = 0
   }, [])
 
@@ -157,7 +170,7 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
     if (decision.kind === 'allow') return
     event.preventDefault()
     event.stopPropagation()
-    if (decision.kind === 'navigate') go(decision.page)
+    if (decision.kind === 'navigate') go(decision.page, decision.review)
     if (decision.kind === 'locked') locked.notify(decision.action)
   }, [go, locked])
 
@@ -177,6 +190,7 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
     setData(createDemoData((action) => locked.notify(action)))
     setGeneration((value) => value + 1)
     setPage('home')
+    setReviewOpen(0)
   }, [locked])
 
   const handlers = interactive
@@ -204,9 +218,9 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
         <SiteSidebar active={page} />
         <main className={`sheet is-${page}`} ref={main}>
           <DemoBoundary key={generation} onReset={reset}>
-            <div className="lp-demo__page" key={`${generation}-${page}`}>
+            <div className="lp-demo__page" key={`${generation}-${page}-${reviewOpen}`}>
               {page === 'home' ? <Home session={DEMO_SESSION} /> : null}
-              {page === 'tools' ? <Tools accessToken={DEMO_SESSION.access_token} /> : null}
+              {page === 'tools' ? <Tools accessToken={DEMO_SESSION.access_token} startReview={reviewOpen > 0} /> : null}
               {page === 'progress' ? <Progress session={DEMO_SESSION} /> : null}
               {page === 'profile' ? <Profile session={DEMO_SESSION} /> : null}
             </div>

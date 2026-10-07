@@ -4,6 +4,7 @@ import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
+import { REVIEW_ALL_HASH, useReviewSummary } from '../lib/useReviewSummary'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
@@ -238,6 +239,8 @@ export function Home({ session }: { session: AuthSession | null }) {
   const frame = useRef<HTMLDivElement>(null)
   const cardLinks = useRef(new Map<string, HTMLAnchorElement>())
   const focusAfterOpen = useRef(false)
+  // Flashcards due today: one extra row in the notification box (none when nothing is due).
+  const reviewDue = useReviewSummary(token)?.due ?? 0
 
   // Cached values above render first; everything refreshes in parallel in the background.
   useEffect(() => {
@@ -459,6 +462,13 @@ export function Home({ session }: { session: AuthSession | null }) {
           <section className="home-notice" aria-labelledby="home-notice-title">
             <span className="home-notice__corner" aria-hidden="true"><Icon name="bell" /></span>
             <h2 className="home-notice__title" id="home-notice-title"><a href="#profile">View notifications:</a></h2>
+            {reviewDue ? (
+              <a className="home-notice__row home-notice__review" href={REVIEW_ALL_HASH} data-review-link="">
+                <span className="home-badge home-badge--review">Review</span>
+                <span className="home-notice__text">{reviewDue} {reviewDue === 1 ? 'flashcard' : 'flashcards'} due</span>
+                <span className="home-notice__time">now</span>
+              </a>
+            ) : null}
             {tasks === null && !unread ? (
               <span className="ui-skeleton home-notice__skeleton" aria-hidden="true" />
             ) : nextItem ? (
@@ -473,7 +483,7 @@ export function Home({ session }: { session: AuthSession | null }) {
                 <span className="home-notice__text">{unread.message}</span>
                 <span className="home-notice__time">{relative(now - parseServerTime(unread.created_at))}<span className="sr-only"> ago</span></span>
               </a>
-            ) : (
+            ) : reviewDue && !tasksFailed ? null : (
               <p className="home-notice__quiet">{tasksFailed ? 'Couldn’t check right now.' : 'All caught up.'}</p>
             )}
           </section>

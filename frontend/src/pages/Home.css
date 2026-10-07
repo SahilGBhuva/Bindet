@@ -175,6 +175,7 @@
   line-height: 1;
   white-space: nowrap;
 }
+.home-badge--review { border-color: var(--color-brand); border-radius: var(--radius-full); color: var(--color-brand-text); }
 .home-badge.is-due { border-color: var(--color-warning); color: var(--color-warning); }
 .home-badge.is-overdue { border-color: var(--color-danger); color: var(--color-danger); }
 .home-badge.is-ongoing { border-color: var(--color-text-tertiary); color: var(--color-text); }

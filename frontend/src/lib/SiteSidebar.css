@@ -189,6 +189,7 @@
 .bindit-rail__glyph { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--color-text-tertiary); line-height: 1; }
 .bindit-rail__glyph svg { width: 13px; height: 13px; }
 .bindit-rail__glyph--dot { font-size: 18px; font-weight: var(--weight-bold); }
+.bindit-rail__glyph--review { color: var(--color-brand); }
 .bindit-rail__glyph--star { padding-top: 4px; font-size: 14px; }
 .bindit-rail__glyph--plus { font-size: 15px; }
 .bindit-rail__entry--add { width: fit-content; }

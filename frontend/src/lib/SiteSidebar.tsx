@@ -9,6 +9,7 @@ import { withCourseTones } from './session'
 import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
+import { REVIEW_ALL_HASH, useReviewSummary } from './useReviewSummary'
 import './SiteSidebar.css'
 
 type NavItem = { id: Screen; label: string; short?: string }
@@ -229,6 +230,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const [now, setNow] = useState(() => data.now())
   // A failed refresh with nothing cached says so (the rail retries every 30 seconds) instead of looking empty.
   const [failed, setFailed] = useState({ tasks: false, groups: false })
+  // Flashcards due today lead Highlighted (hidden when none are due).
+  const reviewDue = useReviewSummary(canRead ? token || undefined : undefined)?.due ?? 0
 
   // The Menu sheet only exists on phones. It closes when the page changes, when the search
   // palette opens, and when the window grows past the phone layout, so its scroll lock
@@ -408,9 +411,17 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
 
   const sections: Record<SectionId, { count?: number; hatch?: boolean; body: ReactNode }> = {
     highlighted: {
-      body: tasksLoading ? skeletonRows(2)
-        : highlighted.length ? (
+      body: tasksLoading && !reviewDue ? skeletonRows(2)
+        : highlighted.length || reviewDue ? (
           <ul className="bindit-rail__entries">
+            {reviewDue ? (
+              <li>
+                <a className="bindit-rail__entry" href={REVIEW_ALL_HASH} data-review-link="">
+                  <span className="bindit-rail__glyph bindit-rail__glyph--dot bindit-rail__glyph--review" aria-hidden="true">·</span>
+                  <span className="bindit-rail__entry-text">Review {reviewDue} {reviewDue === 1 ? 'flashcard' : 'flashcards'}</span>
+                </a>
+              </li>
+            ) : null}
             {highlighted.map((task) => (
               <li key={task.id}>
                 <a className="bindit-rail__entry" href={`#goals?task=${encodeURIComponent(task.id)}`} title={task.title}>
