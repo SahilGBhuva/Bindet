@@ -664,6 +664,23 @@ def is_prompt_extraction(text: str) -> bool:
     return bool(_PROMPT_EXTRACTION.search(_plain(text)))
 
 
+# Text in an answer that talks to the grader rather than answering the question.
+_GRADER_STEERING = re.compile(
+    r"\b(?:mark|grade|score|rate|count|accept|treat)\w*\b[^.\n]{0,40}\b(?:correct|right|true|full\s+(?:marks?|credit)|100)\b"
+    r"|\bcorrect\s*[:=]\s*true\b|\bscore\s*[:=]\s*\d|\bgrader\b|\brubric\b|\bgrading\b",
+    re.I,
+)
+
+
+def answer_steers_grader(text: str) -> bool:
+    """A student answer that contains instruction-like text (prompt overrides, notes to the
+    grader, role changes). Such an answer may still be graded, but a "correct" verdict for
+    it is never cached, so a lucky jailbreak can't be replayed for free."""
+    plain = _plain(text)
+    return bool(is_prompt_extraction(plain) or _INSTRUCTION.search(plain) or _GRADER_STEERING.search(plain)
+                or _INSTRUCTION_ABUSE.search(plain))
+
+
 def tutor_route(text: str, has_images: bool) -> dict[str, Any]:
     """Fast model for everyday questions; more reasoning (or a configured stronger model) for hard ones."""
     lowered = text.lower()

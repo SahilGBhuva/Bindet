@@ -194,8 +194,11 @@ def store_extraction(key: str, text: str) -> bool:
 # --- Answer grading ----------------------------------------------------------------
 #
 # The grader sees the question, reference answer, student answer, topic and
-# difficulty, so all of them are in the key. Shared across students only for the
-# identical question and answer, which the requester has just typed themselves.
+# difficulty, so all of them are in the key, and so is the student: a grade is only
+# ever reused for the same student re-sending the same answer. Sharing grades across
+# students would let one lucky jailbroken "correct" verdict be replayed by everyone who
+# pastes that answer. A "correct" verdict for an answer that reads like instructions to
+# the grader is never stored at all (see main.analyze_answer).
 
 GRADE_FIELDS = ("correct", "score", "mistake_type", "explanation", "hint", "misconception")
 
@@ -208,12 +211,13 @@ def grading_version() -> str:
 
 
 def normalize_answer(answer: str) -> str:
-    """Unicode-normalised with whitespace collapsed. Case is kept: it can matter (CO vs Co)."""
-    return " ".join(unicodedata.normalize("NFKC", answer or "").split())
+    """Canonically normalised (NFC) with whitespace collapsed. Case is kept: it can matter
+    (CO vs Co). NFC, not NFKC, so "x²" and "x2" or "10⁵" and "105" stay different answers."""
+    return " ".join(unicodedata.normalize("NFC", answer or "").split())
 
 
-def grading_key(*, question: str, correct_answer: str, student_answer: str, topic: str, difficulty: int) -> str:
-    return make_key("grading", grading_version(), question, correct_answer, normalize_answer(student_answer), topic, int(difficulty))
+def grading_key(*, student_id: str, question: str, correct_answer: str, student_answer: str, topic: str, difficulty: int) -> str:
+    return make_key("grading", grading_version(), student_id, question, correct_answer, normalize_answer(student_answer), topic, int(difficulty))
 
 
 def cached_grade(key: str) -> dict | None:

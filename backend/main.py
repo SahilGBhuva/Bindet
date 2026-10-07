@@ -2528,12 +2528,12 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         explanation = "Not quite yet. Use the hint and try again."
         hint = make_hint(question["question"], mistake_type)
     else:
-        # The identical answer to this question was graded by the AI before: reuse that
-        # grade (no AI call, grading quota or budget). Only the model call is replaced;
-        # completion, XP and attempts below are unchanged. AI grading is for signed-in
-        # students only, so guests never read the cache.
+        # This student sent the identical answer to this question before and the AI graded
+        # it: reuse that grade (no AI call, grading quota or budget). Only the model call is
+        # replaced; completion, XP and attempts below are unchanged. Grades are never shared
+        # between students. AI grading is for signed-in students only, so guests never read the cache.
         grade_key = ai_cache.grading_key(
-            question=question["question"], correct_answer=question["correct_answer"], student_answer=data.student_answer,
+            student_id=student_id, question=question["question"], correct_answer=question["correct_answer"], student_answer=data.student_answer,
             topic=question["topic"], difficulty=question["difficulty"],
         ) if authorization else None
         cached_grade = ai_cache.cached_grade(grade_key) if grade_key else None
@@ -2568,7 +2568,9 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                     difficulty=question["difficulty"],
                     session_id=ai_session_id(student_id, question["topic"], "grading"),
                 )
-                if grade_key:
+                # A "correct" verdict for an answer that talks to the grader may be a successful
+                # jailbreak: use it this once, but never cache it for replay.
+                if grade_key and not (ai_result["correct"] and ai_tutor.answer_steers_grader(data.student_answer)):
                     ai_cache.store_grade(grade_key, ai_result)
                 correct = ai_result["correct"]
                 score = ai_result["score"]
