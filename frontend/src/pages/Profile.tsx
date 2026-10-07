@@ -489,11 +489,11 @@ export function Profile({ session, onError }: ProfileProps) {
                   <h3 className="profile__form-title">Start a group</h3>
                   <label className="ui-field">
                     <span>Group name</span>
-                    <input className="ui-input" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="AP Bio study circle" maxLength={48} />
+                    <input className="ui-input" value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="AP Bio study circle" maxLength={48} autoComplete="off" autoCapitalize="words" enterKeyHint="next" />
                   </label>
                   <label className="ui-field">
                     <span>What are you studying? <span className="profile__optional">Optional</span></span>
-                    <input className="ui-input" value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Weekly review before unit tests" maxLength={160} />
+                    <input className="ui-input" value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Weekly review before unit tests" maxLength={160} autoComplete="off" enterKeyHint="done" />
                   </label>
                   <button className="ui-button" disabled={socialBusy || groupName.trim().length < 2}>Create group</button>
                 </form>
@@ -501,7 +501,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   <h3 className="profile__form-title">Join with a code</h3>
                   <label className="ui-field">
                     <span>Invite code</span>
-                    <input className="ui-input profile__code-input" value={groupCode} onChange={(event) => setGroupCode(event.target.value.toUpperCase())} placeholder="8-character code" maxLength={10} aria-label="Study group invite code" />
+                    <input className="ui-input profile__code-input" value={groupCode} onChange={(event) => setGroupCode(event.target.value.toUpperCase())} placeholder="8-character code" maxLength={10} aria-label="Study group invite code" autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="go" />
                   </label>
                   <p className="profile__form-help">Ask a group owner for the code on their group page.</p>
                   <button className="ui-button" disabled={socialBusy || groupCode.trim().length < 6}>Join group</button>
@@ -755,11 +755,11 @@ export function Profile({ session, onError }: ProfileProps) {
               {session ? (
                 <div className="profile__friend-forms">
                   <form className="profile__inline-form" onSubmit={findPeople} role="search">
-                    <input className="ui-input" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Search name or username" maxLength={40} aria-label="Search people" />
+                    <input className="ui-input" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Search name or username" maxLength={40} aria-label="Search people" type="search" autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" />
                     <button className="ui-button" disabled={socialBusy || peopleQuery.trim().length < 2}>Search</button>
                   </form>
                   <form className="profile__inline-form" onSubmit={addFriend}>
-                    <input className="ui-input profile__code-input" value={friendCode} onChange={(event) => setFriendCode(event.target.value.toUpperCase())} placeholder="Or enter a friend ID" maxLength={12} aria-label="Friend ID" />
+                    <input className="ui-input profile__code-input" value={friendCode} onChange={(event) => setFriendCode(event.target.value.toUpperCase())} placeholder="Or enter a friend ID" maxLength={12} aria-label="Friend ID" autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="go" />
                     <button className="ui-button" disabled={socialBusy || !friendCode.trim()}>Add</button>
                   </form>
                 </div>

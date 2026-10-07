@@ -282,7 +282,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                   <label className="settings__label" htmlFor="settings-display-name">Display name</label>
                   <span className="settings__hint">Shown to friends and in group chats.</span>
                 </div>
-                <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} disabled={!profileReady} />
+                <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} autoComplete="nickname" autoCapitalize="words" enterKeyHint="done" disabled={!profileReady} />
               </div>
               <div className="settings__row">
                 <div className="settings__row-text">
@@ -298,6 +298,8 @@ export function Settings({ session, onSession }: SettingsProps) {
                   minLength={3}
                   maxLength={24}
                   autoCapitalize="none"
+                  autoComplete="username"
+                  enterKeyHint="done"
                   spellCheck={false}
                   disabled={!profileReady}
                 />
