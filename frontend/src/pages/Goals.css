@@ -673,7 +673,10 @@
   .tasks-box__head .tasks-icon-button { width: 40px; height: 40px; }
   .tasks-box__head .tasks-icon-button { margin-block: -6px; }
   .tasks-notice .tasks-icon-button { width: 40px; height: 40px; margin: -8px -8px -8px 0; }
-  .tasks-switch { height: 40px; }
+  .tasks-switch { min-width: 44px; height: 40px; }
+  /* The drawn inline fields keep their look; they just get a finger-sized hit area. */
+  .task-title-input,
+  .task-location__input { min-height: 40px; }
   .tasks-tab { min-height: 40px; }
   .task-card__main { min-height: 44px; padding: 10px 12px; }
   /* The drawn pills stay small; an invisible margin makes them easy to tap. */
@@ -681,7 +684,12 @@
   .task-pill::after { content: ""; position: absolute; inset: -9px -4px; }
   .task-title-input,
   .task-location__input,
-  .task-details { font-size: 16px; }
+  .task-details,
+  .task-inline-add input,
+  .task-comment-form .ui-textarea { font-size: 16px; }
+  .task-inline-add input { height: 40px; }
+  .task-checklist li,
+  .task-links li { min-height: 40px; }
 
   .tasks-boxes { flex-direction: column; align-items: stretch; }
   .tasks-box,
@@ -698,7 +706,8 @@
     bottom: 0;
     z-index: 45;
     display: block;
-    width: min(420px, 100vw);
+    /* A strip of the page stays visible so a tap outside closes the drawer. */
+    width: min(420px, calc(100vw - 40px));
     padding: calc(var(--space-3) + env(safe-area-inset-top)) calc(var(--space-4) + env(safe-area-inset-right)) calc(var(--space-6) + env(safe-area-inset-bottom)) var(--space-4);
     overflow-y: auto;
     overscroll-behavior: contain;

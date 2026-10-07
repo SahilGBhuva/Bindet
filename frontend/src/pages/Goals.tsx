@@ -795,12 +795,12 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
         <button type="button" className="tasks-icon-button is-tiny" onClick={onCancel} aria-label="Cancel new task" title="Cancel"><Icon name="close-box" /></button>
       </div>
       <div className="task-detail-card task-compose">
-        <input className="task-title-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={kind === 'event' ? 'New event' : 'New task'} aria-label="Title" maxLength={140} autoFocus required />
+        <input className="task-title-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={kind === 'event' ? 'New event' : 'New task'} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done" autoFocus required />
         <KindToggle value={kind} onChange={setKind} />
         <div className="task-form">
           <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
           <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={dueTime} disabled={!dueDate} onChange={(event) => setDueTime(event.target.value)} /></label>
-          <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Optional" maxLength={200} /></label>
+          <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Optional" maxLength={200} autoComplete="off" enterKeyHint="done" /></label>
           <label className="ui-field"><span>Priority</span>
             <select className="ui-select" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
               {PRIORITIES.map((item) => <option key={item} value={item}>{PRIORITY_LABEL[item]}</option>)}
@@ -976,7 +976,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
       <article className="task-detail-card" aria-label={task.title}>
         <div className="task-detail-card__top">
           {manageable ? (
-            <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140}
+            <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) }}
               onKeyDown={(event) => {
@@ -1006,7 +1006,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                 <>
                   <label htmlFor={`task-location-${task.id}`}>Location:</label>
                   <Icon name="pin" />
-                  <input id={`task-location-${task.id}`} className="task-location__input" value={location} placeholder="Add a place" maxLength={200}
+                  <input id={`task-location-${task.id}`} className="task-location__input" value={location} placeholder="Add a place" maxLength={200} autoComplete="off" enterKeyHint="done"
                     onChange={(event) => setLocation(event.target.value)} onBlur={saveLocation}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') event.currentTarget.blur()
@@ -1041,7 +1041,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                   </select>
                 </label>
                 <label className="ui-field"><span>Course</span>
-                  <input className="ui-input" value={course} maxLength={120} placeholder="Optional" list={`task-courses-${task.id}`} onChange={(event) => setCourse(event.target.value)} onBlur={() => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }} />
+                  <input className="ui-input" value={course} maxLength={120} placeholder="Optional" autoComplete="off" enterKeyHint="done" list={`task-courses-${task.id}`} onChange={(event) => setCourse(event.target.value)} onBlur={() => { if (course.trim() !== task.course) onPatch({ course: course.trim() }) }} />
                   <datalist id={`task-courses-${task.id}`}>{courses.map((name) => <option key={name} value={name} />)}</datalist>
                 </label>
                 <label className="ui-field"><span>Group</span>
@@ -1088,7 +1088,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                 ))}
               </ul>
             ) : !detail && !pending && task.checklist_total ? <span className="ui-skeleton task-section__loading" /> : null}
-            {editable && !pending ? <form onSubmit={addItem} className="task-inline-add"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="+ Add a step" aria-label="Add a checklist step" maxLength={200} /></form> : null}
+            {editable && !pending ? <form onSubmit={addItem} className="task-inline-add"><input value={newItem} onChange={(event) => setNewItem(event.target.value)} placeholder="+ Add a step" aria-label="Add a checklist step" maxLength={200} autoComplete="off" enterKeyHint="done" /></form> : null}
           </section>
 
           <section className="task-section">
@@ -1104,7 +1104,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
                 ))}
               </ul>
             ) : null}
-            {editable && !pending ? <form onSubmit={addLink} className="task-inline-add"><input value={link} onChange={(event) => setLink(event.target.value)} placeholder="+ Paste a link" aria-label="Attach a link" type="url" inputMode="url" maxLength={500} /></form> : null}
+            {editable && !pending ? <form onSubmit={addLink} className="task-inline-add"><input value={link} onChange={(event) => setLink(event.target.value)} placeholder="+ Paste a link" aria-label="Attach a link" type="url" inputMode="url" maxLength={500} autoComplete="off" autoCapitalize="none" enterKeyHint="done" /></form> : null}
           </section>
 
           {task.group_id ? (
