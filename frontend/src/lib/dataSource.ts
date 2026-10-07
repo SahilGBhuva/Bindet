@@ -69,6 +69,11 @@ export type DataSource = {
   transferStudyGroup: typeof api.transferStudyGroup
   // Account (Settings). Always locked in the demo.
   deleteAccount: typeof api.deleteAccount
+  // Practice tests. The demo runs them in memory.
+  createPracticeTest: typeof api.createPracticeTest
+  getPracticeTest: typeof api.getPracticeTest
+  submitPracticeTest: typeof api.submitPracticeTest
+  listPracticeTests: typeof api.listPracticeTests
 }
 
 export const realData: DataSource = {
@@ -120,6 +125,10 @@ export const realData: DataSource = {
   deleteStudyGroup: api.deleteStudyGroup,
   transferStudyGroup: api.transferStudyGroup,
   deleteAccount: api.deleteAccount,
+  createPracticeTest: api.createPracticeTest,
+  getPracticeTest: api.getPracticeTest,
+  submitPracticeTest: api.submitPracticeTest,
+  listPracticeTests: api.listPracticeTests,
 }
 
 const DataContext = createContext<DataSource>(realData)
