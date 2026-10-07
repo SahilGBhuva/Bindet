@@ -1,5 +1,6 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useState } from 'react'
 import { AuthGate } from './components/AuthGate'
+import { OfflineNotice, UpdatePrompt } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
 import { PROFILE_SETUP_ROUTED_KEY } from './components/ProfileSetupCard'
 import { useAuth } from './lib/AuthContext'
@@ -242,6 +243,7 @@ function AppShell() {
         </div>
       </header>
       <main className={`sheet is-${screen}`} id="main-content" tabIndex={-1} key={screen}>
+        {screen !== 'tools' ? <OfflineNotice /> : null}
         <Suspense fallback={<PageSkeleton sketch={screen === 'goals' || screen === 'stats'} />}>
           {screen === 'home' ? <Home session={session} /> : null}
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
@@ -277,9 +279,12 @@ function PageSkeleton({ sketch = false }: { sketch?: boolean }) {
 
 function App() {
   return (
-    <AuthGate>
-      <AppShell />
-    </AuthGate>
+    <>
+      <AuthGate>
+        <AppShell />
+      </AuthGate>
+      <UpdatePrompt />
+    </>
   )
 }
 
