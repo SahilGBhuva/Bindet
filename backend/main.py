@@ -2027,8 +2027,10 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             # Shared bank: the model gets no student data. Only the difficulty (part of the
             # key) adapts to the student.
             personalization = neutral_personalization(target_topic)
-        # A banked question costs no AI call and no AI quota.
-        cached = questions.cached_question(cache_key, student_id)
+        # A banked question costs no AI call, no ai_question quota and no global AI budget.
+        cached = questions.cached_question(cache_key, student_id) if ai_cache.enabled() else None
+        if ai_cache.enabled():
+            ai_tutor.log_ai_event("generate_quiz", outcome="cache_hit" if cached else "cache_miss", student_id=student_id, tier="text")
         if cached:
             ai_question = cached
         else:

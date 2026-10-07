@@ -514,6 +514,42 @@ class TutorCacheTests(CacheTestCase):
         self.assertNotIn("distinctive", json.dumps(row, default=str))
 
 
+class QuestionBankTests(CacheTestCase):
+    QUESTION = {"question": "What molecule is the main energy currency of a cell?", "correct_answer": "ATP", "topic": "Respiration"}
+
+    def ask(self, student_id):
+        request = main.QuestionRequest(topic="mixed", difficulty=2, notes=main.NoteContext(course="Biology", unit="Respiration"))
+        with self.as_user(student_id):
+            return main.generate_question(request, "Bearer t")
+
+    def charged(self):
+        with database.engine().connect() as connection:
+            return sorted(connection.execute(select(database.social_action_events.c.student_id, database.social_action_events.c.action)).all())
+
+    def test_a_banked_question_skips_the_model_ai_quota_and_global_budget(self):
+        with patch.object(ai_tutor, "generate_question", return_value=dict(self.QUESTION)) as ai:
+            self.ask("alex")
+        ai.assert_called_once()
+        before = self.charged()
+        self.assertIn((main.GLOBAL_AI_BUDGET_ID, "ai_call"), before)
+        with patch.object(ai_tutor, "generate_question") as ai, \
+                patch.object(main, "global_ai_available", side_effect=AssertionError("budget charged")), \
+                self.assertLogs("bindit.ai", "INFO") as logs:
+            second = self.ask("sam")
+        ai.assert_not_called()
+        self.assertEqual(second.question, self.QUESTION["question"])
+        self.assertTrue(any('"op":"generate_quiz","outcome":"cache_hit"' in line for line in logs.output))
+        # Only Sam's general question_request limit was counted; no ai_question quota.
+        self.assertEqual(sorted(set(self.charged()) - set(before)), [("sam", "question_request")])
+
+    def test_ai_cache_enabled_off_skips_the_bank(self):
+        with patch.object(ai_tutor, "generate_question", return_value=dict(self.QUESTION)) as ai:
+            self.ask("alex")
+            with patch.dict(os.environ, {"AI_CACHE_ENABLED": "off"}):
+                self.ask("sam")
+        self.assertEqual(ai.call_count, 2)
+
+
 class CacheLockdownTests(unittest.TestCase):
     def test_cache_tables_are_backend_only(self):
         for name in ai_cache.RETENTION:
