@@ -34,6 +34,7 @@
       <h1>Privacy Policy</h1>
       <p class="updated">Last updated: October 6, 2026</p>
       <p class="lead">bindit is a study app that turns your class notes into flashcards, quizzes and a tutor you can ask questions. This policy explains, in plain language, what information bindit handles, why, who helps us process it, how long we keep it and what you can do about it.</p>
+      <p class="lead">bindit is a free student project created for the Congressional App Challenge.</p>
     </div>
 
     <aside class="summary" aria-labelledby="summary-title">
@@ -43,7 +44,7 @@
         <li>Notes, photos of notes, quiz answers and tutor messages are sent to AI providers to make your study materials. Please don't upload sensitive personal information.</li>
         <li>We don't sell your data, we don't show ads, and we don't use analytics or tracking tools.</li>
         <li>bindit is meant for students 13 and older. Younger students need a parent, guardian or school to agree first.</li>
-        <li>You can ask us to see, fix, export or delete your data by emailing <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</li>
+        <li>You can delete your account and all your data at any time in Settings → Delete account. You can also ask us to see, fix, export or delete your data by emailing <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</li>
       </ul>
     </aside>
 
@@ -70,7 +71,7 @@
     <div class="legal-body">
       <section id="who-we-are" aria-labelledby="who-we-are-h">
         <h2 id="who-we-are-h">1. Who we are</h2>
-        <p>bindit is built and run by Sahil, an independent student developer ("we", "us"). It is available at <a href="https://bindet-learn.vercel.app/">bindet-learn.vercel.app</a>. bindit is a free service and is not run by a school or company.</p>
+        <p>bindit is built and run by the bindit team, a small group of students<!-- TEAM NAMES: pending owner approval --> ("we", "us"). It is available at <a href="https://bindet-learn.vercel.app/">bindet-learn.vercel.app</a>. bindit is a free student project created for the Congressional App Challenge, and is not run by a school or company.</p>
         <p>If you have a question about this policy or your data, email us at <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
       </section>
 
@@ -126,7 +127,7 @@
           <li>your tutor messages, attached photos, earlier messages in the conversation and the relevant notes, to write a tutor reply;</li>
           <li>any study instructions you give.</li>
         </ul>
-        <p>We send these requests through <strong>OpenRouter</strong>, which forwards them to the company that runs the AI model. At the moment bindit uses Google Gemini models, and scanned PDFs are read with OpenRouter's PDF reader, which uses Mistral's OCR service. We don't send your email address or name with these requests.</p>
+        <p>bindit uses <strong>Google Gemini models, accessed through OpenRouter</strong>, which forwards each request to the company that runs the model. Scanned PDFs may be read with Mistral's OCR service through OpenRouter. OpenRouter may route a request to another AI provider if one is unavailable. We don't send your email address or name with these requests.</p>
         <div class="callout">
           <p><strong>Please don't upload sensitive personal information</strong> (for example health, financial or government ID details, or other people's private information) in notes, photos or tutor messages. Anything you upload may be processed by AI providers as described here.</p>
           <p>AI output can be wrong. Always check important facts against your course materials.</p>
@@ -168,7 +169,7 @@
             <tbody>
               <tr><td>Supabase</td><td>Sign-in, database and file storage</td><td>Account details and everything you save in bindit, including group chat images</td></tr>
               <tr><td>Vercel</td><td>Hosts the website and the app's server</td><td>Requests to the app, including IP address and browser details in request logs</td></tr>
-              <tr><td>OpenRouter, and the AI providers it routes to (currently Google for Gemini models and Mistral for reading scanned PDFs)</td><td>Generates flashcards, quizzes, grading, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
+              <tr><td>OpenRouter, and the AI providers it routes to (Google for Gemini models, Mistral for reading scanned PDFs, or another provider if one is unavailable)</td><td>Generates flashcards, quizzes, grading, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
               <tr><td>Google</td><td>"Continue with Google" sign-in, only if you choose it</td><td>Your Google name, email and profile picture link</td></tr>
               <tr><td>Our email provider</td><td>Sends sign-up codes and password reset emails</td><td>Your email address and the email content</td></tr>
               <tr><td>Google Fonts</td><td>Serves the fonts used on the site</td><td>Your browser downloads fonts from Google's servers, so Google can see your IP address</td></tr>
@@ -193,13 +194,17 @@
       <section id="retention" aria-labelledby="retention-h">
         <h2 id="retention-h">8. How long we keep data</h2>
         <ul>
-          <li><strong>Account and study data</strong> stays until you delete it or ask us to delete your account.</li>
+          <li><strong>Account and study data</strong> stays until you delete it or delete your account.</li>
           <li><strong>Notes and tutor conversations</strong> can be deleted by you at any time in the app. Deleting a note also deletes the flashcards made from it.</li>
-          <li><strong>AI results cache.</strong> To avoid paying for the same AI request twice, we keep some AI results for a short time: flashcards, text read from photos or scans, and grading results for 30 days, and tutor replies for 7 days. These entries are identified by a scrambled fingerprint (a hash) of the input, not the input itself. Deleting a note does not remove these cached results right away; they expire on the schedule above. Recently served quiz questions are kept for 7 days and reusable quiz questions for up to 30 days.</li>
+          <li><strong>AI results cache.</strong> To avoid paying for the same AI request twice, we keep some AI results for a short time: flashcards, text read from photos or scans, and grading results for up to 30 days, and tutor replies for up to 7 days. Results are looked up by a scrambled fingerprint (a hash) of the input, but a stored result can contain your content, such as the text read from your photo. When you delete a note, the cached flashcards and text made from it are deleted too, unless another note still uses the same entry (yours, or another user's upload of identical content). Deleting a tutor conversation deletes its cached reply. Deleting your account deletes every cached result tied to your account, except shared entries that another user's identical upload still uses. A few results cached before we began linking them to accounts aren't linked to anyone and simply expire on the schedule above.</li>
+          <li><strong>Quiz questions.</strong> Recently served quiz questions are kept for 7 days and reusable quiz questions for up to 30 days. Questions made from your own notes or instructions are deleted with your account.</li>
           <li><strong>Usage-limit records</strong> are deleted after about 7 days. In-memory request counts disappear within minutes.</li>
           <li><strong>Server and hosting logs</strong> are kept for the limited period set by our hosting provider.</li>
         </ul>
-        <p>Some things can't yet be deleted from inside the app, including your whole account and messages you've sent in group chat. You can ask us to delete them by email (see below).</p>
+        <h3>Deleting your account</h3>
+        <p>You can delete your account and all your data at any time in <strong>Settings → Delete account</strong>. Deletion is immediate and permanent. You can also email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> and we'll do it within 30 days.</p>
+        <p>Deleting your account removes your sign-in, profile, notes, flashcards, quizzes, tutor conversations, progress, personal tasks, friends, notifications, and the messages and images you sent in group chats, along with your comments, attachments and assignments on other people's tasks. Study groups you own pass to the member who has been in the group the longest, together with the group tasks you created, and that member is told; a group where you're the only member is deleted. Fragments may remain for a limited period in our hosting providers' logs and backups until those are replaced.</p>
+        <p>Individual group chat messages can't yet be deleted from inside the app. They're deleted with your account, or you can ask us by email.</p>
       </section>
 
       <section id="rights" aria-labelledby="rights-h">
@@ -212,7 +217,7 @@
           <li><strong>export</strong> a copy of your data in a common format;</li>
           <li><strong>object to or limit</strong> how we use it, or withdraw your consent.</li>
         </ul>
-        <p>Email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> from the address on your account. We may need to confirm it's you. We'll complete account deletion requests within 30 days, and answer other requests within 30 days as well. Copies of deleted data may stay in our providers' backups for a limited time until those backups are replaced.</p>
+        <p>You can delete your account yourself at any time in Settings → Delete account (see <a href="#retention">section 8</a>). For anything else, email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> from the address on your account. We may need to confirm it's you. We'll complete account deletion requests sent by email within 30 days, and answer other requests within 30 days as well. Copies of deleted data may stay in our providers' logs and backups for a limited time until they are replaced.</p>
         <p>If you live in the European Economic Area or the United Kingdom, we handle your information to provide the service you asked for, for our legitimate interest in keeping bindit safe and working, and with your consent where needed. You can also complain to your local data protection authority. If you live in California or another US state with a privacy law, you have the rights listed above, and we will not treat you differently for using them. We do not sell or "share" personal information for targeted advertising.</p>
         <p>You can also control what others see: turn off "Appear in search" or "Friend requests" in Settings, remove friends, block or report people, and leave study groups.</p>
       </section>
