@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { ApiError, isAbortError, RequestTimeoutError } from '../lib/api'
-import type { AnswerResult, Flashcard, GeneratedQuestion, Topic } from '../lib/api'
+import { AI_BREAK_MESSAGE, ApiError, isAbortError, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, Topic, UploadedNote } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
   fileToCourseImageDataUrl,
@@ -147,6 +147,59 @@ function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
+/* Where one note's saved flashcards stand, as shown next to the note and in the deck. */
+type NoteCards = { status: NoteFlashcardStatus; count: number; error: string; retry: boolean }
+type NoteRef = { id: string; course: string; unit: string }
+
+const FLASHCARD_LIMIT_MESSAGE = 'You’ve made a lot of flashcards today — try again tomorrow.'
+const FLASHCARD_FAILED_MESSAGE = 'Something went wrong. Try again in a moment.'
+const POLL_INTERVAL_MS = 3000
+const POLL_ATTEMPTS = 20
+
+function noteCardsFromServer(state: NoteFlashcardState): NoteCards {
+  return {
+    status: state.status,
+    count: state.card_count,
+    error: state.status === 'failed' ? state.error || FLASHCARD_FAILED_MESSAGE : '',
+    retry: state.status === 'failed',
+  }
+}
+
+/* A failed generation, in words the student can act on. */
+function flashcardFailure(error: unknown): NoteCards {
+  const failed = (message: string, retry = true): NoteCards => ({ status: 'failed', count: 0, error: message, retry })
+  if (error instanceof ApiError) {
+    if (error.status === 404) return failed('This note isn’t saved anymore.', false)
+    if (error.status === 429) return failed(error.message && error.message !== RATE_LIMITED_MESSAGE ? error.message : FLASHCARD_LIMIT_MESSAGE)
+    if (error.code === 'ai_daily_limit') return failed(AI_BREAK_MESSAGE)
+    return failed(error.message || FLASHCARD_FAILED_MESSAGE)
+  }
+  if (error instanceof RequestTimeoutError) return failed(error.message)
+  return failed('Couldn’t reach bindit. Check your connection and try again.')
+}
+
+/* Adds cards that are new and refreshes ones already shown, keeping their order so the open card stays put. */
+function mergeCards(current: Flashcard[], incoming: Flashcard[]) {
+  if (!incoming.length) return current
+  const byId = new Map(incoming.map((card) => [card.id, card]))
+  const known = new Set(current.map((card) => card.id))
+  return [...current.map((card) => byId.get(card.id) ?? card), ...incoming.filter((card) => !known.has(card.id))]
+}
+
+function noteFromServer(note: UploadedNote): NoteDeposit {
+  return {
+    id: note.id,
+    course: note.course,
+    unit: note.unit,
+    fileName: note.file_name,
+    createdAt: note.created_at,
+    status: 'ready',
+    textPreview: note.text_preview,
+  }
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
+
 export function Tools({ accessToken }: { accessToken?: string }) {
   const data = useData()
   const [notebook, setNotebook] = useState(() => {
@@ -182,10 +235,12 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [quizChecking, setQuizChecking] = useState(false)
   const [quizError, setQuizError] = useState('')
   const [quizFailed, setQuizFailed] = useState<'' | 'load' | 'check'>('')
-  const [deck, setDeck] = useState<{ key: string; cards: Flashcard[] } | null>(null)
-  const [cardsBusy, setCardsBusy] = useState(false)
-  const [cardsError, setCardsError] = useState('')
-  const [cardsRequest, setCardsRequest] = useState(0)
+  // Saved flashcards and server notes from every unit opened so far; each view filters its own.
+  const [savedCards, setSavedCards] = useState<Flashcard[]>([])
+  const [serverNotes, setServerNotes] = useState<NoteDeposit[]>([])
+  const [noteCards, setNoteCards] = useState<Record<string, NoteCards>>({})
+  const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string }>({ key: '', status: 'loading', error: '' })
+  const [libraryRequest, setLibraryRequest] = useState(0)
   const [panelFn, setPanelFn] = useState<ToolView>('scan')
   const [orderOpen, setOrderOpen] = useState(false)
   const [orderDrag, setOrderDrag] = useState('')
@@ -199,8 +254,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const studentId = useRef(data.getStudentId())
   // AI generation is rate limited per day, so generated content is only requested
   // when what it depends on changes, never just because the user switched views.
-  const pendingDeckKey = useRef('')
-  const latestDeckKey = useRef('')
+  // Flashcards are written once per note, when it is saved, and kept on the server.
+  const generatingNotes = useRef(new Set<string>())
+  const mounted = useRef(true)
   const loadedQuizKey = useRef('')
   const quizSequence = useRef(0)
   // At most one question is fetched ahead per quiz setting; leaving that setting cancels it.
@@ -213,12 +269,30 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const units = unitsFor(courses, activeCourse)
   const current = courses.find((course) => course.name === activeCourse)
   const looking = courses.find((course) => course.name === lookCourse) ?? current
-  const unitNotes = notesFor(notebook.deposits, activeCourse, activeUnit)
-  const courseNoteCount = notebook.deposits.filter((note) => note.course === activeCourse).length
-  const deckKey = `${activeCourse}|${activeUnit}|${unitNotes.length}`
-  latestDeckKey.current = deckKey
-  const cards = deck?.key === deckKey ? deck.cards : []
+  // A unit's notes are the ones saved on the server (from any device) plus this device's own.
+  const localUnitNotes = notesFor(notebook.deposits, activeCourse, activeUnit)
+  const unitNotes = [
+    ...localUnitNotes,
+    ...notesFor(serverNotes, activeCourse, activeUnit).filter((note) => !localUnitNotes.some((item) => item.id === note.id)),
+  ].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
+  const courseNoteCount = new Set([
+    ...notebook.deposits.filter((note) => note.course === activeCourse).map((note) => note.id),
+    ...serverNotes.filter((note) => note.course === activeCourse).map((note) => note.id),
+  ]).size
+  const unitKey = `${activeCourse}|${activeUnit}`
+  const libraryLoaded = library.key === unitKey && library.status === 'ready'
+  const libraryLoading = library.key !== unitKey || library.status === 'loading'
+  const unitNoteIds = new Set(unitNotes.map((note) => note.id))
+  const cards = savedCards.filter((item) => unitNoteIds.has(item.note_id))
   const card = cards.length ? cards[cardIndex % cards.length] : null
+  // A note the server has not reported on yet has no flashcards so far.
+  const cardsFor = (note: NoteDeposit): NoteCards | undefined =>
+    noteCards[note.id] ?? (libraryLoaded ? { status: 'none', count: 0, error: '', retry: false } : undefined)
+  const notesWith = (status: NoteFlashcardStatus) => unitNotes.filter((note) => cardsFor(note)?.status === status)
+  const makingNotes = notesWith('generating')
+  const failedNotes = notesWith('failed')
+  const waitingNotes = notesWith('none')
+  const shortNotes = notesWith('too_short')
   const uploadBusy = Boolean(uploading)
   const quizKey = `${activeCourse}|${activeUnit}|${unitNotes.length ? `notes:${unitNotes.length}` : quizTopic}|${quizDifficulty}`
 
@@ -261,37 +335,135 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     }
   }, [menuCourse])
 
-  // Writes the unit's deck once per set of notes. Called when the Flashcards view opens,
-  // and a moment earlier when the pointer rests on (or focus reaches) its tab.
-  function startDeck() {
-    if (!activeCourse || !activeUnit || unitNotes.length === 0) return
-    const key = deckKey
-    if (deck?.key === key || pendingDeckKey.current === key) return
-    pendingDeckKey.current = key
-    setCardsBusy(true)
-    setCardsError('')
-    void data.generateFlashcards({ course: activeCourse, unit: activeUnit, count: 10 }, accessToken)
-      .then((result) => {
-        if (latestDeckKey.current !== key) return
-        setDeck({ key, cards: result.cards })
-        setCardIndex(0)
-        setCardFlipped(false)
-      })
-      .catch((error: unknown) => {
-        if (latestDeckKey.current === key) setCardsError(error instanceof RequestTimeoutError ? error.message : 'Couldn’t generate flashcards. Try again in a moment.')
-      })
-      .finally(() => {
-        if (pendingDeckKey.current !== key) return
-        pendingDeckKey.current = ''
-        setCardsBusy(false)
-      })
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  // Takes in what the server reports for a unit: its notes, saved cards, and each note's state.
+  function applyLibrary(course: string, unit: string, result: FlashcardLibrary, notes: UploadedNote[] | null) {
+    const listed = (notes ?? []).map(noteFromServer)
+    const fromStates: NoteDeposit[] = result.notes
+      .filter((state) => !listed.some((note) => note.id === state.note_id))
+      .map((state) => ({ id: state.note_id, course, unit, fileName: state.file_name, createdAt: state.updated_at ?? '', status: 'ready' }))
+    const incoming = [...listed, ...fromStates]
+    setServerNotes((current) => [...current.filter((note) => note.course !== course || note.unit !== unit), ...incoming])
+    setSavedCards((current) => mergeCards(current, result.cards))
+    setNoteCards((current) => {
+      const next = { ...current }
+      for (const state of result.notes) {
+        const settled = state.status === 'ready' || state.status === 'too_short'
+        // While this page is writing a note's cards, only a finished result replaces "Making flashcards…".
+        if (generatingNotes.current.has(state.note_id) && !settled) continue
+        const known = current[state.note_id]
+        if (state.status === 'none' && known && known.status !== 'none') continue
+        next[state.note_id] = noteCardsFromServer(state)
+      }
+      return next
+    })
   }
 
-  const startDeckForView = useEffectEvent(() => startDeck())
+  const loadUnitLibrary = useEffectEvent((course: string, unit: string, signal: AbortSignal) => {
+    const key = `${course}|${unit}`
+    Promise.all([
+      data.listFlashcards({ course, unit }, accessToken, signal),
+      // The flashcard states name every note too, so a failed note list only loses previews.
+      data.listNotes(course, unit, accessToken, signal).catch((error: unknown) => {
+        if (isAbortError(error)) throw error
+        return null
+      }),
+    ])
+      .then(([result, notes]) => {
+        if (signal.aborted) return
+        applyLibrary(course, unit, result, notes)
+        setLibrary({ key, status: 'ready', error: '' })
+      })
+      .catch((error: unknown) => {
+        if (signal.aborted || isAbortError(error)) return
+        setLibrary({ key, status: 'error', error: error instanceof Error ? error.message : 'Couldn’t load your flashcards.' })
+      })
+  })
 
+  // Opening a unit reads its saved notes and flashcards. This never asks the AI for anything.
   useEffect(() => {
-    if (panelFn === 'cards') startDeckForView()
-  }, [panelFn, deckKey, cardsRequest])
+    if (!activeCourse || !activeUnit) return
+    const controller = new AbortController()
+    loadUnitLibrary(activeCourse, activeUnit, controller.signal)
+    return () => controller.abort()
+  }, [activeCourse, activeUnit, libraryRequest])
+
+  function reloadLibrary() {
+    setLibrary({ key: unitKey, status: 'loading', error: '' })
+    setLibraryRequest((count) => count + 1)
+  }
+
+  // Writes and saves one note's flashcards. New cards join the deck as soon as they arrive.
+  async function makeFlashcards(note: NoteRef, retry = false) {
+    if (generatingNotes.current.has(note.id)) return
+    generatingNotes.current.add(note.id)
+    setNoteCards((current) => ({ ...current, [note.id]: { status: 'generating', count: 0, error: '', retry: false } }))
+    let stillWorking = false
+    try {
+      const result = await data.generateNoteFlashcards(note.id, retry ? { retry: true } : undefined, accessToken)
+      if (!mounted.current) return
+      setSavedCards((current) => mergeCards(current, result.cards))
+      setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
+    } catch (error) {
+      if (!mounted.current) return
+      // Already being written (here or on another device), or slower than our wait: watch for the result.
+      stillWorking = (error instanceof ApiError && error.status === 409) || error instanceof RequestTimeoutError
+      if (!stillWorking) setNoteCards((current) => ({ ...current, [note.id]: flashcardFailure(error) }))
+    } finally {
+      if (!stillWorking) generatingNotes.current.delete(note.id)
+    }
+    if (stillWorking) await watchFlashcards(note)
+  }
+
+  // Checks the saved flashcards every few seconds, for about a minute, until the note's cards are done.
+  async function watchFlashcards(note: NoteRef) {
+    try {
+      for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
+        await wait(POLL_INTERVAL_MS)
+        if (!mounted.current) return
+        let state: NoteFlashcardState | undefined
+        try {
+          const result = await data.listFlashcards({ course: note.course, unit: note.unit }, accessToken)
+          if (!mounted.current) return
+          setSavedCards((current) => mergeCards(current, result.cards))
+          state = result.notes.find((item) => item.note_id === note.id)
+        } catch {
+          continue
+        }
+        if (!state || state.status === 'generating') continue
+        const settled: NoteCards = state.status === 'none'
+          ? { status: 'failed', count: 0, error: FLASHCARD_FAILED_MESSAGE, retry: true }
+          : noteCardsFromServer(state)
+        setNoteCards((current) => ({ ...current, [note.id]: settled }))
+        return
+      }
+      if (mounted.current) {
+        setNoteCards((current) => ({ ...current, [note.id]: { status: 'failed', count: 0, error: 'This is taking longer than usual. Try again in a moment.', retry: true } }))
+      }
+    } finally {
+      generatingNotes.current.delete(note.id)
+    }
+  }
+
+  // Notes saved before flashcards were automatic get theirs one at a time, to stay within limits.
+  async function makeFlashcardsFor(notes: NoteDeposit[]) {
+    const queue = notes
+      .filter((note) => !generatingNotes.current.has(note.id))
+      .map((note) => ({ note, retry: cardsFor(note)?.status === 'failed' }))
+    setNoteCards((current) => {
+      const next = { ...current }
+      for (const { note } of queue) next[note.id] = { status: 'generating', count: 0, error: '', retry: false }
+      return next
+    })
+    for (const { note, retry } of queue) {
+      if (!mounted.current) return
+      await makeFlashcards(note, retry)
+    }
+  }
 
   // Reads the latest quiz inputs without making them reasons to request a new question.
   const loadQuizForKey = useEffectEvent(() => {
@@ -622,13 +794,12 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     void entry.promise.catch(() => { if (prefetchedQuestions.current.get(key) === entry) prefetchedQuestions.current.delete(key) })
   }
 
-  // Resting on (or tabbing to) the Flashcards or Quiz tab starts its AI work early,
-  // so it is usually ready by the time the view opens. One deck or one question at most.
+  // Resting on (or tabbing to) the Quiz tab fetches a question early, so it is usually
+  // ready by the time the view opens. Flashcards are already saved, so they need no head start.
   function showIntent(view: ToolView) {
     window.clearTimeout(intentTimer.current)
     if (view === panelFn || !activeCourse || !activeUnit) return
-    if (view === 'cards') startDeck()
-    else if (view === 'quiz' && loadedQuizKey.current !== quizKey) primeNextQuestion()
+    if (view === 'quiz' && loadedQuizKey.current !== quizKey) primeNextQuestion()
   }
 
   function hoverIntent(view: ToolView) {
@@ -709,6 +880,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setFile(null)
       if (fileInput.current) fileInput.current.value = ''
       setNotice(`Added “${deposit.fileName}” to ${activeCourse} → ${activeUnit}.`)
+      // Flashcards are written in the background; the note's row shows how that is going.
+      void makeFlashcards(deposit)
       return true
     } catch (error) {
       setUploadError({ source, message: error instanceof Error ? error.message : 'Could not read that note.', retry: true })
@@ -724,6 +897,14 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     try {
       await data.deleteNote(note.id, accessToken)
       setNotebook((current) => ({ ...current, deposits: current.deposits.filter((item) => item.id !== note.id) }))
+      // The server removes the note's flashcards along with it.
+      setServerNotes((current) => current.filter((item) => item.id !== note.id))
+      setSavedCards((current) => current.filter((item) => item.note_id !== note.id))
+      setNoteCards((current) => {
+        const next = { ...current }
+        delete next[note.id]
+        return next
+      })
       setNotice(`Removed “${note.fileName}”.`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not remove that note.')
@@ -843,6 +1024,75 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   const cardPosition = cards.length ? (cardIndex % cards.length) + 1 : 0
+
+  // The flashcard state next to each note: being written, how many, too short, or what went wrong.
+  function noteCardsStatus(note: NoteDeposit) {
+    const state = cardsFor(note)
+    let content: React.ReactNode = null
+    if (state?.status === 'generating') content = <><span className="ui-spinner" />Making flashcards…</>
+    else if (state?.status === 'ready') content = plural(state.count, 'flashcard')
+    else if (state?.status === 'too_short') content = 'Too short for flashcards'
+    else if (state?.status === 'none') {
+      content = (
+        <>
+          No flashcards yet
+          <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => void makeFlashcards(note)} aria-label={`Make flashcards from ${note.fileName}`}>
+            Make flashcards
+          </button>
+        </>
+      )
+    } else if (state?.status === 'failed') {
+      content = (
+        <>
+          <span>Couldn’t make flashcards. {state.error}</span>
+          {state.retry ? (
+            <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => void makeFlashcards(note, true)} aria-label={`Retry flashcards for ${note.fileName}`}>
+              Retry
+            </button>
+          ) : null}
+        </>
+      )
+    }
+    return (
+      <span className={`tools__note-cards${state ? ` is-${state.status}` : ''}`} aria-live="polite">
+        {content}
+      </span>
+    )
+  }
+
+  // Under the deck (or its empty state): notes still being written, ones that failed, and ones without cards yet.
+  const showDeckStatus = panelFn === 'cards' && unitNotes.length > 0 && (card !== null || !libraryLoading)
+  const deckStatus = showDeckStatus ? (
+    <div className="tools__deck-status" aria-live="polite">
+      {card && makingNotes.length ? (
+        <p className="tools__status"><span className="ui-spinner" />Making flashcards from {plural(makingNotes.length, 'more note')}…</p>
+      ) : null}
+      {failedNotes.map((note) => {
+        const state = cardsFor(note)
+        return (
+          <div key={note.id} className="ui-alert">
+            <span>Couldn’t make flashcards from “{note.fileName}”. {state?.error}</span>
+            {state?.retry ? (
+              <button className="ui-button ui-button--sm" type="button" onClick={() => void makeFlashcards(note, true)} aria-label={`Retry flashcards for ${note.fileName}`}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        )
+      })}
+      {waitingNotes.length ? (
+        <div className="ui-alert ui-alert--info">
+          <span>{waitingNotes.length === 1 ? '1 note doesn’t' : `${waitingNotes.length} notes don’t`} have flashcards yet.</span>
+          <button className="ui-button ui-button--sm ui-button--primary" type="button" onClick={() => void makeFlashcardsFor(waitingNotes)}>
+            Make flashcards
+          </button>
+        </div>
+      ) : null}
+      {card && shortNotes.length ? (
+        <p className="tools__hint">{shortNotes.length === 1 ? '1 note was' : `${shortNotes.length} notes were`} too short for flashcards.</p>
+      ) : null}
+    </div>
+  ) : null
   const loadingQuestion = quizBusy && !quizChecking
 
   return (
@@ -1008,9 +1258,9 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       role="tab"
                       aria-selected={panelFn === view.id}
                       onClick={() => setPanelFn(view.id)}
-                      onPointerEnter={view.id === 'scan' ? undefined : () => hoverIntent(view.id)}
+                      onPointerEnter={view.id === 'quiz' ? () => hoverIntent(view.id) : undefined}
                       onPointerLeave={() => window.clearTimeout(intentTimer.current)}
-                      onFocus={view.id === 'scan' ? undefined : () => showIntent(view.id)}
+                      onFocus={view.id === 'quiz' ? () => showIntent(view.id) : undefined}
                     >
                       {view.label}
                       {view.id === 'scan' ? <span className="ui-count">{unitNotes.length}</span> : null}
@@ -1128,6 +1378,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                               <span className="ui-row__meta">
                                 {formatDay(note.createdAt)}{formatDay(note.createdAt) ? ' · ' : ''}{note.textPreview || 'Text extracted and ready.'}
                               </span>
+                              {noteCardsStatus(note)}
                             </div>
                             <button
                               className="ui-button ui-button--ghost ui-button--sm"
@@ -1153,20 +1404,14 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
               {panelFn === 'cards' ? (
                 <div className="tools__cards" role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
-                  {unitNotes.length === 0 ? (
-                    <div className="ui-empty">
-                      <h3 className="ui-empty__title">No notes in {activeUnit} yet</h3>
-                      <p className="ui-empty__copy">Flashcards are written from this unit’s notes. Add a file or paste some text first.</p>
-                      <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>
-                    </div>
-                  ) : card ? (
+                  {card ? (
                     <>
                       <button
                         className={`tools__card${cardFlipped ? ' is-flipped' : ''}`}
                         type="button"
                         onClick={() => setCardFlipped((open) => !open)}
                       >
-                        <span className="tools__card-face" key={`${cardPosition}-${cardFlipped ? 'back' : 'front'}`} aria-live="polite">
+                        <span className="tools__card-face" key={`${card.id}-${cardFlipped ? 'back' : 'front'}`} aria-live="polite">
                           <span className="tools__card-label">{cardFlipped ? 'Answer' : 'Question'}</span>
                           <span className="tools__card-text">{cardFlipped ? card.back : card.front}</span>
                         </span>
@@ -1191,14 +1436,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         <kbd>Space</kbd> flips · <kbd>←</kbd> <kbd>→</kbd> move between cards
                       </p>
                     </>
-                  ) : cardsError && !cardsBusy ? (
-                    <div className="tools__cards-error">
-                      <div className="ui-alert" role="alert">
-                        <span>{cardsError}</span>
-                        <button className="ui-button ui-button--sm" type="button" onClick={() => setCardsRequest((count) => count + 1)}>Try again</button>
-                      </div>
-                    </div>
-                  ) : (
+                  ) : makingNotes.length || libraryLoading ? (
                     <div className="tools__card-loading" aria-busy="true">
                       <div className="tools__card tools__card--skeleton" aria-hidden="true">
                         <span className="ui-skeleton" />
@@ -1206,10 +1444,39 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         <span className="ui-skeleton" />
                       </div>
                       <p className="tools__status" role="status">
-                        <span className="ui-spinner" />Writing flashcards from {plural(unitNotes.length, 'note')}…
+                        <span className="ui-spinner" />{makingNotes.length ? 'Making flashcards from your notes…' : 'Loading your flashcards…'}
                       </p>
                     </div>
+                  ) : library.key === unitKey && library.status === 'error' ? (
+                    <div className="tools__cards-error">
+                      <div className="ui-alert" role="alert">
+                        <span>{library.error}</span>
+                        <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Try again</button>
+                      </div>
+                    </div>
+                  ) : unitNotes.length === 0 ? (
+                    <div className="ui-empty">
+                      <h3 className="ui-empty__title">No notes in {activeUnit} yet</h3>
+                      <p className="ui-empty__copy">Flashcards are written from this unit’s notes. Add a file or paste some text first.</p>
+                      <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>
+                    </div>
+                  ) : failedNotes.length || waitingNotes.length ? (
+                    <div className="ui-empty">
+                      <h3 className="ui-empty__title">No flashcards yet</h3>
+                      <p className="ui-empty__copy">
+                        {failedNotes.length
+                          ? `Flashcards couldn’t be made from ${failedNotes.length === unitNotes.length ? 'your notes' : plural(failedNotes.length, 'note')} in ${activeUnit}.`
+                          : `Make flashcards from the notes in ${activeUnit}. They’re saved, so this only happens once.`}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="ui-empty">
+                      <h3 className="ui-empty__title">{shortNotes.length === unitNotes.length ? 'Your notes are too short for flashcards' : 'No flashcards in these notes'}</h3>
+                      <p className="ui-empty__copy">Flashcards need a few facts or definitions to work from. Add longer notes to {activeUnit}, or paste more text.</p>
+                      <button className="ui-button ui-button--primary" type="button" onClick={() => setPanelFn('scan')}>Add notes</button>
+                    </div>
                   )}
+                  {deckStatus}
                 </div>
               ) : null}
 
