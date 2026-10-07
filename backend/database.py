@@ -205,6 +205,8 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "flashcard_jobs",
+    "flashcards",
     "friend_quests",
     "friendships",
     "generated_questions",
@@ -239,6 +241,8 @@ RLS_TABLES = (
 # client-facing RLS policies (study_group_members) or read by the browser
 # (study_notes) must not be listed here.
 CLIENT_REVOKED_TABLES = (
+    "flashcard_jobs",
+    "flashcards",
     "tutor_conversations",
     "tutor_messages",
     "workspace_group_milestones",
