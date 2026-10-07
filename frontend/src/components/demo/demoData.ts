@@ -574,5 +574,8 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
       }
       return wait(result, 60)
     },
+    // The demo never touches the visitor's storage: nothing is kept for offline use.
+    saveOfflineCards: () => Promise.resolve(),
+    loadOfflineCards: () => Promise.resolve(null),
   }
 }

@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import * as api from './api'
+import * as offlineCards from './offlineCards'
 import * as progress from './progress'
 import * as session from './session'
 
@@ -73,6 +74,9 @@ export type DataSource = {
   getReviewSummary: typeof api.getReviewSummary
   getReviewQueue: typeof api.getReviewQueue
   gradeReviewCard: typeof api.gradeReviewCard
+  // Flashcards kept on this device for offline study (IndexedDB). The demo keeps none.
+  saveOfflineCards: typeof offlineCards.saveOfflineCards
+  loadOfflineCards: typeof offlineCards.loadOfflineCards
 }
 
 export const realData: DataSource = {
@@ -127,6 +131,8 @@ export const realData: DataSource = {
   getReviewSummary: api.getReviewSummary,
   getReviewQueue: api.getReviewQueue,
   gradeReviewCard: api.gradeReviewCard,
+  saveOfflineCards: offlineCards.saveOfflineCards,
+  loadOfflineCards: offlineCards.loadOfflineCards,
 }
 
 const DataContext = createContext<DataSource>(realData)

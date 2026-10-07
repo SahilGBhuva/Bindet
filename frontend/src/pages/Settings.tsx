@@ -4,6 +4,8 @@ import { accountDisplayName, suggestedUsername } from '../lib/accountName'
 import { accountDeletionEnabled, requestPasswordReset, signIn, signOutAndReload, signOutWithNotice, signUp, type AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
+import { InstallBindit } from '../components/AppPrompts'
+import { useInstallOffer } from '../lib/pwa'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
 
@@ -62,6 +64,7 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState<Loaded | null>(() => initialLoaded(session))
+  const installOffer = useInstallOffer()
   const [displayName, setDisplayName] = useState(() => loaded?.profile?.display_name ?? defaultDisplayName(session))
   const [username, setUsername] = useState(() => loaded?.profile?.username ?? defaultUsername(session))
   const [profileStatus, setProfileStatus] = useState('')
@@ -219,6 +222,7 @@ export function Settings({ session, onSession }: SettingsProps) {
   const authTitle = mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create an account' : 'Reset your password'
 
   const appearance = (
+    <>
     <Section id="settings-appearance" title="Appearance" copy="Choose how bindit looks on this device. System follows your device setting.">
       <div className="ui-panel">
         <div className="settings__row">
@@ -234,6 +238,14 @@ export function Settings({ session, onSession }: SettingsProps) {
         </div>
       </div>
     </Section>
+    {installOffer ? (
+      <Section id="settings-app" title="App" copy="Use bindit as an app on this device. Flashcards you have opened stay available offline.">
+        <div className="ui-panel">
+          <InstallBindit place="settings" />
+        </div>
+      </Section>
+    ) : null}
+    </>
   )
 
   return (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, parseServerTime, type Profile, type StudyGroup, type Task } from './api'
+import { InstallBindit } from '../components/AppPrompts'
 import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -658,6 +659,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                 </ul>
               </div>
             ) : null}
+            <InstallBindit place="menu" />
             <div className="bindit-sheet__footer">
               <a href="#settings" onClick={() => setMenuOpen(false)}><NavIcon kind="settings" />Settings</a>
               <a href="#more" onClick={() => setMenuOpen(false)}><NavIcon kind="more" />Help</a>

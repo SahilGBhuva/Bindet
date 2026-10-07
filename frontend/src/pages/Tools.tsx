@@ -1,8 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { AI_BREAK_MESSAGE, ApiError, isAbortError, parseServerTime, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
+import { AI_BREAK_MESSAGE, ApiError, isAbortError, OFFLINE_MESSAGE, OfflineError, parseServerTime, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
 import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, NoteScope, UploadedNote } from '../lib/api'
 import { useData } from '../lib/dataSource'
+import { isOffline, useOnline } from '../lib/pwa'
 import {
   fileToCourseImageDataUrl,
   mergeNoteScopes,
@@ -288,6 +289,7 @@ function flashcardFailure(error: unknown): NoteCards {
     return failed(error.message || FLASHCARD_FAILED_MESSAGE)
   }
   if (error instanceof RequestTimeoutError) return failed(error.message)
+  if (error instanceof OfflineError || isOffline()) return failed(OFFLINE_MESSAGE)
   return failed('Couldn’t reach bindit. Check your connection and try again.')
 }
 
@@ -322,6 +324,7 @@ function questionFingerprint(text: string) {
 /* Why a unit's notes or flashcards didn't load, in words the student can act on. */
 function libraryFailure(error: unknown, what: 'notes' | 'flashcards' = 'notes') {
   const fallback = `Couldn’t load your ${what}.`
+  if (error instanceof OfflineError || isOffline()) return `You’re offline, and the ${what} for this unit aren’t saved on this device yet. Open this unit once while online to study its flashcards offline.`
   if (nameRejected(error)) return `${fallback} ${NAME_TOO_LONG_MESSAGE}`
   if (error instanceof RequestTimeoutError) return `${fallback} ${error.message}`
   if (error instanceof ApiError && (error.status === 401 || error.status === 429)) return `${fallback} ${error.message}`
@@ -330,7 +333,7 @@ function libraryFailure(error: unknown, what: 'notes' | 'flashcards' = 'notes') 
 
 /* Why a question didn't load, in words the student can act on. */
 function quizLoadFailure(error: unknown) {
-  if (error instanceof RequestTimeoutError) return error.message
+  if (error instanceof RequestTimeoutError || error instanceof OfflineError) return error.message
   if (error instanceof ApiError && error.message) return error.message
   return 'Couldn’t load a question. Try again in a moment.'
 }
@@ -391,6 +394,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   // cardsFailed: the notes loaded but their flashcards didn't (each is shown on its own).
   const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string; cardsFailed: boolean }>({ key: '', status: 'loading', error: '', cardsFailed: false })
   const [libraryRequest, setLibraryRequest] = useState(0)
+  // The unit whose flashcards are shown from this device's offline copy (key and when it was saved).
+  const [offlineCopy, setOfflineCopy] = useState<{ key: string; savedAt: number } | null>(null)
+  const online = useOnline()
   const [panelFn, setPanelFn] = useState<ToolView>('scan')
   // Focus mode: the current card or question, large, with the panel's other controls hidden.
   const [focusMode, setFocusMode] = useState(false)
@@ -654,16 +660,30 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     void Promise.allSettled([
       data.listFlashcards({ course, unit }, accessToken, signal),
       data.listNotes(course, unit, accessToken, signal),
-    ]).then(([cardsResult, notesResult]) => {
+    ]).then(async ([cardsResult, notesResult]) => {
       if (signal.aborted) return
       const result = cardsResult.status === 'fulfilled' ? cardsResult.value : null
       const notes = notesResult.status === 'fulfilled' ? notesResult.value : null
+      const reason = cardsResult.status === 'rejected' ? cardsResult.reason : null
+      // Online: keep a copy of the unit's flashcards for offline study.
+      if (result) void data.saveOfflineCards({ course, unit }, result)
+      // Offline (or bindit can't be reached at all): show the copy from the last time this unit was opened, if there is one.
+      if (!result && !isAbortError(reason) && (reason instanceof OfflineError || reason instanceof TypeError || isOffline())) {
+        const saved = await data.loadOfflineCards({ course, unit })
+        if (signal.aborted) return
+        if (saved) {
+          applyLibrary(course, unit, { cards: saved.cards, notes: saved.notes }, null)
+          setOfflineCopy({ key, savedAt: saved.savedAt })
+          setLibrary({ key, status: 'ready', error: '', cardsFailed: false })
+          return
+        }
+      }
       if (!result && !notes) {
-        const reason = cardsResult.status === 'rejected' ? cardsResult.reason : null
         if (isAbortError(reason)) return
         setLibrary({ key, status: 'error', error: libraryFailure(reason), cardsFailed: true })
         return
       }
+      if (result) setOfflineCopy((current) => (current?.key === key ? null : current))
       applyLibrary(course, unit, result, notes)
       setLibrary({ key, status: 'ready', error: result ? '' : libraryFailure(cardsResult.status === 'rejected' ? cardsResult.reason : null, 'flashcards'), cardsFailed: !result })
     })
@@ -681,6 +701,17 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     setLibrary({ key: unitKey, status: 'loading', error: '', cardsFailed: false })
     setLibraryRequest((count) => count + 1)
   }
+
+  // Back online after showing an offline copy (or failing offline): load the unit from the server again.
+  const reloadWhenOnline = useEffectEvent(() => {
+    if (offlineCopy?.key === unitKey || libraryFailed) reloadLibrary()
+  })
+  useEffect(() => {
+    if (data.sandboxed) return
+    const onOnline = () => reloadWhenOnline()
+    window.addEventListener('online', onOnline)
+    return () => window.removeEventListener('online', onOnline)
+  }, [data])
 
   /* Where a note is filed now: it may have moved with a rename since `note` was read. */
   function placeOf(note: NoteRef): Place {
@@ -1271,7 +1302,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       // A 503 means the grader is busy or offline: the answer wasn't graded, so the
       // server's message says to resubmit, and Try again sends the same answer.
       const unavailable = error instanceof ApiError && error.status === 503
-      setQuizError(error instanceof RequestTimeoutError || unavailable ? (error as Error).message : 'Couldn’t check that answer. Try again in a moment.')
+      setQuizError(error instanceof RequestTimeoutError || error instanceof OfflineError || unavailable ? (error as Error).message : 'Couldn’t check that answer. Try again in a moment.')
       setQuizFailed('check')
     } finally {
       setQuizBusy(false)
@@ -1820,6 +1851,15 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
         </div>
       </header>
+
+      {!data.sandboxed && (!online || offlineCopy?.key === unitKey) ? (
+        <p className="ui-alert ui-alert--info tools__offline" role="status">
+          <span>
+            <strong>You’re offline — showing saved flashcards.</strong>{' '}
+            Units you’ve opened before can be studied here. Adding notes, quizzes and the tutor need a connection.
+          </span>
+        </p>
+      ) : null}
 
       {reviewAll ? (
         <section className="ui-panel tools__review-sheet" aria-labelledby="tools-review-all-title">
