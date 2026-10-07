@@ -7,6 +7,7 @@ import { listChatUnreads } from './chat'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
+import { courseInitial } from './tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
@@ -92,14 +93,15 @@ function ThemeButton() {
 
 /* ---------- Panel layout: which sections show, in what order, and which are folded (per device). ---------- */
 
-type SectionId = 'highlighted' | 'directory' | 'important' | 'groups' | 'tasks'
+type SectionId = 'highlighted' | 'study' | 'directory' | 'important' | 'groups' | 'tasks'
 type Layout = { order: SectionId[]; hidden: SectionId[]; collapsed: SectionId[] }
 
 const LAYOUT_KEY = 'bindit:sidebar:layout:v2'
 const IMPORTANT_KEY = 'bindit:sidebar:important'
-const SECTION_IDS: SectionId[] = ['highlighted', 'directory', 'important', 'groups', 'tasks']
+const SECTION_IDS: SectionId[] = ['highlighted', 'study', 'directory', 'important', 'groups', 'tasks']
 const SECTION_TITLES: Record<SectionId, string> = {
   highlighted: 'Highlighted',
+  study: 'Study',
   directory: 'Directory',
   important: 'Important groups',
   groups: 'My Groups',
@@ -194,6 +196,11 @@ const glyphs = {
   up: svg(<path d="m4.5 9.5 3.5-3.5 3.5 3.5" />),
   down: svg(<path d="m4.5 6.5 3.5 3.5 3.5-3.5" />),
   eye: svg(<><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" /><circle cx="8" cy="8" r="1.8" /></>),
+  cards: svg(<><rect x="2.5" y="4.5" width="8.5" height="9" rx="1.2" /><path d="M5 2.5h7.3a1.2 1.2 0 0 1 1.2 1.2V11" /></>),
+  test: svg(<><rect x="3" y="2.5" width="10" height="11" rx="1.2" /><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3" /></>),
+  bolt: svg(<path d="M9 1.8 3.8 9h3.6L7 14.2 12.2 7H8.6z" />),
+  chat: svg(<path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />),
+  help: svg(<><circle cx="8" cy="8" r="5.5" /><path d="M6.4 6.3a1.7 1.7 0 0 1 3.2.6c0 1.2-1.6 1.4-1.6 2.4M8 11.2v.1" /></>),
   eyeOff: svg(<><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" /><path d="M3 3l10 10" /></>),
 }
 
@@ -434,15 +441,40 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           </ul>
         ) : failed.tasks ? offline : empty('Nothing pressing right now.'),
     },
+    study: {
+      body: (
+        <ul className="bindit-rail__entries">
+          {([
+            { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
+            { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
+            { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
+            { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask the tutor', current: active === 'tutor' },
+            { key: 'help', tone: 'green', glyph: glyphs.help, href: '#more', label: 'Help & feedback', current: active === 'more' },
+          ] as const).map((item) => (
+            <li key={item.key}>
+              <a
+                className={`bindit-rail__entry bindit-rail__study ui-tone--${item.tone}${'current' in item && item.current ? ' is-current' : ''}`}
+                href={item.href}
+                aria-current={'current' in item && item.current ? 'page' : undefined}
+                data-review-link={'review' in item ? '' : undefined}
+              >
+                <span className="bindit-rail__study-icon">{item.glyph}</span>
+                <span className="bindit-rail__entry-text">{item.label}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ),
+    },
     directory: {
       body: (
         <ul className="bindit-rail__entries">
-          {courses.map((course, index) => {
+          {courses.map((course) => {
             const current = active === 'tools' && course.name === notebook.activeCourse
             return (
               <li key={course.name}>
                 <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} title={course.name} onClick={() => openCourse(course)}>
-                  <span className="bindit-rail__glyph">{index % 3 === 2 ? glyphs.circle : glyphs.square}</span>
+                  <span className="ui-course-mark ui-course-mark--sm bindit-rail__course" style={{ ['--course' as string]: course.tone }} aria-hidden="true">{courseInitial(course.name)}</span>
                   <span className="bindit-rail__entry-text">{course.name}</span>
                 </a>
               </li>

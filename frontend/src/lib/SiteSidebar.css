@@ -14,7 +14,7 @@
   z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: 22px;
   width: var(--layout-sidebar-width);
   height: 100vh;
   height: 100dvh;
@@ -165,7 +165,7 @@
 .bindit-rail__controls { display: flex; align-items: center; gap: 0; margin-left: auto; }
 
 /* Rows: 13px, tight rhythm, tiny outline glyphs. */
-.bindit-rail__entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0 0 0 4px; list-style: none; }
+.bindit-rail__entries { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0; list-style: none; }
 /* Long course, group and task names end in an ellipsis instead of widening the rail. */
 .bindit-rail__entries > li { min-width: 0; }
 
@@ -174,8 +174,8 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 24px;
-  padding: 2px 6px 2px 2px;
+  min-height: 30px;
+  padding: 3px 6px 3px 4px;
   border-radius: var(--radius-xs);
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
@@ -186,6 +186,21 @@
 .bindit-rail__entry.is-current { color: var(--color-text); font-weight: var(--weight-medium); }
 .bindit-rail__entry-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Study shortcuts: each in its own hue, icon on a tint (CLAUDE.md card icons). */
+.bindit-rail__study-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+}
+.bindit-rail__study-icon svg { width: 13px; height: 13px; }
+.bindit-rail__study:hover { background: var(--tone-tint); }
+.bindit-rail__study.is-current { color: var(--tone-text); }
+.bindit-rail__entry .bindit-rail__course { width: 20px; height: 20px; }
 .bindit-rail__glyph { display: grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--color-text-tertiary); line-height: 1; }
 .bindit-rail__glyph svg { width: 13px; height: 13px; }
 .bindit-rail__glyph--dot { font-size: 18px; font-weight: var(--weight-bold); }
@@ -246,47 +261,48 @@
 }
 .bindit-rail__block.is-hidden .bindit-rail__title { color: var(--color-text-tertiary); text-decoration-line: line-through; }
 
-/* Bottom: a hairline, then the boxed lock labelled "locked" with "edit panel" to its right. */
+/* Bottom: a hairline, then one compact row: [lock] locked · edit panel. */
 .bindit-rail__footer {
   display: flex;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
   margin: auto -14px 0 -16px;
-  padding: 8px 14px 0 16px;
+  padding: 10px 14px 0 16px;
   border-top: 1px solid var(--color-border);
 }
 
 .bindit-rail__lock {
   display: flex;
   flex: 1;
-  align-items: flex-end;
-  gap: 18px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  padding: 2px 4px 2px 0;
+  min-height: 34px;
+  padding: 4px 8px 4px 4px;
   border: 0;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
   text-align: left;
   cursor: pointer;
 }
-.bindit-rail__lock-state { display: grid; justify-items: start; gap: 2px; }
-.bindit-rail__lock-state small { color: var(--color-text-tertiary); font-size: var(--text-2xs); line-height: 1; }
+.bindit-rail__lock:hover { background: var(--color-surface-hover); }
+.bindit-rail__lock-state { display: flex; flex-direction: row-reverse; align-items: center; gap: 8px; }
+.bindit-rail__lock-state small { color: var(--color-text-tertiary); font-size: var(--text-xs); line-height: 1; }
 .bindit-rail__lock-box {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 26px;
-  border: 1px solid var(--color-text-secondary);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-xs);
   color: var(--color-text-secondary);
 }
 .bindit-rail__lock-box svg { width: 13px; height: 13px; }
-.bindit-rail__lock-action { padding-bottom: 4px; }
+.bindit-rail__lock-action { margin-left: auto; color: var(--color-text-secondary); }
 .bindit-rail__lock:hover .bindit-rail__lock-action { color: var(--color-text); text-decoration: underline; text-underline-offset: 3px; }
-.bindit-rail__lock.is-editing .bindit-rail__lock-box { border-color: var(--color-text); color: var(--color-text); }
-.bindit-rail__lock.is-editing .bindit-rail__lock-action { color: var(--color-text); font-weight: var(--weight-medium); }
+.bindit-rail__lock.is-editing .bindit-rail__lock-box { border-color: var(--color-accent); color: var(--color-accent); }
+.bindit-rail__lock.is-editing .bindit-rail__lock-action { color: var(--color-accent); font-weight: var(--weight-medium); }
 
 /* Phone menu: unread badge and theme switch. */
 .bindit-rail__badge {
