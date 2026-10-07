@@ -180,7 +180,16 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         const local = current[activeId] ?? []
         // Keep anything still in flight that the server has not returned yet.
         const inFlight = local.filter((message) => message.status)
-        return { ...current, [activeId]: [...items.map(toLocal), ...inFlight] }
+        // The server doesn't keep which notes a reply drew on (a fast or replayed reply can
+        // finish before this page loads): keep the sources this page was told while it streamed.
+        const grounded = new Map(local.filter((message) => message.grounded?.length).map((message) => [message.id, message.grounded]))
+        const merged = items.map((item) => {
+          const message = toLocal(item)
+          const sources = grounded.get(item.id)
+          return sources ? { ...message, grounded: sources } : message
+        })
+        if (grounded.size) setCachedTutorMessages(token, activeId, merged)
+        return { ...current, [activeId]: [...merged, ...inFlight] }
       })
     }).catch((error: unknown) => {
       if (!live) return
