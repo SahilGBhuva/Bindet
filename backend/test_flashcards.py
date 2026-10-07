@@ -8,12 +8,18 @@ TEST_DB.close()
 os.environ['POCKET_TUTOR_DB_PATH'] = TEST_DB.name
 
 import main
+import note_store
 
 
 class BinditFlashcardTests(unittest.TestCase):
     def setUp(self):
         main.questions.reset_questions()
         main.database.reset_db()
+        main.flashcards.reset_flashcards()
+
+    def add_note(self, course, unit, text):
+        # Flashcards are grounded only: the legacy endpoint needs notes in the unit.
+        return note_store.save_note('student-1', course, unit, 'notes.txt', 'text/plain', text, len(text))
 
     @classmethod
     def tearDownClass(cls):
@@ -21,6 +27,7 @@ class BinditFlashcardTests(unittest.TestCase):
             os.unlink(TEST_DB.name)
 
     def test_flashcards_support_any_school_subject(self):
+        self.add_note('Biology', 'Natural Selection', 'Natural selection is differential survival and reproduction due to heritable variation.')
         cards = [
             {'front': 'What is natural selection?', 'back': 'Differential survival and reproduction due to heritable variation.', 'topic': 'Natural Selection'},
             {'front': 'What is an adaptation?', 'back': 'A heritable trait that increases reproductive success in an environment.', 'topic': 'Natural Selection'},
@@ -43,6 +50,7 @@ class BinditFlashcardTests(unittest.TestCase):
         mocked.assert_called_once()
 
     def test_flashcards_use_student_performance(self):
+        self.add_note('Biology', 'Cell Biology', 'The mitochondrion produces ATP through cellular respiration.')
         for _ in range(3):
             main.database.update_progress('student-1', 'Cell Biology', False, 0)
         cards = [
@@ -59,12 +67,15 @@ class BinditFlashcardTests(unittest.TestCase):
         self.assertTrue(result.personalized)
 
     def test_flashcard_ai_failure_returns_service_error(self):
+        self.add_note('History', 'Industrial Revolution', 'Steam power transformed textile production in Britain.')
         with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1'}), patch.object(main.ai_tutor, 'generate_flashcards', side_effect=main.ai_tutor.AITutorError('offline')):
             with self.assertRaises(main.HTTPException) as context:
                 main.generate_flashcards(
                     main.FlashcardRequest(student_id='student-1', course='History', unit='Industrial Revolution'), 'Bearer test'
                 )
         self.assertEqual(context.exception.status_code, 503)
+        self.assertEqual(context.exception.detail['code'], 'ai_unavailable')
+        self.assertNotIn('offline', str(context.exception.detail))
 
 
 if __name__ == '__main__':

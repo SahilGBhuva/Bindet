@@ -89,9 +89,13 @@ class TutorTests(unittest.TestCase):
         conversation_id = first[0][1]["conversation"]["id"]
         self.assertEqual(first[0][1]["grounded_in"], ["alex-cells.pdf"])
         _, captured = self.send("alex", content="And respiration?", conversation_id=conversation_id)
+        # Notes travel in a delimited data block in the student's turn, never in the system prompt.
         system = captured["messages"][0]["content"]
-        self.assertIn("Mitochondria make ATP.", system)
-        self.assertNotIn("Sam's private note", system)
+        turn = captured["messages"][-1]["content"]
+        self.assertNotIn("Mitochondria make ATP.", system)
+        self.assertIn("Mitochondria make ATP.", turn.split("<<<NOTES>>>", 1)[1].split("<<<END NOTES>>>", 1)[0])
+        self.assertTrue(turn.endswith("And respiration?"))
+        self.assertNotIn("Sam's private note", system + turn)
         roles = [message["role"] for message in captured["messages"]]
         self.assertEqual(roles, ["system", "user", "assistant", "user"])
         self.assertNotIn("alex", captured["session_id"])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import random
 import re
@@ -8,12 +9,12 @@ import time
 import unicodedata
 import hashlib
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Body, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi import Path as PathParam
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -22,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
 import base64
 import binascii
@@ -31,6 +32,7 @@ import json
 import ai_tutor
 import auth
 import database
+import flashcards
 import questions
 import note_ingestion
 import note_store
@@ -1287,7 +1289,8 @@ def get_note(note_id: str, authorization: Annotated[str | None, Header()] = None
 def delete_note(note_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
     limit_action(user["id"], "note_delete", 120)
-    if not note_store.remove_note(user["id"], note_id):
+    # The note's flashcards and their generation state go with it.
+    if not flashcards.delete_note_and_cards(user["id"], note_id):
         raise HTTPException(status_code=404, detail="Note not found")
     return {"deleted": True}
 
@@ -1517,7 +1520,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if str(error) == "day":
             raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED, headers={"Retry-After": "3600"}) from error
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
-    spend_global_ai_call()
+    # Obvious attempts to extract or override the tutor's instructions get the fixed
+    # refusal without a model call (a cheap filter, not a guarantee).
+    prefiltered = ai_tutor.is_prompt_extraction(content)
+    if not prefiltered:
+        spend_global_ai_call()
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
@@ -1538,12 +1545,50 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         saving.set_result(retry_of)
     else:
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
-    route = capped_tutor_route(owner, content, bool(image_parts))
+    route = ai_tutor.tutor_route(content, bool(image_parts)) if prefiltered else capped_tutor_route(owner, content, bool(image_parts))
+    # The system prompt is fixed; the course, unit and notes travel in a delimited data
+    # block inside the student's turn, never in the system prompt.
+    turn_text = ai_tutor.tutor_user_text(content, course, unit, labels, source_text)
     model_messages = [
-        {"role": "system", "content": ai_tutor.tutor_system_prompt(course, unit, labels, source_text)},
+        {"role": "system", "content": ai_tutor.tutor_system_prompt()},
         *history,
-        {"role": "user", "content": [{"type": "text", "text": content}, *image_parts] if image_parts else content},
+        {"role": "user", "content": [{"type": "text", "text": turn_text}, *image_parts] if image_parts else turn_text},
     ]
+    started = time.perf_counter()
+
+    def reply_chunks():
+        """The model's reply, minus the off-topic sentinel: an off-topic reply becomes the fixed refusal."""
+        if prefiltered:
+            ai_tutor.log_ai_event("explain_material", outcome="prefiltered", student_id=owner, tier=route["tier"], started=started)
+            yield ai_tutor.TUTOR_REFUSAL
+            return
+        guard = ai_tutor.ReplyGuard()
+        upstream = ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor"))
+        try:
+            for chunk in upstream:
+                text = guard.feed(chunk)
+                if guard.off_topic:
+                    break
+                if text:
+                    yield text
+            tail = guard.finish()
+            if tail:
+                yield tail
+        except ai_tutor.AITutorError as error:
+            tail = guard.finish()
+            ai_tutor.log_ai_event("explain_material", outcome="ai_error", student_id=owner, tier=route["tier"], started=started, error=error)
+            if tail:
+                yield tail
+            raise
+        finally:
+            close = getattr(upstream, "close", None)
+            if close:
+                close()  # stops reading the upstream stream (and closes the connection) early
+        if guard.off_topic:
+            ai_tutor.log_ai_event("explain_material", outcome="off_topic", student_id=owner, tier=route["tier"], started=started)
+            yield ai_tutor.TUTOR_REFUSAL
+        else:
+            ai_tutor.log_ai_event("explain_material", outcome="ok", student_id=owner, tier=route["tier"], started=started)
 
     def saved_user() -> bool:
         try:
@@ -1560,7 +1605,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # Inside the try, so a client that leaves at the very first event still
             # releases its stream slot straight away.
             yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
-            for chunk in ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor")):
+            for chunk in reply_chunks():
                 if not user_sent:
                     user_sent = True
                     if not saved_user():
@@ -1900,7 +1945,6 @@ def group_analytics_route(group_id: str, authorization: Annotated[str | None, He
 
 
 QUIZ_UNAVAILABLE = "AI quiz generation is temporarily unavailable. Try again in a moment."
-FLASHCARDS_UNAVAILABLE = "AI flashcard generation is temporarily unavailable. Try again in a moment."
 
 
 def _rate_limited(student_id: str, action: str, limit: int, window_minutes: int) -> None:
@@ -1988,23 +2032,181 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
     )
 
 
+# --- Flashcards ----------------------------------------------------------------------
+#
+# Cards are made once per note, from that note's text only, and stored (flashcards.py).
+# Errors from these routes carry {"code", "message"} so the app can react to each case.
+
+FLASHCARD_NOTES_PER_DAY = 40      # notes a student can generate cards for per day (retries count)
+LEGACY_FLASHCARD_DECKS_PER_DAY = 20
+FLASHCARD_MESSAGES = {
+    "ai_unavailable": "Couldn’t make flashcards right now. Try again in a moment.",
+    "ai_bad_output": "Couldn’t make usable flashcards from this note right now. Try again in a moment.",
+    "generation_in_progress": "Flashcards for this note are already being made.",
+    "no_notes": "Add notes to this unit first — flashcards are made only from your notes.",
+    "ai_daily_limit": AI_PAUSED,
+}
+
+
+def ai_error(status: int, code: str, message: str | None = None, retry_after: int | None = None) -> HTTPException:
+    headers = {"Retry-After": str(retry_after)} if retry_after else None
+    return HTTPException(status_code=status, detail={"code": code, "message": message or FLASHCARD_MESSAGES[code]}, headers=headers)
+
+
+def _wait_phrase(seconds: int) -> str:
+    if seconds < 90:
+        return "in a minute"
+    if seconds < 3600:
+        return f"in about {math.ceil(seconds / 60)} minutes"
+    hours = math.ceil(seconds / 3600)
+    return "in about an hour" if hours == 1 else f"in about {hours} hours"
+
+
+def limit_retry_after(student_id: str, action: str, window_minutes: int) -> int:
+    """Seconds until the oldest counted event of a rolling-window limit expires."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    events = database.social_action_events
+    try:
+        with database.engine().connect() as connection:
+            oldest = connection.execute(select(func.min(events.c.created_at)).where(
+                events.c.student_id == student_id, events.c.action == action, events.c.created_at >= cutoff,
+            )).scalar_one_or_none()
+    except Exception:  # noqa: BLE001 - the limit still holds; only the hint is lost
+        return 3600
+    if oldest is None:
+        return 60
+    oldest = oldest if oldest.tzinfo else oldest.replace(tzinfo=timezone.utc)
+    return max(60, math.ceil((oldest + timedelta(minutes=window_minutes) - datetime.now(timezone.utc)).total_seconds()))
+
+
+def flashcard_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 1440) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        wait = limit_retry_after(student_id, action, window_minutes)
+        raise ai_error(429, "rate_limited", f"You’ve made a lot of flashcards today. Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+
+
+def flashcard_budget() -> None:
+    if not global_ai_available():
+        raise ai_error(503, "ai_daily_limit", retry_after=3600)
+
+
+class NoteFlashcardsRequest(BaseModel):
+    """The generate request carries nothing: the note, its text and every model setting are server-side."""
+    model_config = ConfigDict(extra="forbid")
+
+
+def _note_flashcards_result(note_id: str, status: str, created: bool, cards: list[dict], error: str | None = None) -> dict:
+    result = {"note_id": note_id, "status": status, "created": created, "cards": cards}
+    if error:
+        result["error"] = error
+    return result
+
+
+@app.post("/api/notes/{note_id}/flashcards")
+def make_note_flashcards(
+    note_id: Annotated[str, PathParam(min_length=1, max_length=64)],
+    data: Annotated[NoteFlashcardsRequest | None, Body()] = None,
+    retry: Annotated[bool, Query()] = False,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Make (once) and return the flashcards for one of the student's notes. Idempotent."""
+    owner = auth.authenticated_user(authorization)["id"]
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
+    note, state = gather((note_store.get_note, owner, note_id), (flashcards.job_state, owner, note_id))
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if state["status"] == "ready":
+        return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
+    if state["status"] == "generating":
+        log("locked")
+        raise ai_error(409, "generation_in_progress")
+    if state["status"] == "failed" and not retry:
+        return _note_flashcards_result(note_id, "failed", False, [], state["error"])
+    text = ai_tutor.flashcard_source_text(note["text"])
+    if ai_tutor.note_too_short(text):
+        flashcards.mark_too_short(owner, note_id)
+        log("too_short")
+        return _note_flashcards_result(note_id, "too_short", False, [])
+    try:
+        flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
+    except HTTPException:
+        log("rate_limited")
+        raise
+    flashcard_budget()
+    outcome, attempt = flashcards.claim(owner, note_id, retry=retry)
+    if outcome == "ready":
+        return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
+    if outcome == "generating":
+        log("locked")
+        raise ai_error(409, "generation_in_progress")
+    if outcome == "failed":
+        return _note_flashcards_result(note_id, "failed", False, [], flashcards.job_state(owner, note_id)["error"])
+    ai_tutor.warm_connection()
+    try:
+        batch = ai_tutor.generate_note_flashcards(
+            course=note["course"], unit=note["unit"], file_name=note["file_name"], note_text=text,
+            session_id=ai_session_id(owner, note_id, "flashcards"),
+        )
+    except ai_tutor.AIBadOutput as exc:
+        flashcards.fail(owner, note_id, attempt, "ai_bad_output")
+        log("bad_output", error=exc)
+        raise ai_error(503, "ai_bad_output", retry_after=30) from exc
+    except ai_tutor.AITutorError as exc:
+        flashcards.fail(owner, note_id, attempt, "ai_unavailable")
+        log("ai_error", error=exc)
+        raise ai_error(503, "ai_unavailable", retry_after=30) from exc
+    except BaseException as exc:
+        flashcards.fail(owner, note_id, attempt, "ai_unavailable")
+        log("ai_error", error=exc)
+        raise
+    stored = flashcards.complete(owner, note_id, note["course"], note["unit"], batch.cards)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
+    return _note_flashcards_result(note_id, "ready", True, stored)
+
+
+@app.get("/api/flashcards")
+def list_flashcards(
+    course: Annotated[str, Query(min_length=1, max_length=120)],
+    unit: Annotated[str, Query(min_length=1, max_length=160)],
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """The student's stored cards for a unit and each note's flashcard state. Never calls the AI."""
+    owner = auth.authenticated_user(authorization)["id"]
+    stored, states = flashcards.list_for_unit(owner, course.strip(), unit.strip())
+    return {"cards": stored, "notes": states}
+
+
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)
 def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | None, Header()] = None):
+    """Legacy unit-wide deck. Grounded only, and served from stored cards when the unit has them."""
     student_id = auth.authenticated_user(authorization)["id"]
     course = data.course.strip()
     unit = data.unit.strip()
     if not course and not unit:
         raise HTTPException(status_code=400, detail="Choose a course or unit before generating flashcards")
-    ai_tutor.warm_connection()
-
+    started = time.perf_counter()
     target_topic = unit or course
-    _, (_, personalization), (source_labels, source_text) = gather(
-        (_rate_limited, student_id, "ai_flashcards", 20, 1440),
+    (_, personalization), (source_labels, source_text) = gather(
         (quiz_personalization, student_id, 2, target_topic),
         # The model only ever sees the first 12,000 characters, so read no more than that.
         (note_store.context_for, student_id, course, unit, 12_000),
     )
-    spend_global_ai_call()
+    personalized = bool(personalization.get("overall_attempts", 0))
+    if not source_text.strip():
+        raise ai_error(400, "no_notes")
+    if course and unit:
+        stored, _ = flashcards.list_for_unit(student_id, course, unit)
+        if stored:
+            return FlashcardResponse(course=course, unit=unit, personalized=personalized,
+                                     cards=[Flashcard(front=card["front"], back=card["back"], topic=card["topic"]) for card in stored[:data.count]])
+    flashcard_rate_limit(student_id, "ai_flashcards", LEGACY_FLASHCARD_DECKS_PER_DAY)
+    flashcard_budget()
+    ai_tutor.warm_connection()
     try:
         cards = ai_tutor.generate_flashcards(
             course=course,
@@ -2015,10 +2217,13 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             source_text=source_text,
             session_id=ai_session_id(student_id, course, unit, "flashcards"),
         )
+    except ai_tutor.AIBadOutput as exc:
+        ai_tutor.log_ai_event("generate_flashcards", outcome="bad_output", student_id=student_id, tier="text", started=started, error=exc)
+        raise ai_error(503, "ai_bad_output", retry_after=30) from exc
     except ai_tutor.AITutorError as exc:
-        raise HTTPException(status_code=503, detail=FLASHCARDS_UNAVAILABLE) from exc
-
-    personalized = bool(personalization.get("overall_attempts", 0))
+        ai_tutor.log_ai_event("generate_flashcards", outcome="ai_error", student_id=student_id, tier="text", started=started, error=exc)
+        raise ai_error(503, "ai_unavailable", retry_after=30) from exc
+    ai_tutor.log_ai_event("generate_flashcards", outcome="ok", student_id=student_id, tier="text", started=started, cards_kept=len(cards))
     return FlashcardResponse(
         course=course,
         unit=unit,
