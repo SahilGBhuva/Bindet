@@ -136,8 +136,16 @@
   .app-shell,
   .app-shell.is-rail-collapsed { grid-template-columns: 1fr; min-width: 0; }
   .app-bar { display: none; }
-  .app-shell > .sheet { min-width: 0; min-height: calc(100vh - 52px); padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
-  .app-toast { right: 16px; bottom: calc(76px + env(safe-area-inset-bottom)); left: 16px; max-width: none; }
+  /* Landscape phones: keep content clear of the notch on either side. */
+  .app-shell { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .app-shell > .sheet { min-width: 0; min-height: calc(100vh - 52px); min-height: calc(100dvh - var(--phone-topbar)); padding-bottom: var(--phone-tabbar); }
+  .app-toast {
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(var(--phone-tabbar) + 12px + var(--keyboard-inset));
+    left: calc(16px + env(safe-area-inset-left));
+    max-width: none;
+  }
+  .app-toast button { display: grid; flex: none; place-items: center; width: 44px; height: 44px; margin: -10px -6px -10px auto; }
   .app-skeleton__body,
   .app-skeleton.is-sketch .app-skeleton__body { grid-template-columns: 1fr; }
 }

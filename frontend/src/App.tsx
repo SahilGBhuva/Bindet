@@ -82,6 +82,50 @@ function readRailChoice(): boolean | null {
   }
 }
 
+const TYPING_FIELD = 'textarea, select, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="file"]):not([type="color"])'
+
+/*
+ * Phones: while a text field has focus the on-screen keyboard is (or is about to be) open.
+ * html.is-typing hides the bottom tab bar so the field sits right above the keys, and
+ * --keyboard-inset is the height the keyboard still covers when the browser does not
+ * shrink the page for it (iOS Safari), so fixed message boxes can lift above it.
+ */
+function useKeyboardAwareness() {
+  useEffect(() => {
+    const phone = window.matchMedia('(max-width: 860px)')
+    const root = document.documentElement
+    const viewport = window.visualViewport
+    const measure = () => {
+      if (!viewport || !root.classList.contains('is-typing')) {
+        root.style.removeProperty('--keyboard-inset')
+        return
+      }
+      const covered = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
+      root.style.setProperty('--keyboard-inset', `${covered}px`)
+    }
+    const sync = () => {
+      const active = document.activeElement
+      const typing = phone.matches && active instanceof HTMLElement && active.matches(TYPING_FIELD) && !active.matches(':disabled, [readonly]')
+      root.classList.toggle('is-typing', typing)
+      measure()
+    }
+    // focusout fires before the next field gains focus, so wait a frame before deciding.
+    const onFocusOut = () => window.requestAnimationFrame(sync)
+    document.addEventListener('focusin', sync)
+    document.addEventListener('focusout', onFocusOut)
+    viewport?.addEventListener('resize', measure)
+    phone.addEventListener('change', sync)
+    return () => {
+      document.removeEventListener('focusin', sync)
+      document.removeEventListener('focusout', onFocusOut)
+      viewport?.removeEventListener('resize', measure)
+      phone.removeEventListener('change', sync)
+      root.classList.remove('is-typing')
+      root.style.removeProperty('--keyboard-inset')
+    }
+  }, [])
+}
+
 function AppShell() {
   const [screen, setScreen] = useState(currentScreen)
   // The nav highlight follows the click at once; the page itself swaps in a transition.
@@ -124,6 +168,8 @@ function AppShell() {
     window.addEventListener('keydown', toggle)
     return () => window.removeEventListener('keydown', toggle)
   }, [])
+
+  useKeyboardAwareness()
 
   useEffect(() => {
     const studentId = session?.user.id ?? getStudentId()

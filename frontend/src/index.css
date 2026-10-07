@@ -219,6 +219,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--color-bg);
   color: var(--color-text);
 }
@@ -228,7 +229,7 @@ button, input, select, textarea {
   color: inherit;
 }
 img, svg, video, canvas { max-width: 100%; }
-#root { min-height: 100vh; }
+#root { min-height: 100vh; min-height: 100dvh; }
 
 /* One focus treatment everywhere: visible on keyboard, invisible on click. */
 :focus-visible {
@@ -244,6 +245,26 @@ img, svg, video, canvas { max-width: 100%; }
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/*
+ * Phones. The bars around the page are measured once here so every full-height screen
+ * (Messages, Tutor) and every fixed bar subtracts the same amounts: the top bar under the
+ * notch, the bottom tab bar over the home indicator. While the on-screen keyboard is open
+ * (html.is-typing, set by the app shell) the tab bar steps aside and --keyboard-inset holds
+ * the part of the layout the keyboard still covers (iOS, which does not resize the page).
+ * Text is never smaller than 12px on a phone.
+ */
+@media (max-width: 860px) {
+  :root {
+    --text-2xs: 12px;
+    --phone-topbar: calc(52px + env(safe-area-inset-top));
+    --phone-tabbar: calc(64px + env(safe-area-inset-bottom));
+    --keyboard-inset: 0px;
+  }
+  :root.is-typing { --phone-tabbar: 0px; }
+  /* Tapping a control should not flash a grey box; :active states give the feedback. */
+  a, button, [role="button"], summary, label { -webkit-tap-highlight-color: transparent; }
 }
 
 .skip-link {

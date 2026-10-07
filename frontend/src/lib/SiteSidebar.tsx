@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Profile, StudyGroup, Task } from './api'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -7,6 +7,7 @@ import type { Screen } from './screens'
 import { withCourseTones } from './session'
 import { loadThemePreference, saveThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
+import { useDrawer } from './useDrawer'
 import './SiteSidebar.css'
 
 type NavItem = { id: Screen; label: string; short?: string }
@@ -277,18 +278,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [data, session, onUnreadChange])
 
-  // The phone menu takes focus when it opens and hands it back to the Menu button when it closes.
-  useEffect(() => {
-    if (!menuOpen) return
-    menuPanel.current?.querySelector<HTMLElement>('a, button')?.focus()
-    const close = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setMenuOpen(false)
-      menuButton.current?.focus({ preventScroll: true })
-    }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
-  }, [menuOpen])
+  // The phone menu takes focus when it opens, keeps the page behind it still, closes on Esc
+  // and hands focus back to the Menu button when it closes.
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
+  useDrawer({ open: menuOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
 
   const displayName = profile?.display_name || session?.user.user_metadata?.username || 'Your account'
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'B'
