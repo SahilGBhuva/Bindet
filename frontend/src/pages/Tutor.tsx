@@ -7,6 +7,7 @@ import {
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
+import { MathExpression, MathText } from '../components/math/Math'
 import './Tutor.css'
 
 /*
@@ -31,16 +32,38 @@ function toLocal(message: TutorMessage): LocalMessage {
   return { ...message, key: `m-${message.id}` }
 }
 
-/* A small, safe renderer for the tutor's plain-text formatting: paragraphs, lists, code, bold and italics. */
-function inline(text: string, keyPrefix: string): ReactNode[] {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g)
+/* A small, safe renderer for the tutor's plain-text formatting: paragraphs, lists, code, bold, italics and math. */
+function emphasis(text: string, keyPrefix: string): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g)
   return parts.map((part, index) => {
     const key = `${keyPrefix}-${index}`
-    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={key}>{part.slice(1, -1)}</code>
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) return <strong key={key}>{part.slice(2, -2)}</strong>
     if (part.startsWith('*') && part.endsWith('*') && part.length > 2) return <em key={key}>{part.slice(1, -1)}</em>
     return <Fragment key={key}>{part}</Fragment>
   })
+}
+
+/* Code spans first (math is never read inside them), then math, then bold and italics. */
+function inline(text: string, keyPrefix: string): ReactNode[] {
+  const parts = text.split(/(`[^`]+`)/g)
+  return parts.map((part, index) => {
+    const key = `${keyPrefix}-${index}`
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={key}>{part.slice(1, -1)}</code>
+    return <MathText key={key} text={part} renderText={(plain, textKey) => emphasis(plain, `${key}-${textKey}`)} />
+  })
+}
+
+/* A display equation on lines of its own: $$ … $$ or \[ … \]. Returns its end line, or -1. */
+function displayMathEnd(lines: string[], start: number): number {
+  const open = lines[start].trim()
+  const close = open.startsWith('$$') ? '$$' : open.startsWith('\\[') ? '\\]' : ''
+  if (!close) return -1
+  const rest = open.slice(2)
+  if (rest.includes(close)) return rest.trim().endsWith(close) ? start : -1
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].trim().endsWith(close)) return index
+  }
+  return -1
 }
 
 /* Memoised: while a reply streams, only the message that is growing is parsed again. */
@@ -58,6 +81,16 @@ const Rich = memo(function Rich({ text }: { text: string }) {
       blocks.push(<pre key={`b${blocks.length}`}><code>{code.join('\n')}</code></pre>)
       continue
     }
+    const mathEnd = displayMathEnd(lines, index)
+    if (mathEnd >= 0) {
+      const source = lines.slice(index, mathEnd + 1).join('\n').trim()
+      const tex = source.slice(2, -2).trim()
+      blocks.push(tex
+        ? <MathExpression key={`b${blocks.length}`} tex={tex} display source={source} />
+        : <p key={`b${blocks.length}`}>{source}</p>)
+      index = mathEnd + 1
+      continue
+    }
     if (/^\s*([-*•]|\d+[.)])\s+/.test(line)) {
       const ordered = /^\s*\d+[.)]/.test(line)
       const items: string[] = []
@@ -73,7 +106,7 @@ const Rich = memo(function Rich({ text }: { text: string }) {
     }
     if (!line.trim()) { index += 1; continue }
     const paragraph: string[] = []
-    while (index < lines.length && lines[index].trim() && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[index]) && !lines[index].trim().startsWith('```') && !/^#{1,4}\s/.test(lines[index])) { paragraph.push(lines[index]); index += 1 }
+    while (index < lines.length && lines[index].trim() && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[index]) && !lines[index].trim().startsWith('```') && !/^#{1,4}\s/.test(lines[index]) && (!paragraph.length || displayMathEnd(lines, index) < 0)) { paragraph.push(lines[index]); index += 1 }
     blocks.push(<p key={`b${blocks.length}`}>{paragraph.map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? <br /> : null}{inline(part, `p${blocks.length}-${partIndex}`)}</Fragment>)}</p>)
   }
   return <>{blocks}</>

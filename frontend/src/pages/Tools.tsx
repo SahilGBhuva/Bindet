@@ -13,6 +13,7 @@ import {
 } from '../lib/session'
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
+import { MathText } from '../components/math/Math'
 import { FOCUS_SIZES, INSTRUCTIONS_MAX, instructionsKey, loadFocusSize, loadInstructions, saveFocusSize, saveInstructions } from '../lib/studyPrefs'
 import type { InstructionKind } from '../lib/studyPrefs'
 import './Tools.css'
@@ -1690,7 +1691,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       >
                         <span className="tools__card-face" key={`${card.id}-${cardFlipped ? 'back' : 'front'}`} aria-live="polite">
                           <span className="tools__card-label">{cardFlipped ? 'Answer' : 'Question'}</span>
-                          <span className="tools__card-text">{cardFlipped ? card.back : card.front}</span>
+                          <span className="tools__card-text"><MathText text={cardFlipped ? card.back : card.front} /></span>
                         </span>
                         <span className="tools__card-hint" aria-hidden="true">
                           <FlipIcon />
@@ -1805,7 +1806,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                     ) : quizQuestion ? (
                       <>
                         <span className="ui-eyebrow">Question · Level {quizQuestion.difficulty || quizDifficulty}</span>
-                        <p className="tools__prompt">{quizQuestion.question}</p>
+                        <p className="tools__prompt"><MathText text={quizQuestion.question} /></p>
                         {quizQuestion.choices?.length ? (
                           <div className="tools__choices" role="group" aria-label="Answer choices">
                             {quizQuestion.choices.map((choice, index) => {
@@ -1826,7 +1827,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                                   <span className="tools__choice-key" aria-hidden="true">
                                     {verdict === 'correct' ? <CheckIcon /> : verdict === 'incorrect' ? <CrossIcon /> : String.fromCharCode(65 + index)}
                                   </span>
-                                  <span className="tools__choice-text">{choice}</span>
+                                  <span className="tools__choice-text"><MathText text={choice} /></span>
                                   {picked && quizChecking ? <span className="tools__choice-state"><span className="ui-spinner" />Checking…</span> : null}
                                   {verdict ? <span className="tools__choice-state">{verdict === 'correct' ? 'Correct' : 'Incorrect'}</span> : null}
                                 </button>
@@ -1870,8 +1871,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         {quizResult.correct ? 'Correct' : 'Not quite'}
                         {quizResult.xp_earned ? <span className="ui-badge ui-badge--accent">+{quizResult.xp_earned} XP</span> : null}
                       </p>
-                      <p className="tools__result-body">{quizResult.explanation}</p>
-                      {quizResult.hint ? <p className="tools__result-body"><strong>Hint:</strong> {quizResult.hint}</p> : null}
+                      <p className="tools__result-body"><MathText text={quizResult.explanation} /></p>
+                      {quizResult.hint ? <p className="tools__result-body"><strong>Hint:</strong> <MathText text={quizResult.hint} /></p> : null}
                       <div className="tools__result-foot">
                         <p className="tools__result-meta">
                           {quizResult.total_xp.toLocaleString()} XP total · answer streak {quizResult.streak}

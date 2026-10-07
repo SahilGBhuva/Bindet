@@ -1,0 +1,22 @@
+/* KaTeX output inherits the surrounding ink, so it reads in both themes and in Focus mode. */
+.math .katex { font-size: 1.08em; color: inherit; }
+
+/* Long display equations scroll inside their own box instead of widening the page. */
+.math--display {
+  display: block;
+  max-width: 100%;
+  margin: .5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.math--display .katex-display { margin: 0; }
+
+.math--source {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: .9em;
+  padding: 0 .25em;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface-sunken);
+}

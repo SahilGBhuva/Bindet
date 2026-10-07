@@ -792,7 +792,12 @@ def deterministic_verdict(student_answer: str, correct_answer: str, topic: str =
     Correct answers are recognised for every question. An answer is only judged
     wrong here when that is certain and an AI explanation would add nothing: a
     blank answer, or a wrong number on a generated arithmetic exercise.
+
+    LaTeX on either side is read as plain text first, so "$\\frac{1}{2}$", "\\frac12"
+    and "1/2" are the same answer.
     """
+    student_answer = ai_tutor.latex_to_plain(student_answer)
+    correct_answer = ai_tutor.latex_to_plain(correct_answer)
     if not canonical_answer(student_answer):
         return False
     if answers_match(student_answer, correct_answer):
