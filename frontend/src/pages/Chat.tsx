@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { getCachedStudyGroups, getStudyGroups, type StudyGroup } from '../lib/api'
+import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import {
   deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, isSafeAttachmentPath, listChatUnreads, listGroupMessages,
@@ -214,9 +215,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const groupList = useMemo(() => groups ?? [], [groups])
   const activeGroup = groupList.find((group) => group.id === preferredId) ?? groupList[0] ?? null
   const activeId = activeGroup?.id ?? ''
-  const metadataName = session?.user.user_metadata?.username
   const ownName = activeGroup?.members.find((member) => member.student_id === userId)?.display_name
-    || (typeof metadataName === 'string' ? metadataName : '')
+    || accountDisplayName(session?.user)
     || 'You'
 
   // Callbacks from sockets and timers read the latest values through these refs.

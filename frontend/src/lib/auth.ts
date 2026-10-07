@@ -11,7 +11,7 @@ export type AuthSession = {
   user: AuthUser
 }
 
-type AuthConfig = { supabase_url: string; supabase_anon_key: string }
+type AuthConfig = { supabase_url: string; supabase_anon_key: string; google_enabled?: boolean }
 type AuthResponse = Partial<AuthSession> & { expires_in?: number; user?: AuthUser }
 
 export const AUTH_SESSION_KEY = 'bindit-auth-session'
@@ -25,7 +25,9 @@ const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
 // that reflects account data (important items, task tabs/notices) is cleared.
 const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2'])
 // Device-level flags that aren't account data and must outlive a sign-out.
-const DEVICE_KEYS = new Set<string>(['bindit-reset-requested'])
+// A Google sign-in started here is pending until the browser comes back from Google.
+const OAUTH_FLOW_KEY = 'bindit-oauth-flow'
+const DEVICE_KEYS = new Set<string>(['bindit-reset-requested', OAUTH_FLOW_KEY])
 export const ACCOUNT_DATA_CLEARED_EVENT = 'bindit:account-data-cleared'
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 let configPromise: Promise<AuthConfig> | null = null
@@ -362,6 +364,8 @@ export type AuthRedirect =
   | { kind: 'none' }
   | { kind: 'error'; message: string }
   | { kind: 'tokens'; accessToken: string; refreshToken: string; expiresIn: number; type: string }
+  // A Google sign-in coming back with its one-time code, and this browser's own verifier for it.
+  | { kind: 'oauth'; code: string; codeVerifier: string }
 
 let authRedirect: AuthRedirect | null = null
 
@@ -394,12 +398,18 @@ function redirectErrorMessage(errorCode: string | null, errorName: string | null
 }
 
 /**
- * Reads what the auth server put in the URL fragment after an email link
- * (sign-up confirmation, password recovery) and removes it from the address
- * bar. Read once per page load; the tokens are not trusted until verified.
+ * Reads what the auth server put in the URL after an email link (fragment
+ * tokens: sign-up confirmation, password recovery) or a Google sign-in (query
+ * `code`, or an OAuth error), and removes it from the address bar. Read once
+ * per page load; nothing in it is trusted until checked with the auth server.
  */
 export function takeAuthRedirect(): AuthRedirect {
   if (authRedirect) return authRedirect
+  const oauth = takeOAuthRedirect()
+  if (oauth) {
+    authRedirect = oauth
+    return authRedirect
+  }
   const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
   const accessToken = params.get('access_token')
   const refreshToken = params.get('refresh_token')
@@ -433,6 +443,199 @@ export async function verifyRedirectTokens(redirect: Extract<AuthRedirect, { kin
     refresh_token: redirect.refreshToken,
     expires_at: Number.isFinite(redirect.expiresIn) && redirect.expiresIn > 0 ? Math.floor(Date.now() / 1000) + redirect.expiresIn : undefined,
     user,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Continue with Google (OAuth 2.0 authorization code flow with PKCE, RFC 7636)
+//
+// Only the browser that started the sign-in holds the code verifier, so a code
+// someone else obtained (or tricked this browser into opening) can't be turned
+// into a session here: the auth server refuses a verifier that doesn't match
+// the challenge the code was issued for. That is what stops login CSRF.
+// ---------------------------------------------------------------------------
+
+/** How long a started Google sign-in may take before its verifier is refused. */
+const OAUTH_FLOW_TTL_MS = 10 * 60 * 1000
+const OAUTH_NOT_STARTED_HERE = 'That sign-in link didn’t start in this browser. Try again.'
+const OAUTH_EXPIRED = 'That Google sign-in took too long. Try again.'
+const OAUTH_FAILED = 'Google sign-in didn’t finish. Try again.'
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  access_denied: 'Google sign-in was cancelled.',
+  user_cancelled: 'Google sign-in was cancelled.',
+  provider_disabled: 'Google sign-in isn’t available right now. Use your email instead.',
+  validation_failed: 'Google sign-in isn’t available right now. Use your email instead.',
+  bad_oauth_state: OAUTH_EXPIRED,
+  bad_oauth_callback: OAUTH_FAILED,
+  flow_state_expired: OAUTH_EXPIRED,
+  flow_state_not_found: OAUTH_EXPIRED,
+  bad_code_verifier: OAUTH_NOT_STARTED_HERE,
+  provider_email_needs_verification: 'Verify your email with Google first, then try again.',
+  email_address_invalid: 'Google didn’t share a usable email address. Use your email instead.',
+  signup_disabled: 'New accounts can’t be created right now.',
+  user_banned: 'This account can’t sign in right now.',
+  over_request_rate_limit: 'Too many attempts. Wait a few minutes and try again.',
+  temporarily_unavailable: 'Accounts are briefly unavailable. Try again in a few minutes.',
+  server_error: OAUTH_FAILED,
+  unexpected_failure: OAUTH_FAILED,
+}
+
+type OAuthFlow = { id: string; verifier: string; createdAt: number }
+
+function base64Url(bytes: Uint8Array) {
+  let binary = ''
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte)
+  })
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function randomBase64Url(byteLength: number) {
+  return base64Url(crypto.getRandomValues(new Uint8Array(byteLength)))
+}
+
+function readOAuthFlow(storage: Storage): OAuthFlow | null {
+  try {
+    const raw = storage.getItem(OAUTH_FLOW_KEY)
+    if (!raw) return null
+    const flow = JSON.parse(raw) as Partial<OAuthFlow>
+    if (typeof flow.id !== 'string' || typeof flow.verifier !== 'string' || typeof flow.createdAt !== 'number') return null
+    if (!/^[A-Za-z0-9_-]{43,128}$/.test(flow.verifier)) return null
+    return flow as OAuthFlow
+  } catch {
+    return null
+  }
+}
+
+function forgetOAuthFlow() {
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      storage.removeItem(OAUTH_FLOW_KEY)
+    } catch {
+      // Storage unavailable: nothing was kept there.
+    }
+  }
+}
+
+/**
+ * The verifier this browser saved when it started a Google sign-in, removed so
+ * it can be used only once. The tab's own copy wins; the localStorage copy
+ * covers browsers that drop sessionStorage across the round trip to Google.
+ */
+function takeOAuthFlow(): { flow: OAuthFlow | null; expired: boolean } {
+  let flow: OAuthFlow | null = null
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      flow ??= readOAuthFlow(storage)
+    } catch {
+      // Storage unavailable.
+    }
+  }
+  forgetOAuthFlow()
+  if (!flow) return { flow: null, expired: false }
+  const age = Date.now() - flow.createdAt
+  if (age < 0 || age > OAUTH_FLOW_TTL_MS) return { flow: null, expired: true }
+  return { flow, expired: false }
+}
+
+const OAUTH_QUERY_KEYS = ['code', 'error', 'error_code', 'error_description', 'state']
+
+/** Handles a return from Google (query `code` or OAuth error); null when the URL isn't one. */
+function takeOAuthRedirect(): AuthRedirect | null {
+  const query = new URLSearchParams(window.location.search)
+  const code = query.get('code')
+  const errorName = query.get('error')
+  const errorCode = query.get('error_code')
+  // A bare ?error= with nothing else is someone else's URL; ours always comes with a code or details.
+  const isOAuthError = Boolean(errorName && (errorCode || query.has('error_description') || hasPendingOAuthFlow()))
+  if (!code && !isOAuthError) return null
+  // Take the code (and any error text) out of the address bar and history before anything else.
+  OAUTH_QUERY_KEYS.forEach((key) => query.delete(key))
+  const search = query.toString()
+  window.history.replaceState(window.history.state, document.title, `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`)
+  const { flow, expired } = takeOAuthFlow()
+  if (isOAuthError) {
+    // Anyone can craft this URL, so its free-text error_description is never shown.
+    const message = (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) || (errorName && OAUTH_ERROR_MESSAGES[errorName]) || OAUTH_FAILED
+    return { kind: 'error', message }
+  }
+  // Never exchange a code without this browser's own verifier.
+  if (!flow) return { kind: 'error', message: expired ? OAUTH_EXPIRED : OAUTH_NOT_STARTED_HERE }
+  if (!code || code.length > 512) return { kind: 'error', message: OAUTH_FAILED }
+  return { kind: 'oauth', code, codeVerifier: flow.verifier }
+}
+
+function hasPendingOAuthFlow() {
+  try {
+    return Boolean(readOAuthFlow(sessionStorage) ?? readOAuthFlow(localStorage))
+  } catch {
+    return false
+  }
+}
+
+/** True when the server has Google sign-in turned on (AUTH_GOOGLE_ENABLED). */
+export async function googleSignInEnabled() {
+  try {
+    return (await config()).google_enabled === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Starts "Continue with Google": saves a fresh PKCE verifier in this browser and
+ * sends the page to the auth server, which hands over to Google and comes back
+ * to appReturnUrl() with `?code=`. Resolves only if navigation didn't happen.
+ */
+export async function startGoogleSignIn() {
+  const settings = await config()
+  if (settings.google_enabled !== true) throw new Error('Google sign-in isn’t available right now. Use your email instead.')
+  if (!globalThis.crypto?.subtle) throw new Error('This browser can’t sign in with Google here. Use your email instead.')
+  // 64 random bytes -> an 86-character verifier (RFC 7636 allows 43-128).
+  const verifier = randomBase64Url(64)
+  const challenge = base64Url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))))
+  const flow: OAuthFlow = { id: randomBase64Url(16), verifier, createdAt: Date.now() }
+  let saved = false
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      storage.setItem(OAUTH_FLOW_KEY, JSON.stringify(flow))
+      saved = true
+    } catch {
+      // Try the other storage.
+    }
+  }
+  if (!saved) throw new Error('Google sign-in needs site storage turned on. Use your email instead.')
+  const authorizeUrl = new URL(`${settings.supabase_url}/auth/v1/authorize`)
+  authorizeUrl.searchParams.set('provider', 'google')
+  // Always our own address, never one taken from the URL: no open redirect.
+  authorizeUrl.searchParams.set('redirect_to', appReturnUrl())
+  authorizeUrl.searchParams.set('code_challenge', challenge)
+  authorizeUrl.searchParams.set('code_challenge_method', 's256')
+  window.location.assign(authorizeUrl.toString())
+}
+
+/**
+ * Trades the code from a Google sign-in for a session, using this browser's
+ * verifier, then confirms the account with the auth server. The session is not
+ * saved here; the caller decides (it may belong to a different account).
+ */
+export async function exchangeOAuthCode(redirect: Extract<AuthRedirect, { kind: 'oauth' }>): Promise<AuthSession> {
+  let data: AuthResponse
+  try {
+    data = await authRequest('token?grant_type=pkce', { auth_code: redirect.code, code_verifier: redirect.codeVerifier })
+  } catch (error) {
+    // Fixed text only: the server's message is not shown.
+    if (error instanceof AuthRequestError && error.status >= 400 && error.status < 500) throw new Error(OAUTH_EXPIRED)
+    throw new Error(OAUTH_FAILED)
+  }
+  const session = asSession(data)
+  if (!session) throw new Error(OAUTH_FAILED)
+  try {
+    const user = await fetchAuthUser(session.access_token)
+    return { ...session, user }
+  } catch {
+    discardSession(session)
+    throw new Error(OAUTH_FAILED)
   }
 }
 

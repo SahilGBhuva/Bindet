@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { parseServerTime, type FriendsHub, type Profile, type StudyGroup, type Task } from '../lib/api'
+import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
@@ -296,7 +297,7 @@ export function Home({ session }: { session: AuthSession | null }) {
   }, [])
 
   const courses = notebook.courses
-  const firstName = firstWord(profile?.display_name || session?.user.user_metadata?.username || '')
+  const firstName = firstWord(profile?.display_name || accountDisplayName(session?.user))
   const openTasks = (tasks ?? []).filter((task) => task.status !== 'done').toSorted(byDue)
   const dated = openTasks.filter((task) => dueAt(task) !== Infinity)
 

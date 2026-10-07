@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, t
 import {
   AUTH_SESSION_KEY,
   discardSession,
+  exchangeOAuthCode,
+  googleSignInEnabled,
   loadAuthSession,
   msUntilRefresh,
   refreshAuthSession,
@@ -13,6 +15,7 @@ import {
   signIn,
   signOutAndReload,
   signUp,
+  startGoogleSignIn,
   takeAuthRedirect,
   takeResetRequested,
   updatePassword,
@@ -31,7 +34,8 @@ type LinkGate =
   | { kind: 'continue'; session: AuthSession }
   // confirmed is false when this browser did not ask for the reset link.
   | { kind: 'recovery'; session: AuthSession; confirmed: boolean }
-  | { kind: 'other-account'; linkedEmail: string }
+  // via says whether the other account came from an email link or a Google sign-in.
+  | { kind: 'other-account'; linkedEmail: string; via: 'link' | 'google' }
 const MAX_REFRESH_RETRY_MS = 60_000
 const RESEND_SECS = 60
 
@@ -40,6 +44,18 @@ const RESEND_SECS = 60
 const loadLanding = () => import('./Landing').then((module) => ({ default: module.Landing }))
 const landingRequest = typeof window !== 'undefined' && !loadAuthSession() ? loadLanding() : null
 const Landing = lazy(() => landingRequest ?? loadLanding())
+
+/* Google's own "G" mark in its brand colors, as its sign-in guidelines require. */
+function GoogleMark() {
+  return (
+    <svg className="auth-google__mark" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true" focusable="false">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+  )
+}
 
 /* The quiet editorial panel beside the form: loose notes drawn together on one spine. */
 function AuthAside({ mode }: { mode: 'login' | 'signup' | 'confirm' }) {
@@ -78,7 +94,7 @@ function AuthBrand() {
 export function AuthGate({ children }: { children: ReactNode }) {
   const [redirect] = useState(takeAuthRedirect)
   const [session, setSession] = useState<AuthSession | null>(loadAuthSession)
-  const [loading, setLoading] = useState(() => Boolean(session) || redirect.kind === 'tokens')
+  const [loading, setLoading] = useState(() => Boolean(session) || redirect.kind === 'tokens' || redirect.kind === 'oauth')
   const [linkGate, setLinkGate] = useState<LinkGate | null>(null)
   const [view, setView] = useState<GateView>(redirect.kind === 'error' ? 'auth' : 'landing')
   const [mode, setMode] = useState<Mode>('login')
@@ -95,6 +111,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [resendIn, setResendIn] = useState(0)
   // Why sign-up opened, when it came from a locked action in the landing page demo.
   const [signupReason, setSignupReason] = useState('')
+  // Google sign-in shows only once the server says the provider is configured.
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+  const [googleBusy, setGoogleBusy] = useState(false)
 
   useEffect(() => {
     localStorage.removeItem('bindit-guest-mode')
@@ -113,6 +132,28 @@ export function AuthGate({ children }: { children: ReactNode }) {
     sessionRef.current = session
   }, [session])
 
+  const signedOut = !session
+  useEffect(() => {
+    if (!signedOut) return
+    let live = true
+    void googleSignInEnabled().then((enabled) => {
+      if (live) setGoogleEnabled(enabled)
+    })
+    return () => {
+      live = false
+    }
+  }, [signedOut])
+
+  // Coming back from Google with the Back button restores this page from the
+  // back/forward cache with the button still busy; let it be pressed again.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setGoogleBusy(false)
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [])
+
   // On load: refresh a stored session if it is due, then check any sign-in link
   // from the URL fragment with the auth server before it can be used.
   useEffect(() => {
@@ -121,7 +162,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       const stored = sessionRef.current
       // A rejected refresh has already cleared the session. Reload to the signed-out
       // page, unless an email link is waiting to be checked (reloading would lose it).
-      const current = stored ? await refreshAuthSession(stored, { reloadOnReject: redirect.kind !== 'tokens' }) : null
+      const current = stored ? await refreshAuthSession(stored, { reloadOnReject: redirect.kind !== 'tokens' && redirect.kind !== 'oauth' }) : null
       let gate: LinkGate | null = null
       let next = current
       let linkError = ''
@@ -131,7 +172,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           if (current && current.user.id !== linked.user.id) {
             // Never silently swap accounts: keep the signed-in one.
             discardSession(linked)
-            gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account' }
+            gate = { kind: 'other-account', linkedEmail: linked.user.email ?? 'another account', via: 'link' }
           } else if (redirect.type === 'recovery') {
             gate = { kind: 'recovery', session: linked, confirmed: takeResetRequested() }
           } else if (current) {
@@ -142,6 +183,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
           }
         } catch {
           linkError = 'That link is invalid or has expired. Request a new one and try again.'
+        }
+      } else if (redirect.kind === 'oauth') {
+        // The code was exchanged with this browser's own PKCE verifier, so this
+        // browser started the sign-in: no extra confirmation is needed.
+        try {
+          const signedIn = await exchangeOAuthCode(redirect)
+          if (current && current.user.id !== signedIn.user.id) {
+            // Never silently swap accounts: keep the signed-in one.
+            discardSession(signedIn)
+            gate = { kind: 'other-account', linkedEmail: signedIn.user.email ?? 'another account', via: 'google' }
+          } else {
+            // saveAuthSession wipes another account's local data before storing this one.
+            saveAuthSession(signedIn)
+            next = signedIn
+          }
+        } catch (err) {
+          linkError = err instanceof Error ? err.message : 'Google sign-in didn’t finish. Try again.'
         }
       }
       if (cancelled) return
@@ -287,10 +345,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <AuthBrand />
           <p className="auth-eyebrow">Different account</p>
           <h1 className="auth-title" id="auth-title">You’re already signed in</h1>
-          <p className="auth-lead">
-            That link was for {linkGate.linkedEmail}, but this browser is signed in as {session?.user.email ?? 'another account'}. We kept you signed in.
-            To use {linkGate.linkedEmail}, sign out first and request a new link.
-          </p>
+          {linkGate.via === 'google' ? (
+            <p className="auth-lead">
+              You chose {linkGate.linkedEmail} with Google, but this browser is signed in as {session?.user.email ?? 'another account'}. We kept you signed in.
+              To use {linkGate.linkedEmail}, sign out first and continue with Google again.
+            </p>
+          ) : (
+            <p className="auth-lead">
+              That link was for {linkGate.linkedEmail}, but this browser is signed in as {session?.user.email ?? 'another account'}. We kept you signed in.
+              To use {linkGate.linkedEmail}, sign out first and request a new link.
+            </p>
+          )}
           <button className="auth-submit" type="button" onClick={() => setLinkGate(null)}>
             Continue as {session?.user.email ?? 'current account'}
           </button>
@@ -503,6 +568,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     }
 
+    async function continueWithGoogle() {
+      if (googleBusy || busy) return
+      setGoogleBusy(true)
+      setError('')
+      setMessage('')
+      try {
+        await startGoogleSignIn()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Google sign-in didn’t start. Try again.')
+        setGoogleBusy(false)
+      }
+    }
+
     async function submitCode(event: FormEvent) {
       event.preventDefault()
       setBusy(true)
@@ -577,10 +655,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
               </p>
             ) : null}
+            {mode !== 'reset' && googleEnabled ? (
+              <div className="auth-google">
+                <button className="auth-google__btn" type="button" disabled={busy || googleBusy} aria-busy={googleBusy} onClick={() => void continueWithGoogle()}>
+                  <GoogleMark />
+                  <span>{googleBusy ? 'Opening Google…' : 'Continue with Google'}</span>
+                </button>
+                <p className="auth-divider"><span>or</span></p>
+              </div>
+            ) : null}
             <form className="auth-form" onSubmit={submit}>
               <label className="auth-field">
                 <span>Email</span>
-                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy} value={email} onChange={(event) => setEmail(event.target.value)} />
+                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy || googleBusy} value={email} onChange={(event) => setEmail(event.target.value)} />
               </label>
               {mode !== 'reset' ? <label className="auth-field">
                 <span>Password</span>
