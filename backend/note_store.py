@@ -86,6 +86,36 @@ def list_notes(student_id: str, course: str, unit: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+MAX_SCOPES = 500
+
+
+def note_scopes(student_id: str, limit: int = MAX_SCOPES) -> list[dict]:
+    """The distinct (course, unit) pairs of the student's notes, with how many notes each
+    holds and when the newest was added, newest first. Reads no note text."""
+    init_notes()
+    last_added = func.max(notes.c.created_at).label('last_added')
+    with database.engine().connect() as connection:
+        rows = connection.execute(
+            select(notes.c.course, notes.c.unit, func.count().label('note_count'), last_added)
+            .where(notes.c.student_id == student_id)
+            .group_by(notes.c.course, notes.c.unit)
+            .order_by(last_added.desc(), notes.c.course, notes.c.unit)
+            .limit(max(1, min(limit, MAX_SCOPES)))
+        ).mappings().all()
+    return [{
+        'course': row['course'], 'unit': row['unit'], 'note_count': int(row['note_count']),
+        'last_added': _iso(row['last_added']),
+    } for row in rows]
+
+
+def _iso(value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        value = datetime.fromisoformat(str(value))
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).isoformat()
+
+
 def remove_note(student_id: str, note_id: str) -> bool:
     init_notes()
     with database.engine().begin() as connection:

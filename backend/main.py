@@ -1357,6 +1357,14 @@ def get_notes(course: Annotated[str, Query(max_length=120)], unit: Annotated[str
     return [note_response(row) for row in note_store.list_notes(user["id"], course.strip(), unit.strip())]
 
 
+@app.get("/api/notes/scopes")
+def get_note_scopes(authorization: Annotated[str | None, Header()] = None):
+    """Every (course, unit) the student has notes in, with a count and the newest upload,
+    newest first. No AI. Declared before /api/notes/{note_id} so "scopes" is not an ID."""
+    user = auth.authenticated_user(authorization)
+    return {"scopes": note_store.note_scopes(user["id"])}
+
+
 @app.get("/api/notes/{note_id}", response_model=NoteResponse)
 def get_note(note_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)

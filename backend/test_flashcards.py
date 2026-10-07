@@ -135,5 +135,31 @@ class BinditFlashcardTests(unittest.TestCase):
         self.assertEqual(remade[0]['unit'], 'Trig Identities')
 
 
+    # --- GET /api/notes/scopes ----------------------------------------------------------
+
+    def test_note_scopes_lists_each_course_and_unit_newest_first(self):
+        from datetime import datetime, timedelta, timezone
+        from fastapi.testclient import TestClient
+        base = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        rows = [('Bio', 'Cells', 0), ('Bio', 'Cells', 3), ('Chem', 'Acids', 2), ('Bio', 'Genes', 1)]
+        for course, unit, days in rows:
+            note = note_store.save_note('scopes-student', course, unit, 'n.txt', 'text/plain', 'x', 1)
+            with main.database.engine().begin() as connection:
+                connection.execute(note_store.notes.update().where(note_store.notes.c.id == note['id'])
+                                   .values(created_at=base + timedelta(days=days)))
+        note_store.save_note('someone-else', 'Secret', 'Unit', 'n.txt', 'text/plain', 'x', 1)
+        client = TestClient(main.app)
+        with self._as('scopes-student'):
+            response = client.get('/api/notes/scopes', headers={'Authorization': 'Bearer t'})
+        self.assertEqual(response.status_code, 200, response.text)
+        scopes = response.json()['scopes']
+        self.assertEqual([(item['course'], item['unit'], item['note_count']) for item in scopes],
+                         [('Bio', 'Cells', 2), ('Chem', 'Acids', 1), ('Bio', 'Genes', 1)])
+        self.assertEqual(datetime.fromisoformat(scopes[0]['last_added']), base + timedelta(days=3))
+        with self._as('nobody'):
+            self.assertEqual(client.get('/api/notes/scopes', headers={'Authorization': 'Bearer t'}).json(), {'scopes': []})
+        self.assertEqual(client.get('/api/notes/scopes').status_code, 401)
+
+
 if __name__ == '__main__':
     unittest.main()
