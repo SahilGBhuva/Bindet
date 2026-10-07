@@ -27,6 +27,10 @@
   gap: 28px;
 }
 
+@media (min-width: 1800px) {
+  .tools__layout { grid-template-columns: 260px minmax(0, 1fr); gap: 36px; }
+}
+
 /* Course list: binder tabs */
 
 .tools__courses {

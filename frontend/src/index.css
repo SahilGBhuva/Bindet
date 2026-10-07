@@ -152,6 +152,12 @@
   text-rendering: optimizeLegibility;
 }
 
+/* Big screens: let pages grow with the window instead of sitting in a narrow column
+   with wide empty margins. Reading-width pieces (cards, quiz, long text) keep their own caps. */
+@media (min-width: 1500px) { :root { --layout-content-max-width: 1400px; } }
+@media (min-width: 1800px) { :root { --layout-content-max-width: 1620px; } }
+@media (min-width: 2200px) { :root { --layout-content-max-width: 1880px; } }
+
 :root[data-theme="dark"] {
   color-scheme: dark;
 
