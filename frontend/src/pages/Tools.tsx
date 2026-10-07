@@ -15,6 +15,8 @@ import {
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
+import { useReviewSummary } from '../lib/useReviewSummary'
+import { ReviewSession } from './ReviewSession'
 import { prepareNotePhoto } from '../lib/notePhoto'
 import {
   FOCUS_SIZES,
@@ -334,7 +336,14 @@ function quizLoadFailure(error: unknown) {
 
 const wait = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
 
-export function Tools({ accessToken }: { accessToken?: string }) {
+/* Study's hash asks for Review mode over every unit ("#tools?review=all", from Home or the sidebar). */
+function reviewRequested() {
+  const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
+  return screen === 'tools' && new URLSearchParams(query).get('review') === 'all'
+}
+
+/* startReview: the landing demo opens Review over every unit this way (it never reads the hash). */
+export function Tools({ accessToken, startReview = false }: { accessToken?: string; startReview?: boolean }) {
   const data = useData()
   const [notebook, setNotebook] = useState(() => {
     const loaded = data.loadNotebook()
@@ -385,6 +394,12 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   // Focus mode: the current card or question, large, with the panel's other controls hidden.
   const [focusMode, setFocusMode] = useState(false)
   const [focusSize, setFocusSize] = useState(() => (data.sandboxed ? 1 : loadFocusSize()))
+  // Flashcards: Browse the deck or Review what's due, chosen per unit. A unit's first visit
+  // opens Review when it has due or new cards.
+  const [cardModes, setCardModes] = useState<Record<string, 'browse' | 'review'>>({})
+  // Review over every unit (the header's "N cards due" button, or Home and the sidebar).
+  const [reviewAll, setReviewAll] = useState(() => startReview || (!data.sandboxed && reviewRequested()))
+  const reviewSummary = useReviewSummary(accessToken)
   // Custom instructions per unit and kind, as typed (saved on this device), and any rejection.
   const [instructionDrafts, setInstructionDrafts] = useState<Record<string, string>>({})
   const [instructionErrors, setInstructionErrors] = useState<Record<string, string>>({})
@@ -448,6 +463,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       ...serverNotes.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
     ]).size
   const unitKey = `${activeCourse}|${activeUnit}`
+  const unitReview = reviewSummary?.by_unit.find((entry) => entry.course === activeCourse && entry.unit === activeUnit)
+  if (reviewSummary && activeUnit && !cardModes[unitKey]) {
+    setCardModes((current) => ({ ...current, [unitKey]: unitReview && unitReview.due + unitReview.new > 0 ? 'review' : 'browse' }))
+  }
+  const cardMode = cardModes[unitKey] ?? 'browse'
   const libraryLoaded = library.key === unitKey && library.status === 'ready'
   const libraryLoading = library.key !== unitKey || library.status === 'loading'
   const libraryFailed = library.key === unitKey && library.status === 'error'
@@ -550,7 +570,21 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     return () => document.removeEventListener('keydown', onKey)
   }, [orderOpen])
 
-  const focusOn = focusMode && panelFn !== 'scan'
+  const focusOn = focusMode && (panelFn !== 'scan' || reviewAll)
+
+  // Home and the sidebar link to "#tools?review=all": open Review over every unit, then
+  // drop the request from the address so a reload or Back doesn't reopen it.
+  useEffect(() => {
+    if (data.sandboxed) return
+    const sync = () => {
+      if (!reviewRequested()) return
+      setReviewAll(true)
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
+    }
+    sync()
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [data])
 
   // Esc leaves focus mode (unless a menu or dialog is open; Esc closes that first).
   useEffect(() => {
@@ -1422,6 +1456,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   function onCardsKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    // Review mode handles its own keys (ReviewSession).
+    if (cardMode === 'review') return
     const target = event.target as HTMLElement
     if (target.closest('input, textarea, select, [contenteditable]') || event.altKey || event.ctrlKey || event.metaKey) return
     if (event.key === ' ') {
@@ -1746,6 +1782,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </div>
   )
   const focusStyle = { ['--focus-scale' as string]: String(FOCUS_SIZES[focusSize]) }
+  const toneForCourse = (name: string) => {
+    const match = courses.find((course) => sameName(course.name, name))
+    return match ? courseTone(match) : undefined
+  }
   // Pasted text is only saved by "Add typed notes"; leaving it behind would look like saved notes.
   const unsavedPaste = pastedNotes.trim() && panelFn !== 'scan' ? (
     <div className="ui-alert tools__unsaved" role="status">
@@ -1765,10 +1805,28 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           </p>
         </div>
         <div className="tools__header-actions">
+          {reviewSummary?.due && !reviewAll ? (
+            <button className="ui-button ui-button--primary tools__review-all" type="button" onClick={() => setReviewAll(true)}>
+              {plural(reviewSummary.due, 'card')} due
+            </button>
+          ) : null}
           <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
         </div>
       </header>
 
+      {reviewAll ? (
+        <section className="ui-panel tools__review-sheet" aria-labelledby="tools-review-all-title">
+          <div className="tools__toolbar tools__review-toolbar">
+            <h2 className="tools__unit-title" id="tools-review-all-title">Review · all units</h2>
+            <button className="ui-button tools__review-back" type="button" onClick={() => setReviewAll(false)}>
+              <ArrowIcon direction="left" />{activeUnit ? `Back to ${activeUnit}` : 'Back to your binder'}
+            </button>
+          </div>
+          <div className={`tools__cards${focusOn ? ' is-focus' : ''}`} style={focusStyle}>
+            <ReviewSession scope={{}} accessToken={accessToken} summary={reviewSummary} focusControls={focusControls} toneFor={toneForCourse} />
+          </div>
+        </section>
+      ) : (
       <div className="tools__layout">
         <nav className="tools__courses" aria-label="Courses">
           <h2 className="tools__courses-title">Courses</h2>
@@ -2152,8 +2210,20 @@ export function Tools({ accessToken }: { accessToken?: string }) {
               {panelFn === 'cards' ? (
                 <div className={`tools__cards${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
                   {unsavedPaste}
-                  {card ? <div className="tools__focus-bar">{focusControls}</div> : null}
-                  {card ? (
+                  {cards.length || cardMode === 'review' ? (
+                    <div className="ui-segmented tools__card-modes" role="group" aria-label="Flashcard mode">
+                      <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'browse'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'browse' }))}>Browse</button>
+                      <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'review'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'review' }))}>
+                        Review
+                        {unitReview?.due ? <span className="ui-count">{unitReview.due}</span> : null}
+                      </button>
+                    </div>
+                  ) : null}
+                  {cardMode === 'review' ? (
+                    <ReviewSession key={unitKey} scope={{ course: activeCourse, unit: activeUnit }} accessToken={accessToken} summary={reviewSummary} focusControls={focusControls} />
+                  ) : null}
+                  {cardMode === 'browse' && card ? <div className="tools__focus-bar">{focusControls}</div> : null}
+                  {cardMode === 'review' ? null : card ? (
                     <>
                       <button
                         className={`tools__card${cardFlipped ? ' is-flipped' : ''}`}
@@ -2383,6 +2453,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           )}
         </section>
       </div>
+      )}
 
       {toast}
 

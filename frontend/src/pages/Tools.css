@@ -1464,3 +1464,161 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 @media (max-width: 860px) and (orientation: landscape) {
   .tools__cards.is-focus .tools__card { min-height: 0; padding-block: 20px; }
 }
+
+/* Review mode: due and new saved cards, one at a time, graded Again / Hard / Good / Easy.
+   The card reuses the deck's sheet; each grade button carries its meaning as a colored
+   underline and a word, and the interval it would give. */
+
+.tools__card-modes { align-self: center; }
+
+.tools__review {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+}
+
+.tools__review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+  max-width: 660px;
+}
+
+.tools__review-counts {
+  display: inline-flex;
+  gap: 6px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.tools__review-counts strong { color: var(--color-text); font-weight: var(--weight-semibold); }
+
+.tools__focus-bar.tools__review-focus { width: auto; max-width: none; margin-left: auto; }
+
+.tools__review-progress { height: 4px; }
+
+.tools__review-card { cursor: default; justify-content: center; }
+.tools__review-card:hover { border-color: var(--color-border); }
+.tools__review-card:active { transform: none; }
+
+.tools__review-answer {
+  flex: none;
+  padding-top: var(--space-5);
+  border-top: 1px dashed var(--color-border-strong);
+}
+
+.tools__review-place {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tools__review-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-xs);
+  background: var(--course, var(--color-accent));
+}
+
+.tools__review-show { min-width: 180px; min-height: 44px; }
+
+.tools__review-grades {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 660px;
+}
+
+.ui-button.tools__review-grade {
+  flex-direction: column;
+  gap: 2px;
+  height: auto;
+  min-height: 52px;
+  padding-block: 6px;
+  border-bottom: 2px solid var(--grade, var(--color-border-strong));
+}
+
+.tools__review-grade--again { --grade: var(--color-danger); }
+.tools__review-grade--hard { --grade: var(--color-warning); }
+.tools__review-grade--good { --grade: var(--color-positive); }
+.tools__review-grade--easy { --grade: var(--color-accent); }
+
+.tools__review-grade-label { color: var(--color-text); font-weight: var(--weight-semibold); }
+.tools__review-grade-when { color: var(--color-text-secondary); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+
+.tools__review-notice { width: 100%; max-width: 660px; }
+
+.tools__review-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 660px;
+  padding: 48px var(--space-4);
+  text-align: center;
+}
+
+.tools__review-done-title {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.tools__review-done-copy { margin: 0; color: var(--color-text-secondary); font-size: var(--text-base); }
+.tools__review-done-copy:empty { display: none; }
+
+/* Review over every unit replaces the binder until "Back". */
+.tools__review-sheet { padding: 0; }
+
+/* Focus mode: the same large text as the deck, and roomier grade buttons. */
+.tools__cards.is-focus .tools__review-head,
+.tools__cards.is-focus .tools__review-grades,
+.tools__cards.is-focus .tools__review-notice { max-width: min(960px, 100%); }
+
+.tools__cards.is-focus .tools__review-card { min-height: min(52vh, 520px); min-height: min(52svh, 520px); }
+.tools__cards.is-focus .tools__review-place { font-size: var(--text-sm); }
+
+.tools__cards.is-focus .ui-button.tools__review-grade { min-height: calc(56px * var(--focus-scale, 1)); }
+.tools__cards.is-focus .tools__review-grade-label { font-size: calc(var(--text-md) * var(--focus-scale, 1)); }
+.tools__cards.is-focus .tools__review-grade-when { font-size: calc(var(--text-sm) * var(--focus-scale, 1)); }
+
+@media (max-width: 860px) {
+  .tools__review-sheet .tools__toolbar { padding: var(--space-4) var(--space-4) 0; }
+  .tools__review-card { padding-top: 40px; }
+}
+
+/* Phones: grade buttons in a 2 × 2 grid with 44px targets. */
+@media (max-width: 480px) {
+  .tools__review-grades { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ui-button.tools__review-grade { min-height: 48px; }
+  .tools__review-show { width: 100%; }
+  .tools__card-modes { width: 100%; display: flex; }
+  .tools__card-modes .ui-segmented__item { flex: 1; justify-content: center; }
+  .tools__review-done { padding-block: 32px; }
+}
