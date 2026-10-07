@@ -447,5 +447,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     now: () => DEMO_NOW,
     hourOf: () => DEMO_HOUR,
     confirm: () => false,
+    deleteStudyGroup: locked('manage study groups'),
+    transferStudyGroup: locked('manage study groups'),
   }
 }

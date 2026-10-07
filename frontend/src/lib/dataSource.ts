@@ -61,6 +61,10 @@ export type DataSource = {
   now: () => number
   hourOf: (timestamp: number) => number
   confirm: (message: string) => boolean
+
+  // Study group ownership (owner only)
+  deleteStudyGroup: typeof api.deleteStudyGroup
+  transferStudyGroup: typeof api.transferStudyGroup
 }
 
 export const realData: DataSource = {
@@ -108,6 +112,8 @@ export const realData: DataSource = {
   now: () => Date.now(),
   hourOf: (timestamp) => new Date(timestamp).getHours(),
   confirm: (message) => window.confirm(message),
+  deleteStudyGroup: api.deleteStudyGroup,
+  transferStudyGroup: api.transferStudyGroup,
 }
 
 const DataContext = createContext<DataSource>(realData)

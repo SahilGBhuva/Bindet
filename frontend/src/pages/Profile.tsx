@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from 'react'
 import type { FriendsHub, PersonSuggestion, Profile as ProfileData, Progress as ProgressData, StudyGroup } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
@@ -6,6 +6,7 @@ import type { Course } from '../lib/types'
 import { AvatarControl } from '../lib/AvatarControl'
 import { withCourseTones } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { useDrawer } from '../lib/useDrawer'
 import './Profile.css'
 
 /*
@@ -42,6 +43,8 @@ function closeMenu(event: MouseEvent<HTMLElement>) {
 }
 
 type Notice = { text: string; error?: boolean }
+// Owner actions that need a confirmation step. 'leave' is the sole owner leaving, which deletes the group.
+type GroupDialogKind = 'transfer' | 'delete' | 'leave'
 
 type ProfileProps = {
   session: AuthSession | null
@@ -71,6 +74,9 @@ export function Profile({ session, onError }: ProfileProps) {
   const [peopleQuery, setPeopleQuery] = useState('')
   const [peopleResults, setPeopleResults] = useState<PersonSuggestion[]>([])
   const [searched, setSearched] = useState('')
+  const [groupDialog, setGroupDialog] = useState<{ kind: GroupDialogKind; groupId: string } | null>(null)
+  const [dialogBusy, setDialogBusy] = useState(false)
+  const [dialogError, setDialogError] = useState('')
 
   // A different account (or signing out) swaps to that account's cached data during render.
   if (seenToken !== token) {
@@ -368,15 +374,59 @@ export function Profile({ session, onError }: ProfileProps) {
     }
   }
 
+  function dropGroup(groupId: string) {
+    setGroups((current) => (current ?? []).filter((item) => item.id !== groupId))
+    setActiveGroupId('')
+  }
+
   async function exitGroup(group: StudyGroup) {
-    if (!session || group.role === 'owner' || !data.confirm(`Leave ${group.name}?`)) return
+    if (!session) return
+    // A sole owner leaving deletes the group, so that gets its own confirmation.
+    if (group.role === 'owner' && group.members.length <= 1) {
+      openGroupDialog('leave', group)
+      return
+    }
+    if (!data.confirm(`Leave ${group.name}?`)) return
     try {
       await data.leaveStudyGroup(group.id, session.access_token)
-      setGroups((current) => (current ?? []).filter((item) => item.id !== group.id))
-      setActiveGroupId('')
+      dropGroup(group.id)
       say(`Left ${group.name}.`)
-    } catch {
-      say(`Could not leave ${group.name}. Try again.`, true)
+    } catch (error) {
+      // An owner with members gets the server's owner_must_transfer message (transfer ownership first).
+      say(error instanceof Error && error.message ? error.message : `Could not leave ${group.name}. Try again.`, true)
+    }
+  }
+
+  function openGroupDialog(kind: GroupDialogKind, group: StudyGroup) {
+    setDialogError('')
+    setGroupDialog({ kind, groupId: group.id })
+  }
+
+  async function confirmGroupDialog(group: StudyGroup, kind: GroupDialogKind, newOwnerId: string) {
+    if (!session || dialogBusy) return
+    setDialogBusy(true)
+    setDialogError('')
+    try {
+      if (kind === 'transfer') {
+        const updated = await data.transferStudyGroup(group.id, newOwnerId, session.access_token)
+        const owner = group.members.find((member) => member.student_id === newOwnerId)
+        setGroups((current) => (current ?? []).map((item) => item.id === group.id ? { ...item, ...updated, role: 'member' } : item))
+        say(`${owner?.display_name ?? 'They'} now own${owner ? 's' : ''} ${group.name}. You are still a member.`)
+      } else if (kind === 'delete') {
+        await data.deleteStudyGroup(group.id, session.access_token)
+        dropGroup(group.id)
+        say(`Deleted ${group.name}. Its tasks are now personal tasks of the people who made them.`)
+      } else {
+        await data.leaveStudyGroup(group.id, session.access_token)
+        dropGroup(group.id)
+        say(`Left and deleted ${group.name}.`)
+      }
+      setGroupDialog(null)
+      void refreshSocial()
+    } catch (error) {
+      setDialogError(error instanceof Error && error.message ? error.message : 'That didn’t work. Try again.')
+    } finally {
+      setDialogBusy(false)
     }
   }
 
@@ -394,6 +444,7 @@ export function Profile({ session, onError }: ProfileProps) {
   const tag = profile?.friend_code ?? '—'
   const groupList = groups ?? []
   const activeGroup = groupList.find((group) => group.id === activeGroupId) ?? groupList[0] ?? null
+  const dialogGroup = groupDialog ? groupList.find((group) => group.id === groupDialog.groupId) ?? null : null
   const socialLoading = Boolean(session) && !social && !socialFailed
   const groupsLoading = Boolean(session) && groups === null && !socialFailed
   const people = peopleResults.length ? peopleResults : social?.suggestions ?? []
@@ -622,11 +673,17 @@ export function Profile({ session, onError }: ProfileProps) {
                     </div>
                   </div>
 
-                  {activeGroup.role !== 'owner' ? (
-                    <div className="profile__group-footer">
-                      <button type="button" className="ui-button ui-button--ghost ui-button--sm" onClick={() => void exitGroup(activeGroup)}>Leave group</button>
-                    </div>
-                  ) : null}
+                  <div className="profile__group-footer">
+                    {activeGroup.role === 'owner' ? (
+                      <>
+                        {activeGroup.members.length > 1 ? (
+                          <button type="button" className="ui-button ui-button--sm" onClick={() => openGroupDialog('transfer', activeGroup)}>Transfer ownership</button>
+                        ) : null}
+                        <button type="button" className="ui-button ui-button--danger ui-button--sm" onClick={() => openGroupDialog('delete', activeGroup)}>Delete group</button>
+                      </>
+                    ) : null}
+                    <button type="button" className="ui-button ui-button--ghost ui-button--sm" onClick={() => void exitGroup(activeGroup)}>Leave group</button>
+                  </div>
                 </div>
               </div>
             ) : !showGroupSetup && !(socialFailed && !social) ? (
@@ -941,6 +998,87 @@ export function Profile({ session, onError }: ProfileProps) {
           <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
         </div>
       ) : null}
+      {groupDialog && dialogGroup ? (
+        <GroupOwnerDialog
+          key={`${groupDialog.kind}-${dialogGroup.id}`}
+          kind={groupDialog.kind}
+          group={dialogGroup}
+          me={studentId}
+          busy={dialogBusy}
+          error={dialogError}
+          onCancel={() => { if (!dialogBusy) setGroupDialog(null) }}
+          onConfirm={(newOwnerId) => void confirmGroupDialog(dialogGroup, groupDialog.kind, newOwnerId)}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/* Confirms an owner action: transfer to a member, delete (type the name), or leave as the last member. */
+function GroupOwnerDialog({ kind, group, me, busy, error, onCancel, onConfirm }: {
+  kind: GroupDialogKind
+  group: StudyGroup
+  me: string
+  busy: boolean
+  error: string
+  onCancel: () => void
+  onConfirm: (newOwnerId: string) => void
+}) {
+  const panel = useRef<HTMLDivElement>(null)
+  const others = group.members.filter((member) => member.student_id !== me)
+  const [newOwner, setNewOwner] = useState(others[0]?.student_id ?? '')
+  const [typed, setTyped] = useState('')
+  useDrawer({ open: true, onClose: onCancel, panel })
+  const titleId = `group-dialog-${kind}`
+  const nameMatches = typed.trim().toLowerCase() === group.name.trim().toLowerCase()
+  const ready = kind === 'transfer' ? Boolean(newOwner) : kind === 'delete' ? nameMatches : true
+  const chosen = others.find((member) => member.student_id === newOwner)
+  const memberCount = `${group.members.length} ${group.members.length === 1 ? 'member' : 'members'}`
+
+  return (
+    <div className="ui-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+      <div ref={panel} className="ui-dialog profile__dialog" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={`${titleId}-copy`}>
+        <form onSubmit={(event) => { event.preventDefault(); if (ready && !busy) onConfirm(newOwner) }}>
+          <header className="ui-dialog__header">
+            <h2 className="ui-dialog__title" id={titleId}>
+              {kind === 'transfer' ? `Transfer ${group.name}` : kind === 'delete' ? `Delete ${group.name}?` : `Leave and delete ${group.name}?`}
+            </h2>
+          </header>
+          <div className="profile__dialog-body">
+            {kind === 'transfer' ? (
+              <>
+                <p id={`${titleId}-copy`}>The new owner can rename the group, manage its tasks and members, and delete it. You stay in the group as a member.</p>
+                <label className="ui-field">
+                  <span>New owner</span>
+                  <select className="ui-select" value={newOwner} disabled={busy} onChange={(event) => setNewOwner(event.target.value)}>
+                    {others.map((member) => <option key={member.student_id} value={member.student_id}>{member.display_name} (@{member.username})</option>)}
+                  </select>
+                </label>
+              </>
+            ) : kind === 'delete' ? (
+              <>
+                <p id={`${titleId}-copy`}>
+                  This deletes {group.name} for all {memberCount}, along with its invite code and weekly goal. It can’t be undone.
+                  Tasks in the group aren’t lost: each one becomes a personal task of the person who created it.
+                </p>
+                <label className="ui-field">
+                  <span>Type <strong>{group.name}</strong> to confirm</span>
+                  <input className="ui-input" value={typed} disabled={busy} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} enterKeyHint="done" onChange={(event) => setTyped(event.target.value)} />
+                </label>
+              </>
+            ) : (
+              <p id={`${titleId}-copy`}>You’re the only member, so leaving deletes {group.name}. Its tasks become your personal tasks.</p>
+            )}
+            {error ? <div className="ui-alert" role="alert"><span>{error}</span></div> : null}
+          </div>
+          <footer className="ui-dialog__footer">
+            <button type="button" className="ui-button ui-button--ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+            <button type="submit" className={`ui-button ${kind === 'transfer' ? 'ui-button--primary' : 'ui-button--danger'}${busy ? ' is-busy' : ''}`} disabled={!ready || busy}>
+              {kind === 'transfer' ? `Make ${chosen?.display_name ?? 'them'} owner` : kind === 'delete' ? 'Delete group' : 'Leave and delete'}
+            </button>
+          </footer>
+        </form>
+      </div>
     </div>
   )
 }

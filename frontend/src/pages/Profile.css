@@ -342,9 +342,17 @@
 
 .profile__group-footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: var(--space-2);
   margin-top: var(--space-4);
 }
+
+/* Owner confirmations (transfer, delete, leave as the last member). */
+.profile__dialog { width: min(480px, 100%); }
+.profile__dialog-body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6); }
+.profile__dialog-body p { margin: 0; color: var(--color-text-secondary); }
+.profile__dialog-body .ui-field > span strong { color: var(--color-text); }
 
 .profile__placeholder {
   display: flex;
