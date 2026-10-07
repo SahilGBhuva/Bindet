@@ -37,6 +37,7 @@ const GUIDES: Guide[] = [
       <ol className="help__steps">
         <li><b>Automatic:</b> when you add a note, its flashcards are written from that note only and saved. Opening them again later doesn’t make new ones.</li>
         <li>Switch the unit to <b>Flashcards</b>. Click a card or press <kbd>Space</kbd> to flip it, and use <kbd>←</kbd> <kbd>→</kbd> to move between cards.</li>
+        <li><b>Review:</b> switch the flashcards from <b>Browse</b> to <b>Review</b>. Show the answer, then rate it <b>Again</b>, <b>Hard</b>, <b>Good</b> or <b>Easy</b> (keys <kbd>1</kbd>–<kbd>4</kbd>). Cards you know come back later, and cards you miss come back sooner. Home shows how many are due.</li>
         <li><b>Instructions (optional):</b> type something like “focus on vocabulary” or “make them harder”, then choose <b>Make new cards with these instructions</b>. That replaces the cards for the notes in this unit; your saved cards only change when you do this.</li>
         <li><b>Focus mode:</b> the <b>Focus</b> button gives you large text and fewer distractions. Use A− and A+ to change the text size, and <kbd>Esc</kbd> to leave.</li>
         <li>Very short notes may be too short for flashcards. Add longer notes or paste more text.</li>
@@ -57,6 +58,7 @@ const GUIDES: Guide[] = [
         <li>A right answer on the first try earns 10 XP, and 5 XP after a retry.</li>
         <li><b>Instructions (optional)</b> shape your next questions in this unit, for example “only ask about dates”.</li>
         <li>Stuck? <b>Ask the tutor about this</b> opens the question in Tutor.</li>
+        <li><b>Practice test:</b> choose <b>Take a practice test</b> on the Quiz panel, or <b>Test the whole course</b>. Pick 5, 10 or 15 questions, timed or untimed. After you submit you see your score, which topics need work, and every answer explained.</li>
       </ol>
     ),
   },
