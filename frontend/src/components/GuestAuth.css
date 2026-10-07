@@ -268,3 +268,41 @@
   /* The Log in / Sign up switch is a full 44px target, not just its line of text. */
   .auth-switch .auth-text-btn { display: inline-flex; align-items: center; min-width: 44px; padding: 0 4px; }
 }
+
+/* One-time notice over the landing page (after an account is deleted). */
+.auth-notice {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 6px 6px 6px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  transform: translateX(-50%);
+  animation: ui-fade var(--duration-base) var(--ease-standard);
+}
+.auth-notice__close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 20px;
+  cursor: pointer;
+}
+.auth-notice__close:hover { background: var(--color-surface-hover); color: var(--color-text); }
+@media (prefers-reduced-motion: reduce) { .auth-notice { animation: none; } }

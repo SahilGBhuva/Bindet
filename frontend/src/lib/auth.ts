@@ -812,3 +812,37 @@ export function reloadSignedOut() {
 export function signOutAndReload() {
   void signOut().finally(reloadSignedOut)
 }
+
+/*
+ * A one-time message for the signed-out screens after an account action:
+ * 'deleted' (the landing page says the account and data were deleted) or
+ * 'reauth-delete' (the sign-in card asks for a fresh sign-in to finish deleting).
+ * It lives in this tab's sessionStorage and is written after signOut() has cleared
+ * storage, so it survives exactly one reload.
+ */
+export type AccountNotice = 'deleted' | 'reauth-delete'
+const ACCOUNT_NOTICE_KEY = 'bindit-account-notice'
+
+export function takeAccountNotice(): AccountNotice | null {
+  try {
+    const value = sessionStorage.getItem(ACCOUNT_NOTICE_KEY)
+    sessionStorage.removeItem(ACCOUNT_NOTICE_KEY)
+    return value === 'deleted' || value === 'reauth-delete' ? value : null
+  } catch {
+    return null
+  }
+}
+
+/** Signs out (clearing this browser's account data), leaves a notice for the next screen, and reloads. */
+export async function signOutWithNotice(notice: AccountNotice) {
+  try {
+    await signOut()
+  } finally {
+    try {
+      sessionStorage.setItem(ACCOUNT_NOTICE_KEY, notice)
+    } catch {
+      // Without storage the next screen simply shows no notice.
+    }
+    reloadSignedOut()
+  }
+}

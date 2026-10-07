@@ -968,6 +968,19 @@ export function transferStudyGroup(groupId: string, newOwnerId: string, accessTo
     .then(groupsChanged<StudyGroup>(accessToken))
 }
 
+/* ---- Account deletion ------------------------------------------------------ */
+
+export const DELETE_ACCOUNT_PHRASE = 'DELETE MY ACCOUNT'
+
+/*
+ * Permanently deletes the signed-in account and all of its data. The server wants the
+ * exact phrase and a sign-in from the last 10 minutes (ApiError code reauth_required
+ * otherwise). auth_delete_failed (502) means the data is gone but the login is not.
+ */
+export function deleteAccount(confirm: string, accessToken: string) {
+  return request<{ deleted: boolean }>('/api/account', { method: 'DELETE', body: JSON.stringify({ confirm }), timeoutMs: 60_000 }, accessToken)
+}
+
 /* The student's local calendar day (YYYY-MM-DD), which the server uses for "today" and "overdue". */
 export function localDay(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`

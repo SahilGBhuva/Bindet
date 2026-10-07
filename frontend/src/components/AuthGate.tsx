@@ -16,6 +16,7 @@ import {
   signOutAndReload,
   signUp,
   startGoogleSignIn,
+  takeAccountNotice,
   takeAuthRedirect,
   resetRequestedFor,
   updatePassword,
@@ -44,6 +45,9 @@ const RESEND_SECS = 60
 const loadLanding = () => import('./Landing').then((module) => ({ default: module.Landing }))
 const landingRequest = typeof window !== 'undefined' && !loadAuthSession() ? loadLanding() : null
 const Landing = lazy(() => landingRequest ?? loadLanding())
+// A one-time notice left by Settings before it signed out (account deleted, or sign in again to delete).
+// Read once per page load, outside React, so a double render can't lose it.
+const initialNotice = typeof window !== 'undefined' ? takeAccountNotice() : null
 
 /* Google's own "G" mark in its brand colors, as its sign-in guidelines require. */
 function GoogleMark() {
@@ -96,7 +100,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthSession | null>(loadAuthSession)
   const [loading, setLoading] = useState(() => Boolean(session) || redirect.kind === 'tokens' || redirect.kind === 'oauth')
   const [linkGate, setLinkGate] = useState<LinkGate | null>(null)
-  const [view, setView] = useState<GateView>(redirect.kind === 'error' ? 'auth' : 'landing')
+  const [notice, setNotice] = useState(initialNotice)
+  const [view, setView] = useState<GateView>(redirect.kind === 'error' || initialNotice === 'reauth-delete' ? 'auth' : 'landing')
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -658,6 +663,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
               <img className="auth-card__mascot auth-card__mascot--corner" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
             </div>
             {mode === 'reset' ? <p className="auth-lead">Enter your email and we’ll send you a link to set a new password.</p> : null}
+            {mode === 'login' && notice === 'reauth-delete' ? (
+              <p className="auth-reason" role="status">
+                Sign in again to finish deleting your account. Then open <strong>Settings</strong> and choose <strong>Delete account</strong>.
+              </p>
+            ) : null}
             {mode === 'signup' && signupReason ? (
               <p className="auth-reason" role="status">
                 <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
@@ -738,9 +748,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
 
     return (
-      <Suspense fallback={<div className="auth-backdrop" aria-hidden="true" />}>
-        <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
-      </Suspense>
+      <>
+        {notice === 'deleted' ? (
+          <div className="auth-notice" role="status">
+            <span>Your account and data were deleted.</span>
+            <button className="auth-notice__close" type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>×</button>
+          </div>
+        ) : null}
+        <Suspense fallback={<div className="auth-backdrop" aria-hidden="true" />}>
+          <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
+        </Suspense>
+      </>
     )
   }
 

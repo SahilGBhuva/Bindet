@@ -67,6 +67,8 @@ export type DataSource = {
   // Study group ownership (owner only)
   deleteStudyGroup: typeof api.deleteStudyGroup
   transferStudyGroup: typeof api.transferStudyGroup
+  // Account (Settings). Always locked in the demo.
+  deleteAccount: typeof api.deleteAccount
 }
 
 export const realData: DataSource = {
@@ -117,6 +119,7 @@ export const realData: DataSource = {
   listNoteScopes: api.listNoteScopes,
   deleteStudyGroup: api.deleteStudyGroup,
   transferStudyGroup: api.transferStudyGroup,
+  deleteAccount: api.deleteAccount,
 }
 
 const DataContext = createContext<DataSource>(realData)

@@ -462,5 +462,6 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     },
     deleteStudyGroup: locked('manage study groups'),
     transferStudyGroup: locked('manage study groups'),
+    deleteAccount: locked('delete an account'),
   }
 }

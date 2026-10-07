@@ -86,6 +86,21 @@
 .settings__legal-links { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
 .settings__links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border); }
 
+/* Delete account */
+
+.settings__danger { border-color: color-mix(in srgb, var(--color-danger) 30%, var(--color-border)); }
+.settings__danger-lead { margin: 0; color: var(--color-text); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.settings__danger-list { display: grid; gap: var(--space-1); margin: 0; padding-left: 1.2em; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; }
+.settings__danger-groups { font-size: var(--text-sm); line-height: 1.5; }
+.settings__danger-button { justify-self: start; min-height: 44px; }
+
+.settings__dialog { width: min(480px, 100%); }
+.settings__dialog-body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6); }
+.settings__dialog-body p { margin: 0; color: var(--color-text-secondary); }
+.settings__dialog-body .ui-field > span strong { color: var(--color-text); font-family: var(--font-mono); letter-spacing: .02em; }
+.settings__dialog-body .ui-alert { flex-wrap: wrap; }
+.settings__dialog .ui-button { min-height: 44px; }
+
 @media (max-width: 860px) {
   .settings__section { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); padding: var(--space-6) 0; }
 }
@@ -103,4 +118,8 @@
   .settings__footer .ui-button,
   .settings__submit { align-self: stretch; width: 100%; }
   .settings__auth { max-width: none; }
+  .settings__danger-button { justify-self: stretch; width: 100%; }
+  .settings__dialog-body { padding: var(--space-4); }
+  .settings__dialog .ui-dialog__footer { flex-direction: column-reverse; padding: var(--space-4); }
+  .settings__dialog .ui-dialog__footer .ui-button { width: 100%; }
 }

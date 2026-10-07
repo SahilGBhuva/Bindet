@@ -1,7 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { ApiError, DELETE_ACCOUNT_PHRASE, getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
 import { accountDisplayName, suggestedUsername } from '../lib/accountName'
-import { requestPasswordReset, signIn, signOutAndReload, signUp, type AuthSession } from '../lib/auth'
+import { requestPasswordReset, signIn, signOutAndReload, signOutWithNotice, signUp, type AuthSession } from '../lib/auth'
+import { useData } from '../lib/dataSource'
+import { useDrawer } from '../lib/useDrawer'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
 
@@ -66,6 +68,7 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [goalStatus, setGoalStatus] = useState('')
   const [privacyStatus, setPrivacyStatus] = useState('')
   const [copied, setCopied] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const theme = useThemePreference()
 
   // The saved profile belongs to whoever is signed in now; anything else is ignored.
@@ -401,13 +404,6 @@ export function Settings({ session, onSession }: SettingsProps) {
               </div>
               <div className="settings__row">
                 <div className="settings__row-text">
-                  <span className="settings__label">Delete your account</span>
-                  <span className="settings__hint">Email us from this address and we’ll delete your account and data within 30 days.</span>
-                </div>
-                <a className="ui-link" href="mailto:officialbindet@gmail.com?subject=Delete%20my%20bindit%20account">officialbindet@gmail.com</a>
-              </div>
-              <div className="settings__row">
-                <div className="settings__row-text">
                   <span className="settings__label">Privacy and terms</span>
                   <span className="settings__hint">What bindit stores, who processes it, and the rules for using bindit.</span>
                 </div>
@@ -418,8 +414,102 @@ export function Settings({ session, onSession }: SettingsProps) {
               </div>
             </div>
           </Section>
+
+          <Section id="settings-delete" title="Delete account" copy="Permanently delete your bindit account and everything in it.">
+            <div className="ui-panel settings__danger">
+              <div className="settings__row settings__row--stack">
+                <p className="settings__danger-lead">Deleting your account removes, right away:</p>
+                <ul className="settings__danger-list">
+                  <li>Your profile, XP, streaks, progress and friend code</li>
+                  <li>Your notes, flashcards, quiz questions and tutor conversations</li>
+                  <li>Your personal tasks, plus your comments, attachments and assignments on group tasks</li>
+                  <li>Your friends, friend quests and notifications, and the messages and images you sent in group chats</li>
+                </ul>
+                <p className="settings__hint settings__danger-groups">
+                  Study groups you own pass to the member who joined earliest, together with the group tasks you created.
+                  A group where you’re the only member is deleted. This can’t be undone.
+                </p>
+                <button type="button" className="ui-button ui-button--danger settings__danger-button" onClick={() => setDeleteOpen(true)}>Delete account…</button>
+              </div>
+            </div>
+          </Section>
+          {deleteOpen ? <DeleteAccountDialog session={session} onCancel={() => setDeleteOpen(false)} /> : null}
         </>
       )}
+    </div>
+  )
+}
+
+/*
+ * Confirms account deletion: type DELETE MY ACCOUNT (exactly) to enable the button.
+ * A sign-in older than 10 minutes is refused by the server (reauth_required); then
+ * "Sign in again" signs out and the sign-in card says why. On success this browser's
+ * account data is cleared and the landing page shows a one-time notice.
+ */
+function DeleteAccountDialog({ session, onCancel }: { session: AuthSession; onCancel: () => void }) {
+  const data = useData()
+  const panel = useRef<HTMLDivElement>(null)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [reauth, setReauth] = useState(false)
+  const cancel = () => { if (!busy) onCancel() }
+  useDrawer({ open: true, onClose: cancel, panel })
+  const ready = typed === DELETE_ACCOUNT_PHRASE
+
+  async function confirm(event: FormEvent) {
+    event.preventDefault()
+    if (!ready || busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await data.deleteAccount(typed, session.access_token)
+      await signOutWithNotice('deleted')
+    } catch (caught) {
+      setBusy(false)
+      if (caught instanceof ApiError && caught.code === 'reauth_required') {
+        setReauth(true)
+        setError(caught.message)
+        return
+      }
+      setError(caught instanceof Error ? caught.message : 'Could not delete your account. Try again.')
+    }
+  }
+
+  function signInAgain() {
+    setBusy(true)
+    void signOutWithNotice('reauth-delete')
+  }
+
+  return (
+    <div className="ui-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) cancel() }}>
+      <div ref={panel} className="ui-dialog settings__dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-account-title" aria-describedby="delete-account-copy">
+        <form onSubmit={(event) => void confirm(event)}>
+          <header className="ui-dialog__header">
+            <h2 className="ui-dialog__title" id="delete-account-title">Delete your account?</h2>
+          </header>
+          <div className="settings__dialog-body">
+            <p id="delete-account-copy">
+              Everything in your bindit account is deleted at once and can’t be recovered. Groups you own pass to the member who joined earliest;
+              a group where you’re the only member is deleted.
+            </p>
+            <label className="ui-field">
+              <span>Type <strong>{DELETE_ACCOUNT_PHRASE}</strong> to confirm</span>
+              <input className="ui-input" value={typed} disabled={busy || reauth} autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="done" onChange={(event) => setTyped(event.target.value)} />
+            </label>
+            {error ? (
+              <div className="ui-alert" role="alert">
+                <span>{error}</span>
+                {reauth ? <button type="button" className="ui-button ui-button--primary" disabled={busy} onClick={signInAgain}>Sign in again</button> : null}
+              </div>
+            ) : null}
+          </div>
+          <footer className="ui-dialog__footer">
+            <button type="button" className="ui-button ui-button--ghost" disabled={busy} onClick={cancel}>Cancel</button>
+            <button type="submit" className={`ui-button ui-button--danger${busy && !reauth ? ' is-busy' : ''}`} disabled={!ready || busy || reauth}>Delete account</button>
+          </footer>
+        </form>
+      </div>
     </div>
   )
 }
