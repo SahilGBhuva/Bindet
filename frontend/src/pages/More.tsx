@@ -36,7 +36,7 @@ export function More() {
       <section className="ui-section" aria-labelledby="help-privacy">
         <div className="ui-section-head"><h2 className="ui-section-title" id="help-privacy">Privacy and your data</h2></div>
         <div className="ui-panel ui-panel--padded">
-          <p className="more__privacy">Your notes, photos, quiz answers and tutor messages are sent to AI providers to make your study materials, so please don’t upload sensitive personal information. Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>, or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> to get a copy of your data or delete your account.</p>
+          <p className="more__privacy">Your notes, photos, quiz answers and tutor messages are sent to AI providers to make your study materials, so please don’t upload sensitive personal information. Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>, or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> to get a copy of your data. You can delete your account in <a href="#settings">Settings</a>.</p>
         </div>
       </section>
 
