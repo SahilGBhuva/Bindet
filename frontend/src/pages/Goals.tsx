@@ -153,6 +153,23 @@ function usePhone() {
   return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false)
 }
 
+/* `#goals?task=<id>` (sidebar, Home) opens that task; `#goals?new` (search palette) starts a new one. */
+type TaskLink = { task: string } | { compose: true }
+
+function readTaskLink(): TaskLink | null {
+  const [screen, query = ''] = window.location.hash.replace(/^#/, '').split('?')
+  if (screen !== 'goals' || !query) return null
+  const params = new URLSearchParams(query)
+  const task = params.get('task')
+  if (task) return { task }
+  return params.has('new') ? { compose: true } : null
+}
+
+/* Once handled, the link is dropped from the address bar so the same link works again later. */
+function clearTaskLink() {
+  if (/^#goals\?/.test(window.location.hash)) window.history.replaceState(window.history.state, '', '#goals')
+}
+
 /* ---------- icons ---------- */
 
 type IconName = 'triangle' | 'people' | 'rect' | 'square-plus' | 'edit' | 'pencil' | 'list' | 'board' | 'settings' | 'close-box' | 'close'
@@ -210,6 +227,10 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [today] = useState(() => isoDay(new Date()))
   const [reload, setReload] = useState(0)
+  const [fetched, setFetched] = useState(false)
+  const [link, setLink] = useState<TaskLink | null>(readTaskLink)
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null)
+  const [linksHandled, setLinksHandled] = useState(0)
   const pendingDetails = useRef(new Set<string>())
   const pendingDeletes = useRef(new Map<string, { timer: number; task: Task }>())
   const panelRef = useRef<HTMLElement>(null)
@@ -233,6 +254,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)
       if (social.status === 'fulfilled') setNotice(latestTaskNotice(social.value.notifications))
       setLoaded(true)
+      setFetched(true)
     })
     return () => { cancelled = true }
   }, [token, reload])
@@ -298,6 +320,51 @@ export function Goals({ session }: { session: AuthSession | null }) {
   }, [])
 
   const compose = useCallback((next: Draft) => { setSelectedId(null); setDraft(next) }, [])
+
+  useEffect(() => {
+    const sync = () => setLink(readTaskLink())
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
+
+  /* Follow a deep link once the task is known: the right tab, selected, and scrolled into view.
+     An id that isn't among the student's tasks (after a fresh load) is ignored. Resolved while
+     rendering, so the page never paints the wrong tab first. */
+  if (link) {
+    const target = 'task' in link ? tasks.find((task) => task.id === link.task) : undefined
+    if ('compose' in link) {
+      setSelectedId(null)
+      setDraft({ group_id: null })
+    } else if (target) {
+      const personal = !target.group_id || target.assignees.some((person) => person.student_id === me)
+      setTabState(personal ? 'mine' : 'group')
+      if (target.status === 'done') setShowDoneState(true)
+      setDraft(null)
+      setSelectedId(target.id)
+      setPanelClosed(false)
+      setScrollTarget(target.id)
+    }
+    if ('compose' in link || target || fetched || !token) {
+      setLink(null)
+      setLinksHandled((count) => count + 1)
+    }
+  }
+
+  // Remember the tab a link switched to, and drop the handled link from the address bar.
+  useEffect(() => {
+    if (!linksHandled) return
+    writePref('bindit:tasks:tab', tab)
+    clearTaskLink()
+  }, [linksHandled, tab])
+
+  useEffect(() => {
+    if (!scrollTarget) return
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector(`[data-task-id="${CSS.escape(scrollTarget)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      setScrollTarget(null)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [scrollTarget])
 
   const replaceTask = useCallback((taskId: string, next: Task | null) => {
     setTasks((current) => next ? current.map((task) => task.id === taskId ? next : task) : current.filter((task) => task.id !== taskId))
@@ -596,7 +663,7 @@ function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { 
   const pending = task.id.startsWith('temp-')
   const isSelected = task.id === selectedId
   return (
-    <li className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
+    <li data-task-id={task.id} className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
       draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>

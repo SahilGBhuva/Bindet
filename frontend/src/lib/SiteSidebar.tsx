@@ -398,7 +398,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {highlighted.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals" title={task.title}>
+                <a className="bindit-rail__entry" href={`#goals?task=${encodeURIComponent(task.id)}`} title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--dot" aria-hidden="true">·</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
@@ -469,7 +469,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           <ul className="bindit-rail__entries">
             {nextTasks.map((task) => (
               <li key={task.id}>
-                <a className="bindit-rail__entry" href="#goals" title={task.title}>
+                <a className="bindit-rail__entry" href={`#goals?task=${encodeURIComponent(task.id)}`} title={task.title}>
                   <span className="bindit-rail__glyph bindit-rail__glyph--star" aria-hidden="true">*</span>
                   <span className="bindit-rail__entry-text">{task.title}</span>
                 </a>
