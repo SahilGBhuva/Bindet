@@ -340,6 +340,8 @@
   padding-inline: var(--space-3);
 }
 
+.profile__setup { margin-bottom: var(--space-5); }
+
 .profile__group-footer {
   display: flex;
   flex-wrap: wrap;

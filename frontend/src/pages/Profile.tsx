@@ -7,6 +7,7 @@ import { AvatarControl } from '../lib/AvatarControl'
 import { withCourseTones } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
+import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import './Profile.css'
 
 /*
@@ -74,6 +75,8 @@ export function Profile({ session, onError }: ProfileProps) {
   const [peopleQuery, setPeopleQuery] = useState('')
   const [peopleResults, setPeopleResults] = useState<PersonSuggestion[]>([])
   const [searched, setSearched] = useState('')
+  // Signed in, but no bindit profile yet (a new Google account): no friend ID until it is set up.
+  const [profileMissing, setProfileMissing] = useState(false)
   const [groupDialog, setGroupDialog] = useState<{ kind: GroupDialogKind; groupId: string } | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dialogError, setDialogError] = useState('')
@@ -104,7 +107,10 @@ export function Profile({ session, onError }: ProfileProps) {
   useEffect(() => {
     if (!session) return
     void data.getAccountProfile(session.access_token, true)
-      .then(setProfile)
+      .then((value) => {
+        setProfile(value)
+        setProfileMissing(value === null)
+      })
       .catch(() => onError?.('Could not load your profile.'))
   }, [data, session, onError])
 
@@ -518,6 +524,8 @@ export function Profile({ session, onError }: ProfileProps) {
         </div>
       </section>
 
+      {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="profile__setup" /> : null}
+
       {failedAlert}
 
       <div className="profile__grid">
@@ -873,7 +881,7 @@ export function Profile({ session, onError }: ProfileProps) {
                 </div>
               ) : null}
               <p className="profile__hint">
-                {!session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : 'Share friend ID sends it with your phone’s share menu.'}
+                {session && profileMissing ? 'Finish setting up your profile to get a friend ID you can share.' : !session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : 'Share friend ID sends it with your phone’s share menu.'}
               </p>
             </div>
           </section>

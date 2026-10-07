@@ -18,6 +18,7 @@
 /* ---------- Banner: line landscape with date, theme, otter, greeting and clock ---------- */
 
 .home-hero { position: relative; }
+.home-setup { margin: 16px 0 4px; }
 
 .home-banner {
   --ground: 68.7%; /* y 206 of the 300-high drawing */

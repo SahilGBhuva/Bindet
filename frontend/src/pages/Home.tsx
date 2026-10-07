@@ -6,6 +6,7 @@ import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
+import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import './Home.css'
 
 /*
@@ -219,6 +220,8 @@ export function Home({ session }: { session: AuthSession | null }) {
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [profile, setProfile] = useState<Profile | null>(() => token ? data.getCachedProfile(token) : null)
+  // Signed in, but the server has no bindit profile for this account yet.
+  const [profileMissing, setProfileMissing] = useState(false)
   const [social, setSocial] = useState<FriendsHub | null>(() => token ? data.getCachedFriends(token) : null)
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? data.getCachedStudyGroups(token) : [])
   const [tasks, setTasks] = useState<Task[] | null>(() => token ? data.getCachedTasks(token) : [])
@@ -240,7 +243,11 @@ export function Home({ session }: { session: AuthSession | null }) {
   useEffect(() => {
     if (!token) return
     let active = true
-    void data.getAccountProfile(token).then((value) => { if (active) setProfile(value) }).catch(() => undefined)
+    void data.getAccountProfile(token).then((value) => {
+      if (!active) return
+      setProfile(value)
+      setProfileMissing(value === null)
+    }).catch(() => undefined)
     void data.getFriends(token).then((value) => { if (active) setSocial(value) }).catch(() => undefined)
     void data.getStudyGroups(token).then((value) => {
       if (!active) return
@@ -471,6 +478,8 @@ export function Home({ session }: { session: AuthSession | null }) {
             )}
           </section>
         </header>
+
+        {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
 
         <div className="home__grid">
           <div className="home__main">
