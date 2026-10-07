@@ -65,6 +65,11 @@ function Palette({ onClose }: { onClose: () => void }) {
             }}
             placeholder="Search pages and actions"
             aria-label="Search pages and actions"
+            type="search"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            enterKeyHint="go"
             role="combobox"
             aria-expanded="true"
             aria-controls="command-results"

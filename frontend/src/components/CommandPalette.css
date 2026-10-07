@@ -81,3 +81,14 @@
   .command-backdrop { padding-top: 8vh; }
   .command-menu footer { display: none; }
 }
+
+/* Phones: 16px search (no iOS zoom), 44px rows, room for the notch, results above the keyboard. */
+@media (max-width: 860px) {
+  .command-backdrop { padding: calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 12px calc(12px + env(safe-area-inset-left)); }
+  .command-search { padding-block: 6px; }
+  .command-search input { height: 44px; font-size: 16px; }
+  .command-search kbd { display: none; }
+  .command-search input::-webkit-search-cancel-button { display: none; }
+  .command-results { max-height: calc(100dvh - 120px - env(safe-area-inset-top) - var(--keyboard-inset, 0px)); overscroll-behavior: contain; }
+  .command-results a { min-height: 44px; }
+}
