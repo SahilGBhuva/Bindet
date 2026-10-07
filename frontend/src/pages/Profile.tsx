@@ -1055,7 +1055,7 @@ function GroupOwnerDialog({ kind, group, me, busy, error, onCancel, onConfirm }:
           <div className="profile__dialog-body">
             {kind === 'transfer' ? (
               <>
-                <p id={`${titleId}-copy`}>The new owner can rename the group, manage its tasks and members, and delete it. You stay in the group as a member.</p>
+                <p id={`${titleId}-copy`}>The new owner manages the group’s tasks and is the only one who can delete it. You stay in the group as a member.</p>
                 <label className="ui-field">
                   <span>New owner</span>
                   <select className="ui-select" value={newOwner} disabled={busy} onChange={(event) => setNewOwner(event.target.value)}>
