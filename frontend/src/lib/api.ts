@@ -11,13 +11,28 @@ export type NoteQuizContext = {
   other_units: string[]
   other_courses: string[]
 }
-export type Flashcard = { front: string; back: string; topic: string }
-export type FlashcardDeck = {
+/* A flashcard saved on the server, written once from one note. */
+export type Flashcard = {
+  id: string
+  note_id: string
   course: string
   unit: string
-  personalized: boolean
-  cards: Flashcard[]
+  front: string
+  back: string
+  topic: string
+  created_at: string
 }
+export type NoteFlashcardStatus = 'ready' | 'generating' | 'failed' | 'too_short' | 'none'
+export type NoteFlashcardState = {
+  note_id: string
+  file_name: string
+  status: NoteFlashcardStatus
+  card_count: number
+  error: string | null
+  updated_at: string | null
+}
+export type NoteFlashcardsResult = { note_id: string; status: 'ready' | 'too_short'; created: boolean; cards: Flashcard[] }
+export type FlashcardLibrary = { cards: Flashcard[]; notes: NoteFlashcardState[] }
 export type UploadedNote = {
   id: string
   course: string
@@ -28,6 +43,8 @@ export type UploadedNote = {
   status: 'ready'
   text_preview: string
   created_at: string
+  pages_skipped?: number
+  notice?: string | null
 }
 export type AnswerResult = {
   correct: boolean
@@ -155,7 +172,7 @@ async function resolvedToken(explicit?: string): Promise<string | undefined> {
  * AI requests fail fast with a clear message instead of hanging. The budgets sit
  * above the server's own model timeouts, so a slow but working answer still lands.
  */
-export const AI_TIMEOUTS = { question: 25_000, grade: 25_000, flashcards: 40_000, upload: 60_000 } as const
+export const AI_TIMEOUTS = { question: 25_000, grade: 25_000, flashcards: 60_000, upload: 60_000 } as const
 export const AI_TIMEOUT_MESSAGE = 'This is taking longer than usual. Try again in a moment.'
 
 export class RequestTimeoutError extends Error {
@@ -206,7 +223,11 @@ export function apiError(status: number, data: unknown, fallback: string): ApiEr
   const readable = [detail, nested.message, body.message]
     .map(text)
     .find((value) => value && !CODE_LIKE.test(value)) ?? ''
-  const message = API_ERROR_MESSAGES[code]
+  // An object detail ({ code, message }) carries text written for the student, so it wins
+  // over the fixed text for its code. The daily AI limit keeps one consistent message.
+  const serverMessage = code === 'ai_daily_limit' ? '' : text(nested.message)
+  const message = serverMessage
+    || API_ERROR_MESSAGES[code]
     || readable
     || (status === 429 ? RATE_LIMITED_MESSAGE : '')
     || fallback
@@ -307,23 +328,25 @@ export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQ
   }, accessToken)
 }
 
-export function generateFlashcards(
-  context: { course: string; unit: string; files?: string[]; count?: number },
-  accessToken?: string,
-  signal?: AbortSignal,
-) {
-  return request<FlashcardDeck>('/api/generate-flashcards', {
+export function listNotes(course: string, unit: string, accessToken?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ course, unit })
+  return request<UploadedNote[]>(`/api/notes?${query}`, { signal }, accessToken)
+}
+
+/* Writes and saves flashcards for one note, or returns the ones already saved. */
+export function generateNoteFlashcards(noteId: string, options?: { retry?: boolean }, accessToken?: string, signal?: AbortSignal) {
+  const query = options?.retry ? '?retry=1' : ''
+  return request<NoteFlashcardsResult>(`/api/notes/${encodeURIComponent(noteId)}/flashcards${query}`, {
     method: 'POST',
-    body: JSON.stringify({
-      student_id: getStudentId(),
-      course: context.course,
-      unit: context.unit,
-      files: context.files ?? [],
-      count: context.count ?? 10,
-    }),
     signal,
     timeoutMs: AI_TIMEOUTS.flashcards,
   }, accessToken)
+}
+
+/* The saved flashcards for a unit and each note's flashcard state. Never calls the AI. */
+export function listFlashcards(scope: { course: string; unit: string }, accessToken?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ course: scope.course, unit: scope.unit })
+  return request<FlashcardLibrary>(`/api/flashcards?${query}`, { signal }, accessToken)
 }
 
 export function analyzeAnswer(question: GeneratedQuestion, studentAnswer: string, studentId: string, accessToken?: string) {

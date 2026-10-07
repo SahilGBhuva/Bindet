@@ -1,8 +1,8 @@
-import type { AnswerResult, Flashcard, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, Task } from '../../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { COURSE_TONES } from '../../lib/session'
-import type { Notebook, UnitAttempt } from '../../lib/types'
+import type { NoteDeposit, Notebook, UnitAttempt } from '../../lib/types'
 
 /*
  * Sandboxed data for the landing page's live demo. Everything lives in memory
@@ -240,6 +240,12 @@ function findContent(course: string, unit: string): UnitContent {
   return COURSES[0].units.Genetics
 }
 
+function demoCards(note: NoteDeposit): Flashcard[] {
+  return findContent(note.course, note.unit).cards.map(([front, back], index) => ({
+    id: `${note.id}-card-${index}`, note_id: note.id, course: note.course, unit: note.unit, front, back, topic: note.unit, created_at: note.createdAt,
+  }))
+}
+
 export function createDemoData(onLocked: (action: string) => void): DataSource {
   let notebook = initialNotebook()
   const attempts = initialAttempts()
@@ -350,10 +356,27 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     getTasks: () => wait(structuredClone(tasks)),
     getCachedTasks: () => structuredClone(tasks),
 
-    generateFlashcards: (context) => {
-      const content = findContent(context.course, context.unit)
-      const cards: Flashcard[] = content.cards.map(([front, back]) => ({ front, back, topic: context.unit }))
-      return wait({ course: context.course, unit: context.unit, personalized: true, cards }, 320)
+    // Every demo note already has its saved flashcards, written from the unit's material.
+    listNotes: (course, unit) => wait(notebook.deposits
+      .filter((note) => note.course === course && note.unit === unit)
+      .map((note) => ({
+        id: note.id, course: note.course, unit: note.unit, file_name: note.fileName, content_type: 'text/plain',
+        size_bytes: 0, status: 'ready' as const, text_preview: note.textPreview ?? '', created_at: note.createdAt,
+      }))),
+    listFlashcards: (scope) => {
+      const notes = notebook.deposits.filter((note) => note.course === scope.course && note.unit === scope.unit)
+      const library: FlashcardLibrary = {
+        cards: notes.flatMap(demoCards),
+        notes: notes.map((note) => ({
+          note_id: note.id, file_name: note.fileName, status: 'ready', card_count: demoCards(note).length, error: null, updated_at: note.createdAt,
+        })),
+      }
+      return wait(library, 180)
+    },
+    generateNoteFlashcards: (noteId) => {
+      const note = notebook.deposits.find((item) => item.id === noteId)
+      if (!note) return Promise.reject(new Error('Note not found'))
+      return wait({ note_id: noteId, status: 'ready' as const, created: false, cards: demoCards(note) }, 180)
     },
     generateQuestion: (_topic, difficulty, notes) => {
       const course = notes?.course ?? notebook.activeCourse

@@ -51,6 +51,8 @@ const ACTION_NAMES: [string, string][] = [
   ['.tools__dropzone-button, .tools__upload *', 'Upload notes'],
   ['.tools__paste *', 'Add typed notes'],
   ['.tools__course-menu *', 'Course options'],
+  ['.tools__note-cards *', 'Make flashcards'],
+  ['.tools__deck-status *', 'Make flashcards'],
   ['.tools__source *', 'Remove notes'],
   ['.avatar', 'Change your avatar'],
   ['.profile__friend-forms *', 'Find friends'],
