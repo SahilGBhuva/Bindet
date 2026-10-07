@@ -19,9 +19,11 @@ import account_deletion
 import ai_cache
 import auth
 import database
+import feedback
 import flashcards
 import main
 import note_store
+import practice
 import practice_tests
 import questions
 import rate_limit
@@ -44,6 +46,7 @@ CONFIRM = {"confirm": "DELETE MY ACCOUNT"}
 ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
+    practice.practice_metadata, feedback.feedback_metadata,
 )
 
 
@@ -117,6 +120,8 @@ class AccountDeletionTests(unittest.TestCase):
         questions.reset_questions()
         ai_cache.reset_caches()
         practice_tests.reset_practice()
+        practice.reset_practice()
+        feedback.reset_feedback()
         with database.engine().begin() as connection:
             connection.execute(delete(note_store.notes))
         rate_limit.limiter.reset()
@@ -215,6 +220,17 @@ class AccountDeletionTests(unittest.TestCase):
         ai_cache.store_practice_test("b" * 64, ALEX, [question])
         ai_cache.add_ref("practice_test_cache", "b" * 64, ALEX, self.alex_note["id"])
         self.shared_key, self.private_key = shared_key, private_key
+        # Practice lab: a round and best of Alex's, a challenge Alex sent Sam (played by
+        # both) and one Sam sent Alex, a round of Sam's; and feedback from Alex.
+        practice.submit_round(ALEX, course="Bio", unit="Cells", length_s=60, mode="self",
+                              answers=[(f"card-{ALEX[:8]}", True)])
+        sent = practice.create_challenge(ALEX, to_id=SAM, course="Bio", unit="Cells", length_s=60, mode="self",
+                                         card_ids=[f"card-{ALEX[:8]}"], answers=[True])
+        practice.submit_challenge_result(SAM, sent["id"], [False])
+        practice.submit_round(SAM, course="Bio", unit="Cells", length_s=60, mode="self", answers=[(f"card-{SAM[:8]}", True)])
+        self.received = practice.create_challenge(SAM, to_id=ALEX, course="Bio", unit="Cells", length_s=60, mode="self",
+                                                  card_ids=[f"card-{SAM[:8]}"])
+        feedback.save(ALEX, "bug", "The timer froze", {"browser": "Safari 18", "os": "iOS"}, "games")
 
     # --- helpers --------------------------------------------------------------------
 
@@ -256,7 +272,8 @@ class AccountDeletionTests(unittest.TestCase):
                      "flashcard_jobs", "flashcard_styles", "flashcard_reviews", "generated_questions", "tutor_conversations",
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
-                     "practice_tests", "practice_test_cache"):
+                     "practice_tests", "practice_test_cache",
+                     "practice_rounds", "practice_bests", "practice_challenges", "feedback"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
@@ -316,6 +333,11 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertIsNone(practice_tests.get_test(ALEX, self.alex_test["id"]))
         self.assertIsNotNone(practice_tests.get_test(SAM, self.sam_test["id"]))
         self.assertIsNone(ai_cache.cached_practice_test("b" * 64, ALEX))
+        # Practice: both challenges went with Alex; Sam keeps rounds and bests.
+        self.assertEqual(practice.list_challenges(SAM), [])
+        self.assertEqual(len(practice.list_rounds(SAM)), 2)
+        self.assertEqual(len(practice.list_bests(SAM)), 1)
+        self.assertEqual(feedback.latest(), [])
 
     def test_a_retry_after_success_is_harmless(self):
         self.assertEqual(self.delete().status_code, 200)

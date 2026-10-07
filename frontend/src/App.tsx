@@ -5,7 +5,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { PROFILE_SETUP_ROUTED_KEY } from './components/ProfileSetupCard'
 import { useAuth } from './lib/AuthContext'
 import { getAccountProfile, getStudyGroups, recordDailyLogin } from './lib/api'
-import { SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
+import { rememberPage, SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
 import { getStudentId } from './lib/session'
 import { NavIcon, SiteSidebar } from './lib/SiteSidebar'
 import { Home } from './pages/Home'
@@ -22,6 +22,7 @@ const loaders = {
   settings: () => import('./pages/Settings').then((module) => ({ default: module.Settings })),
   games: () => import('./pages/Games').then((module) => ({ default: module.Games })),
   more: () => import('./pages/More').then((module) => ({ default: module.More })),
+  admin: () => import('./pages/Admin').then((module) => ({ default: module.Admin })),
 }
 
 const Tools = lazy(loaders.tools)
@@ -34,6 +35,7 @@ const Profile = lazy(loaders.profile)
 const Settings = lazy(loaders.settings)
 const Games = lazy(loaders.games)
 const More = lazy(loaders.more)
+const Admin = lazy(loaders.admin)
 
 /* The routes students open most often after Home, fetched while the browser is idle. */
 const PREFETCH: (keyof typeof loaders)[] = ['goals', 'stats', 'tools', 'tutor', 'chat']
@@ -41,6 +43,11 @@ const PREFETCH: (keyof typeof loaders)[] = ['goals', 'stats', 'tools', 'tutor', 
 /* Pointing at or focusing a page icon starts loading that page, so the click rarely waits. */
 function warm(screen: Screen) {
   if (screen in loaders) void loaders[screen as keyof typeof loaders]().catch(() => undefined)
+}
+
+/* #admin is not a navigation screen: it only renders for accounts the server accepts as admins. */
+function isAdminRoute() {
+  return window.location.hash.replace('#', '').split('?')[0] === 'admin'
 }
 
 function currentScreen(): Screen {
@@ -140,6 +147,7 @@ function AppShell() {
   const [screen, setScreen] = useState(currentScreen)
   // The nav highlight follows the click at once; the page itself swaps in a transition.
   const [navScreen, setNavScreen] = useState(currentScreen)
+  const [adminRoute, setAdminRoute] = useState(isAdminRoute)
   const [notice, setNotice] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
   const { session, setSession } = useAuth()
@@ -159,8 +167,11 @@ function AppShell() {
   const openCommand = useCallback(() => setCommandOpen(true), [])
 
   useEffect(() => {
+    rememberPage(currentScreen())
     const sync = () => {
       setNavScreen(currentScreen())
+      setAdminRoute(isAdminRoute())
+      if (!isAdminRoute()) rememberPage(currentScreen())
       startTransition(() => setScreen(currentScreen()))
       window.scrollTo({ top: 0 })
     }
@@ -242,20 +253,21 @@ function AppShell() {
           </button>
         </div>
       </header>
-      <main className={`sheet is-${screen}`} id="main-content" tabIndex={-1} key={screen}>
-        {screen !== 'tools' ? <OfflineNotice /> : null}
-        <Suspense fallback={<PageSkeleton sketch={screen === 'goals' || screen === 'stats'} />}>
-          {screen === 'home' ? <Home session={session} /> : null}
+      <main className={`sheet is-${adminRoute ? 'admin' : screen}`} id="main-content" tabIndex={-1} key={adminRoute ? 'admin' : screen}>
+        {screen !== 'tools' && !adminRoute ? <OfflineNotice /> : null}
+        <Suspense fallback={<PageSkeleton sketch={!adminRoute && (screen === 'goals' || screen === 'stats')} />}>
+          {adminRoute ? <Admin session={session} /> : null}
+          {!adminRoute && screen === 'home' ? <Home session={session} /> : null}
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
           {screen === 'tutor' ? <Tutor session={session} /> : null}
           {screen === 'goals' ? <Goals session={session} /> : null}
           {screen === 'stats' ? <ProjectStats session={session} /> : null}
           {screen === 'progress' ? <Progress session={session} /> : null}
-          {screen === 'games' ? <Games /> : null}
+          {screen === 'games' ? <Games session={session} /> : null}
           {screen === 'chat' ? <Chat session={session} /> : null}
           {screen === 'profile' ? <Profile session={session} onError={setNotice} /> : null}
           {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
-          {screen === 'more' ? <More /> : null}
+          {screen === 'more' ? <More session={session} /> : null}
         </Suspense>
       </main>
       {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
