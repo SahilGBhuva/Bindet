@@ -1,6 +1,7 @@
-import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, Profile, Progress, StudyGroup, Task } from '../../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
+import { nextValues, previewFor, stateName, type SchedulerState } from '../../lib/review'
 import { COURSE_TONES } from '../../lib/session'
 import type { NoteDeposit, Notebook, UnitAttempt } from '../../lib/types'
 import type { NoteScope } from '../../lib/api'
@@ -247,6 +248,23 @@ function demoCards(note: NoteDeposit): Flashcard[] {
   }))
 }
 
+const REVIEW_NEW_PER_DAY = 20
+type DemoReview = SchedulerState & { due: number; created: number; last: number }
+
+/* The demo student reviewed a few Genetics and Cells cards before today, so Review has cards due. */
+function initialReviews(notebook: Notebook): Map<string, DemoReview> {
+  const reviews = new Map<string, DemoReview>()
+  const seeded: [string, string, number][] = [['AP Biology', 'Genetics', 2], ['AP Biology', 'Cells', 1]]
+  for (const [course, unit, count] of seeded) {
+    const note = notebook.deposits.find((item) => item.course === course && item.unit === unit)
+    if (!note) continue
+    demoCards(note).slice(0, count).forEach((card, index) => {
+      reviews.set(card.id, { interval_days: 3, ease: 2.5, reps: 2, lapses: 0, due: DEMO_NOW - (index + 1) * DAY / 2, created: DEMO_NOW - 6 * DAY, last: DEMO_NOW - 3 * DAY })
+    })
+  }
+  return reviews
+}
+
 export function createDemoData(onLocked: (action: string) => void): DataSource {
   let notebook = initialNotebook()
   const attempts = initialAttempts()
@@ -327,6 +345,31 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
   const locked = (action: string) => () => {
     onLocked(action)
     return Promise.reject(new Error('Create a free account to do that.'))
+  }
+
+  // Spaced-repetition review, in memory only. The day is the UTC day of the pinned demo time.
+  const reviews = initialReviews(notebook)
+  let reviewClock = DEMO_NOW
+  const dayStart = Math.floor(DEMO_NOW / DAY) * DAY
+  const reviewCards = () => {
+    const seen = new Set<string>()
+    return notebook.deposits.flatMap(demoCards).filter((card) => {
+      const key = `${card.course}|${card.unit}|${card.front}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const isDue = (state: DemoReview) => (state.interval_days < 1 ? state.due <= reviewClock : state.due < dayStart + DAY)
+  const newAllowance = () => Math.max(0, REVIEW_NEW_PER_DAY - [...reviews.values()].filter((state) => state.created >= dayStart).length)
+  const withReview = (card: Flashcard): ReviewCard => {
+    const state = reviews.get(card.id) ?? null
+    return {
+      ...card,
+      review: state
+        ? { state: stateName(state.interval_days), due_at: new Date(state.due).toISOString(), interval_days: state.interval_days, preview: previewFor(state, card.id) }
+        : { state: 'new', due_at: null, interval_days: 0, preview: previewFor(null, card.id) },
+    }
   }
 
   const notebookListeners = new Set<() => void>()
@@ -463,5 +506,73 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     deleteStudyGroup: locked('manage study groups'),
     transferStudyGroup: locked('manage study groups'),
     deleteAccount: locked('delete an account'),
+
+    getReviewSummary: () => {
+      const cards = reviewCards()
+      const allowance = newAllowance()
+      const units = new Map<string, ReviewSummary['by_unit'][number]>()
+      const unitOf = (card: Flashcard) => {
+        const key = `${card.course}|${card.unit}`
+        const entry = units.get(key) ?? { course: card.course, unit: card.unit, due: 0, new: 0 }
+        units.set(key, entry)
+        return entry
+      }
+      let due = 0
+      let fresh = 0
+      let next: number | null = null
+      for (const card of cards) {
+        const state = reviews.get(card.id)
+        if (!state) {
+          fresh += 1
+          unitOf(card).new += 1
+        } else if (isDue(state)) {
+          due += 1
+          unitOf(card).due += 1
+        } else if (next === null || state.due < next) {
+          next = state.due
+        }
+      }
+      for (const entry of units.values()) entry.new = Math.min(entry.new, allowance)
+      const summary: ReviewSummary = {
+        due, new_available: Math.min(fresh, allowance), next_due_at: next === null ? null : new Date(next).toISOString(),
+        by_unit: [...units.values()].sort((a, b) => `${a.course}|${a.unit}`.localeCompare(`${b.course}|${b.unit}`)),
+      }
+      return wait(summary)
+    },
+    getReviewQueue: (scope) => {
+      const limit = scope.limit ?? 20
+      const cards = reviewCards().filter((card) => (!scope.course || card.course === scope.course) && (!scope.unit || card.unit === scope.unit))
+      const dueCards = cards.filter((card) => {
+        const state = reviews.get(card.id)
+        return state && isDue(state)
+      }).sort((a, b) => {
+        const left = reviews.get(a.id)!
+        const right = reviews.get(b.id)!
+        return Number(left.interval_days >= 1) - Number(right.interval_days >= 1) || left.due - right.due
+      })
+      const picked = dueCards.slice(0, limit)
+      const fresh = cards.filter((card) => !reviews.has(card.id)).slice(0, Math.max(0, Math.min(newAllowance(), limit - picked.length)))
+      return wait({ cards: [...picked, ...fresh].map(withReview) }, 120)
+    },
+    // Grading only updates this in-memory map: nothing is sent or stored.
+    gradeReviewCard: (cardId, grade) => {
+      const card = reviewCards().find((item) => item.id === cardId)
+      if (!card) return Promise.reject(new Error('That flashcard isn’t in your saved cards.'))
+      reviewClock += 1000
+      const previous = reviews.get(cardId) ?? null
+      const values = nextValues(previous, grade, cardId)
+      const due = values.interval_days < 1 ? reviewClock + values.interval_days * DAY : dayStart + Math.round(values.interval_days) * DAY
+      reviews.set(cardId, { ...values, due, created: previous?.created ?? reviewClock, last: reviewClock })
+      const result: ReviewGradeResult = {
+        card_id: cardId,
+        review: {
+          state: stateName(values.interval_days), due_at: new Date(due).toISOString(), interval_days: values.interval_days,
+          ease: values.ease, reps: values.reps, lapses: values.lapses, last_grade: grade, last_reviewed_at: new Date(reviewClock).toISOString(),
+        },
+        next_due_at: new Date(due).toISOString(),
+        duplicate: false,
+      }
+      return wait(result, 60)
+    },
   }
 }

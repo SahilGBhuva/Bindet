@@ -418,6 +418,61 @@ export function listFlashcards(scope: { course: string; unit: string }, accessTo
   return request<FlashcardLibrary>(`/api/flashcards?${query}`, { signal }, accessToken)
 }
 
+/* Spaced-repetition review of saved flashcards. "new": never reviewed; "learning": due again within a day. */
+export type ReviewGrade = 'again' | 'hard' | 'good' | 'easy'
+export type ReviewState = 'new' | 'learning' | 'review'
+export type CardReview = {
+  state: ReviewState
+  due_at: string | null
+  interval_days: number
+  /* Interval in days each grade would give this card. */
+  preview: Record<ReviewGrade, number>
+}
+export type ReviewCard = Flashcard & { review: CardReview }
+export type ReviewSummary = {
+  due: number
+  new_available: number
+  next_due_at: string | null
+  by_unit: { course: string; unit: string; due: number; new: number }[]
+}
+export type ReviewGradeResult = {
+  card_id: string
+  review: {
+    state: ReviewState
+    due_at: string
+    interval_days: number
+    ease: number
+    reps: number
+    lapses: number
+    last_grade: ReviewGrade
+    last_reviewed_at: string
+  }
+  next_due_at: string
+  duplicate: boolean
+}
+
+const tzOffset = () => new Date().getTimezoneOffset()
+
+/* Cards due today (the student's own day) and new cards left today, across every unit. */
+export function getReviewSummary(accessToken?: string, signal?: AbortSignal) {
+  return request<ReviewSummary>(`/api/review/summary?tz_offset=${tzOffset()}`, { signal }, accessToken)
+}
+
+/* The next cards to review: one unit, one course, or everything when no scope is given. */
+export function getReviewQueue(scope: { course?: string; unit?: string; limit?: number }, accessToken?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ tz_offset: String(tzOffset()), limit: String(scope.limit ?? 20) })
+  if (scope.course) query.set('course', scope.course)
+  if (scope.unit) query.set('unit', scope.unit)
+  return request<{ cards: ReviewCard[] }>(`/api/review/queue?${query}`, { signal }, accessToken)
+}
+
+export function gradeReviewCard(cardId: string, grade: ReviewGrade, accessToken?: string) {
+  return request<ReviewGradeResult>(`/api/review/${encodeURIComponent(cardId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ grade, tz_offset: tzOffset() }),
+  }, accessToken)
+}
+
 export function analyzeAnswer(question: GeneratedQuestion, studentAnswer: string, studentId: string, accessToken?: string) {
   return request<AnswerResult>('/api/analyze-answer', {
     method: 'POST',

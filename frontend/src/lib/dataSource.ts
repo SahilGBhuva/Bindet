@@ -69,6 +69,10 @@ export type DataSource = {
   transferStudyGroup: typeof api.transferStudyGroup
   // Account (Settings). Always locked in the demo.
   deleteAccount: typeof api.deleteAccount
+  // Spaced-repetition review (in memory in the demo)
+  getReviewSummary: typeof api.getReviewSummary
+  getReviewQueue: typeof api.getReviewQueue
+  gradeReviewCard: typeof api.gradeReviewCard
 }
 
 export const realData: DataSource = {
@@ -120,6 +124,9 @@ export const realData: DataSource = {
   deleteStudyGroup: api.deleteStudyGroup,
   transferStudyGroup: api.transferStudyGroup,
   deleteAccount: api.deleteAccount,
+  getReviewSummary: api.getReviewSummary,
+  getReviewQueue: api.getReviewQueue,
+  gradeReviewCard: api.gradeReviewCard,
 }
 
 const DataContext = createContext<DataSource>(realData)
