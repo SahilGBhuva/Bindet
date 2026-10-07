@@ -20,7 +20,6 @@ export function useReviewSummary(accessToken: string | undefined) {
     let live = true
     let controller: AbortController | null = null
     const load = () => {
-      if (document.visibilityState === 'hidden') return
       controller?.abort()
       const current = new AbortController()
       controller = current
@@ -28,14 +27,16 @@ export function useReviewSummary(accessToken: string | undefined) {
         .then((value) => { if (live && controller === current) setSummary(value) })
         .catch(() => undefined)
     }
+    // Coming back to the tab refreshes (a day may have turned, or cards come due).
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
     load()
     window.addEventListener(REVIEW_CHANGED_EVENT, load)
-    document.addEventListener('visibilitychange', load)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       live = false
       controller?.abort()
       window.removeEventListener(REVIEW_CHANGED_EVENT, load)
-      document.removeEventListener('visibilitychange', load)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [data, accessToken, canRead])
 

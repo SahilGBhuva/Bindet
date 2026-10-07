@@ -15,6 +15,7 @@ import {
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
+import { announceReviewChange } from '../lib/review'
 import { useReviewSummary } from '../lib/useReviewSummary'
 import { ReviewSession } from './ReviewSession'
 import { prepareNotePhoto } from '../lib/notePhoto'
@@ -464,10 +465,11 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     ]).size
   const unitKey = `${activeCourse}|${activeUnit}`
   const unitReview = reviewSummary?.by_unit.find((entry) => entry.course === activeCourse && entry.unit === activeUnit)
-  if (reviewSummary && activeUnit && !cardModes[unitKey]) {
-    setCardModes((current) => ({ ...current, [unitKey]: unitReview && unitReview.due + unitReview.new > 0 ? 'review' : 'browse' }))
-  }
-  const cardMode = cardModes[unitKey] ?? 'browse'
+  // Until the student picks, Review is chosen once the unit has due or new cards, and then
+  // kept (so finishing a review shows "All caught up" rather than switching to Browse).
+  const reviewReady = Boolean(unitReview && unitReview.due + unitReview.new > 0)
+  if (activeUnit && !cardModes[unitKey] && reviewReady) setCardModes((current) => ({ ...current, [unitKey]: 'review' }))
+  const cardMode = cardModes[unitKey] ?? (reviewReady ? 'review' : 'browse')
   const libraryLoaded = library.key === unitKey && library.status === 'ready'
   const libraryLoading = library.key !== unitKey || library.status === 'loading'
   const libraryFailed = library.key === unitKey && library.status === 'error'
@@ -717,6 +719,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       followRenames(origin, since)
       setSavedCards((current) => mergeCards(current, result.cards))
       setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
+      // New cards are new review cards: due counts and Review's default follow.
+      if (result.cards.length) announceReviewChange()
     } catch (error) {
       if (!mounted.current) return
       // Already being written (here or on another device), or slower than our wait: watch for the result.
@@ -751,6 +755,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           ? { status: 'failed', count: 0, error: FLASHCARD_FAILED_MESSAGE, retry: true }
           : noteCardsFromServer(state)
         setNoteCards((current) => ({ ...current, [note.id]: settled }))
+        if (settled.status === 'ready') announceReviewChange()
         return
       }
       if (mounted.current) {
@@ -1430,6 +1435,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       // The server removes the note's flashcards along with it.
       setServerNotes((current) => current.filter((item) => item.id !== note.id))
       setSavedCards((current) => current.filter((item) => item.note_id !== note.id))
+      announceReviewChange()
       setNoteCards((current) => {
         const next = { ...current }
         delete next[note.id]
@@ -1719,6 +1725,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
         setRemaking({ done: index + 1, total: notes.length })
       }
       setNotice(`Made new flashcards for ${plural(notes.length, 'note')} in ${activeUnit}.`)
+      announceReviewChange()
     } finally {
       if (mounted.current) setRemaking(null)
     }

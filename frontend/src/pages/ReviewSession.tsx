@@ -45,7 +45,8 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   const [request, setRequest] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [done, setDone] = useState(0)
-  const [failed, setFailed] = useState(0)
+  // Cards whose last grade didn't save (they wait at the end of the queue).
+  const [unsaved, setUnsaved] = useState<string[]>([])
   // When each card graded in this session is next due, for "next review …" in a unit.
   const [nextDue, setNextDue] = useState<string[]>([])
   const root = useRef<HTMLDivElement>(null)
@@ -95,6 +96,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     setStatus('loading')
     setDone(0)
     setNextDue([])
+    setUnsaved([])
     setRequest((value) => value + 1)
   }
 
@@ -106,7 +108,10 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     setRevealed(false)
     data.gradeReviewCard(graded.id, choice, accessToken)
       .then((result) => {
-        if (mounted.current) setNextDue((current) => [...current, result.next_due_at])
+        if (mounted.current) {
+          setNextDue((current) => [...current, result.next_due_at])
+          setUnsaved((current) => current.filter((id) => id !== graded.id))
+        }
         announceReviewChange()
       })
       .catch(() => {
@@ -114,7 +119,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
         // Not saved: the card comes back at the end of the queue to grade again.
         setQueue((current) => [...current.filter((item) => item.id !== graded.id), graded])
         setDone((value) => Math.max(0, value - 1))
-        setFailed((value) => value + 1)
+        setUnsaved((current) => (current.includes(graded.id) ? current : [...current, graded.id]))
       })
   }
 
@@ -146,10 +151,10 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     return () => document.removeEventListener('keydown', onKey)
   })
 
-  const notice = failed ? (
+  const notice = unsaved.length ? (
     <div className="ui-alert tools__review-notice" role="alert">
-      <span>{failed === 1 ? 'A grade didn’t save.' : `${failed} grades didn’t save.`} {queue.length ? 'The card is back at the end of the queue.' : 'Try again.'}</span>
-      <button className="ui-button ui-button--ghost ui-button--sm tools__review-dismiss" type="button" onClick={() => setFailed(0)}>Dismiss</button>
+      <span>{unsaved.length === 1 ? 'A grade didn’t save. That card is back at the end of the queue.' : `${unsaved.length} grades didn’t save. Those cards are back at the end of the queue.`}</span>
+      <button className="ui-button ui-button--ghost ui-button--sm tools__review-dismiss" type="button" onClick={() => setUnsaved([])}>Dismiss</button>
     </div>
   ) : null
 
