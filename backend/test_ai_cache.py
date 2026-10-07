@@ -422,12 +422,14 @@ REPLY = "Photosynthesis turns light energy into chemical energy stored in glucos
 
 
 class TutorCacheTests(CacheTestCase):
-    def send(self, student_id, content="What is photosynthesis?", chunks=None, **fields):
+    def send(self, student_id, content="What is photosynthesis?", chunks=None, finish=None, **fields):
         calls = []
+        finish = finish or {"finish_reason": "stop", "done": True}
 
         def fake_stream(*, messages, route, session_id=None):
             calls.append(route)
             yield from (chunks or [REPLY[:30], REPLY[30:]])
+            return finish  # how the provider ended the stream (AI-F7: only "stop" is cached)
 
         with self.as_user(student_id), patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream):
             events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content=content, **fields), "Bearer t"))
@@ -447,7 +449,7 @@ class TutorCacheTests(CacheTestCase):
         self.assertEqual(self.budget_count(), 1)
         with patch.object(main, "global_ai_available", side_effect=AssertionError("budget charged")), \
                 self.assertLogs("bindit.ai", "INFO") as logs:
-            second, calls = self.send("alex", content="  what is   PHOTOSYNTHESIS? ")
+            second, calls = self.send("alex", content="  What is   photosynthesis? ")
         self.assertEqual(calls, [])
         self.assertTrue(any('"outcome":"cache_hit"' in line for line in logs.output))
         self.assertEqual(self.reply_of(second), REPLY)
@@ -456,7 +458,32 @@ class TutorCacheTests(CacheTestCase):
         conversation_id = second[0][1]["conversation"]["id"]
         self.assertNotEqual(conversation_id, first[0][1]["conversation"]["id"])
         stored = tutor.list_messages("alex", conversation_id)
-        self.assertEqual([(item["role"], item["content"]) for item in stored], [("user", "  what is   PHOTOSYNTHESIS?".strip()), ("assistant", REPLY)])
+        self.assertEqual([(item["role"], item["content"]) for item in stored], [("user", "  What is   photosynthesis?".strip()), ("assistant", REPLY)])
+
+    def test_case_is_part_of_the_question(self):
+        self.send("alex", content="What is CO?")
+        _, calls = self.send("alex", content="What is Co?")  # cobalt, not carbon monoxide
+        self.assertEqual(len(calls), 1)
+
+    def test_only_replies_that_finished_normally_are_cached(self):
+        for finish in ({"finish_reason": "length", "done": True}, {"finish_reason": "content_filter", "done": True},
+                       {"finish_reason": None, "done": False}):
+            with self.subTest(finish=finish):
+                self.send("alex", content=f"Explain osmosis {finish['finish_reason']}", finish=finish)
+        self.assertEqual(self.rows("tutor_reply_cache"), [])
+        self.send("alex", content="Explain osmosis", finish={"finish_reason": None, "done": True})
+        self.assertEqual(len(self.rows("tutor_reply_cache")), 1)
+
+    def test_a_downgraded_reply_is_keyed_by_the_model_that_answered(self):
+        hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
+        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 0):
+            _, calls = self.send("alex", content=hard)
+            self.assertEqual(calls[0]["model"], ai_tutor.OPENROUTER_MODEL)  # strong quota used up
+            _, calls = self.send("alex", content=hard)
+            self.assertEqual(calls, [])  # the normal model's reply is reused while the quota is out
+        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 5):
+            _, calls = self.send("alex", content=hard)
+        self.assertEqual(calls[0]["model"], "strong/model")  # never served as if the strong model wrote it
 
     def test_hits_still_count_toward_the_tutor_message_limits(self):
         with patch.object(main, "TUTOR_HOURLY_LIMIT", 2):

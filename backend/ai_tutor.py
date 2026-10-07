@@ -886,8 +886,21 @@ class ReplyGuard:
         return rest
 
 
+def finished_normally(result: Any) -> bool:
+    """True when a finished tutor stream (stream_tutor_reply's return value) ended because the
+    model was done: finish_reason "stop", or the [DONE] marker with no other finish reason.
+    A reply cut off by the token limit ("length"), a content filter or a dropped stream is not."""
+    if not isinstance(result, dict):
+        return False
+    reason = result.get("finish_reason")
+    return reason == "stop" or (reason is None and bool(result.get("done")))
+
+
 def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any], session_id: str | None = None):
-    """Yield text chunks from OpenRouter as they arrive. Raises AITutorError if nothing can be produced."""
+    """Yield text chunks from OpenRouter as they arrive. Raises AITutorError if nothing can be produced.
+
+    The generator's return value (StopIteration.value) is {"finish_reason", "done"}: the last
+    finish reason the provider sent and whether the [DONE] marker arrived (see finished_normally)."""
     payload: dict[str, Any] = _checked_payload("explain_material", {
         "model": route["model"],
         "stream": True,
@@ -899,6 +912,7 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
     if session_id:
         payload["session_id"] = session_id[:256]
     produced = False
+    result: dict[str, Any] = {"finish_reason": None, "done": False}
     try:
         with _client().stream("POST", OPENROUTER_URL, headers=_headers(), json=payload, timeout=_timeout(operation("explain_material")["timeout"])) as response:
             if response.status_code >= 400:
@@ -908,6 +922,7 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
                     continue
                 data = line[5:].strip()
                 if data == "[DONE]":
+                    result["done"] = True
                     break
                 try:
                     event = json.loads(data)
@@ -916,6 +931,8 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
                 if event.get("error"):
                     raise AITutorError("OpenRouter reported an error mid-stream")
                 choices = event.get("choices") or []
+                if choices and choices[0].get("finish_reason"):
+                    result["finish_reason"] = str(choices[0]["finish_reason"])
                 delta = (choices[0].get("delta") or {}).get("content") if choices else None
                 if delta:
                     produced = True
@@ -924,3 +941,4 @@ def stream_tutor_reply(*, messages: list[dict[str, Any]], route: dict[str, Any],
         raise AITutorError("OpenRouter stream failed") from exc
     if not produced:
         raise AITutorError("The tutor returned an empty reply")
+    return result

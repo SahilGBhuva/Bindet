@@ -238,8 +238,10 @@ def store_grade(key: str, result: dict) -> bool:
 #
 # Only the first message of a new conversation, without images, is cacheable: a
 # follow-up carries history that makes it unique. The key holds the owner, the
-# normalised message, a hash of the grounding the model saw (course, unit, note file
-# names and note text) and the route tier.
+# normalised message (case kept: "CO" and "Co" are different questions), a hash of the
+# grounding the model saw (course, unit, note file names and note text), and the route
+# tier and model that actually answered. Only replies whose stream finished normally
+# (ai_tutor.finished_normally) are stored.
 
 TUTOR_REPLY_PIECE_CHARS = 48
 
@@ -253,12 +255,14 @@ def tutor_version() -> str:
 
 
 def normalize_message(message: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", message or "").casefold().split())
+    """Whitespace collapsed, canonical (NFC) form. Case is kept: "What is CO?" (carbon
+    monoxide) and "What is Co?" (cobalt) must not share a reply."""
+    return " ".join(unicodedata.normalize("NFC", message or "").split())
 
 
-def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: list[str], source_text: str, tier: str) -> str:
+def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: list[str], source_text: str, tier: str, model: str = "") -> str:
     grounding = make_key("grounding", course, unit, json.dumps(labels[:10], ensure_ascii=False), (source_text or "").strip())
-    return make_key("tutor", tutor_version(), owner_id, normalize_message(message), grounding, tier)
+    return make_key("tutor", tutor_version(), owner_id, normalize_message(message), grounding, tier, model)
 
 
 def cached_tutor_reply(key: str, owner_id: str) -> str | None:

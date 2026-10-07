@@ -1609,10 +1609,14 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             grounding = note_store.context_for(owner, requested_course, requested_unit, limit_chars=12_000)
         else:
             grounding = ([], "")
-        tutor_cache_key = ai_cache.tutor_key(
+        # Keyed by the route (tier and model) the student would get; if the strong model's
+        # daily quota sends them to the normal model instead, the key is rebuilt below.
+        expected = ai_tutor.tutor_route(content, False)
+        cache_key_for = lambda route: ai_cache.tutor_key(  # noqa: E731
             owner_id=owner, message=content, course=requested_course, unit=requested_unit,
-            labels=grounding[0], source_text=grounding[1], tier=ai_tutor.tutor_route(content, False)["tier"],
+            labels=grounding[0], source_text=grounding[1], tier=route["tier"], model=route["model"],
         )
+        tutor_cache_key = cache_key_for(expected)
         cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
@@ -1641,6 +1645,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     else:
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
     route = ai_tutor.tutor_route(content, bool(image_parts)) if prefiltered or cached_reply is not None else capped_tutor_route(owner, content, bool(image_parts))
+    if tutor_cache_key and cached_reply is None and route["model"] != expected["model"]:
+        # The strong model's quota is used up: the reply comes from (and is cached for) the
+        # model that actually answers, and an earlier reply from that model may be reused.
+        tutor_cache_key = cache_key_for(route)
+        cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
     # The system prompt is fixed; the course, unit and notes travel in a delimited data
     # block inside the student's turn, never in the system prompt.
     turn_text = ai_tutor.tutor_user_text(content, course, unit, labels, source_text)
@@ -1664,8 +1673,13 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         produced: list[str] = []
         guard = ai_tutor.ReplyGuard()
         upstream = ai_tutor.stream_tutor_reply(messages=model_messages, route=route, session_id=ai_session_id(owner, conversation["id"], "tutor"))
+        finish: dict = {}
+
+        def tracked():
+            finish["result"] = yield from upstream  # the stream's finish reason, once it ends
+
         try:
-            for chunk in upstream:
+            for chunk in tracked():
                 text = guard.feed(chunk)
                 if guard.off_topic:
                     break
@@ -1691,8 +1705,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             yield ai_tutor.TUTOR_REFUSAL
         else:
             ai_tutor.log_ai_event("explain_material", outcome="ok", student_id=owner, tier=route["tier"], started=started)
-            if tutor_cache_key:
-                # Reached only when the whole reply streamed: never a refusal, error or cut-off reply.
+            if tutor_cache_key and ai_tutor.finished_normally(finish.get("result")):
+                # Reached only when the whole reply streamed and the model said it was done:
+                # never a refusal, error, or a reply cut off by the token limit.
                 ai_cache.store_tutor_reply(tutor_cache_key, owner, "".join(produced))
 
     def saved_user() -> bool:
