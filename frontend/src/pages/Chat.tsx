@@ -396,6 +396,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
     if (!activeId || !session) return []
     return threads[activeId] ?? getCachedGroupMessages(activeId, session) ?? []
   }, [threads, activeId, session])
+  // The open room failed to load and nothing is cached: sending would go nowhere useful, so the composer waits for a retry.
+  const roomUnavailable = Boolean(threadErrors[activeId]) && !serverMessages.length
 
   // A message can arrive over the socket before its own send call returns; show it once.
   const roomPending = pending.filter((item) => item.groupId === activeId && !(item.status === 'sending' && serverMessages.some((message) =>
@@ -421,6 +423,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   }, [roomMounted])
 
   function addFiles(files: FileList | File[]) {
+    if (roomUnavailable) return
     const list = Array.from(files).filter((file) => file.type.startsWith('image/'))
     if (!list.length) { setNotice('Only images can be shared in group chats.'); return }
     const room = MAX_IMAGES - imagesRef.current.length
@@ -474,7 +477,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   function submit(event?: FormEvent) {
     event?.preventDefault()
-    if (!session || !activeGroup) return
+    if (!session || !activeGroup || roomUnavailable) return
     const body = draft.trim()
     const ready = images.filter((item) => !item.error)
     if (!body && !ready.length) {
@@ -738,6 +741,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
               ))}
             </ul>
           ) : null}
+          {roomUnavailable ? <p className="chat__composer-note" id="chat-composer-note" role="status">This chat didn’t load, so messages can’t be sent yet. Use Try again above.</p> : null}
           <div className="chat__input">
             <textarea
               ref={textarea}
@@ -745,19 +749,20 @@ export function Chat({ session }: { session: AuthSession | null }) {
               onChange={(event) => onDraftChange(event.target.value)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
-              placeholder={activeGroup ? `Message ${activeGroup.name}` : 'Message'}
+              placeholder={roomUnavailable ? 'Chat unavailable' : activeGroup ? `Message ${activeGroup.name}` : 'Message'}
+              aria-describedby={roomUnavailable ? 'chat-composer-note' : undefined}
               aria-label={activeGroup ? `Message ${activeGroup.name}` : 'Message'}
               enterKeyHint="send"
               autoCapitalize="sentences"
               rows={1}
               maxLength={2000}
-              disabled={!activeGroup}
+              disabled={!activeGroup || roomUnavailable}
             />
             <div className="chat__tools">
-              <button type="button" className="chat__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" disabled={!activeGroup || images.length >= MAX_IMAGES}>{Icon.attach}</button>
-              <button type="button" className="chat__tool chat__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={!activeGroup || images.length >= MAX_IMAGES}>{Icon.camera}</button>
+              <button type="button" className="chat__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" disabled={!activeGroup || roomUnavailable || images.length >= MAX_IMAGES}>{Icon.attach}</button>
+              <button type="button" className="chat__tool chat__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={!activeGroup || roomUnavailable || images.length >= MAX_IMAGES}>{Icon.camera}</button>
               <span className="chat__hint">Enter to send · Shift+Enter for a new line · drop or paste images</span>
-              <button type="submit" className="chat__send" disabled={!activeGroup || !canSend} aria-label="Send message">{Icon.send}</button>
+              <button type="submit" className="chat__send" disabled={!activeGroup || roomUnavailable || !canSend} aria-label="Send message">{Icon.send}</button>
             </div>
           </div>
           <input ref={fileInput} className="ui-file-input" type="file" accept={ACCEPTED.join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
