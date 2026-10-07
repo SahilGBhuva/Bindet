@@ -19,7 +19,7 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, delete, select, update
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, delete, func, select, update
 
 import database
 
@@ -68,6 +68,9 @@ GRADING_STALE_SECONDS = 120
 GRACE_SECONDS = 120
 HISTORY_LIMIT = 20
 XP_PER_CORRECT = 2
+# Retakes reuse cached questions whose answers the student has already seen, so XP from
+# practice tests is capped per UTC day (like practice-lab rounds).
+XP_PER_DAY = 60
 # A topic answered below this share correct is a weak spot.
 WEAK_BELOW = 0.7
 
@@ -270,6 +273,18 @@ def finish(owner_id: str, test_id: str, token: str, results: dict[int, dict], *,
             ))
         test, item_rows = _load(connection, owner_id, test_id)
     return _public(test, item_rows)
+
+
+def xp_left_today(owner_id: str) -> int:
+    """How much practice-test XP the owner can still earn today (UTC)."""
+    init_practice()
+    now = _now()
+    day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+    with database.engine().connect() as connection:
+        earned = connection.execute(select(func.coalesce(func.sum(tests.c.xp_awarded), 0)).where(
+            tests.c.owner_id == owner_id, tests.c.status == "submitted", tests.c.submitted_at >= day_start,
+        )).scalar_one()
+    return max(0, XP_PER_DAY - int(earned))
 
 
 def set_xp_awarded(owner_id: str, test_id: str, xp: int) -> None:

@@ -3127,7 +3127,8 @@ def submit_practice_test(
         started_at = test["started_at"] if test["started_at"].tzinfo else test["started_at"].replace(tzinfo=timezone.utc)
         limit = test["time_limit_s"]
         over_time = bool(limit) and submitted_at > started_at + timedelta(seconds=int(limit) + practice_tests.GRACE_SECONDS)
-        xp = practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"])
+        xp = min(practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"]),
+                 practice_tests.xp_left_today(owner))
         public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=xp)
     except practice_tests.Conflict as error:
         raise practice_error(409, "grading_in_progress") from error

@@ -286,6 +286,16 @@ class SubmitTests(PracticeTestCase):
         self.assertEqual(result["xp_earned"], 4)
         self.assertEqual(practice_tests.get_test("alex", test["id"])["xp_earned"], 4)
 
+    def test_practice_test_xp_has_its_own_daily_cap(self):
+        # Retakes reuse questions whose answers are already shown, so repeat submits can't farm XP.
+        earned = 0
+        for _ in range(practice_tests.XP_PER_DAY // 10 + 2):
+            test, answers = self.take()
+            earned += self.submit(test["id"], answers).json()["xp_earned"]
+        self.assertEqual(earned, practice_tests.XP_PER_DAY)
+        self.assertEqual(practice_tests.xp_left_today("alex"), 0)
+        self.assertEqual(practice_tests.xp_left_today("sam"), practice_tests.XP_PER_DAY)
+
     def test_a_test_being_graded_refuses_a_second_submit(self):
         test, answers = self.take()
         token = practice_tests.claim_grading("alex", test["id"])
