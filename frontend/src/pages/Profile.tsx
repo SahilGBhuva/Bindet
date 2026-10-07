@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import type { FriendsHub, PersonSuggestion, Profile as ProfileData, Progress as ProgressData, StudyGroup } from '../lib/api'
+import { parseServerTime, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type StudyGroup } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
 import type { Course } from '../lib/types'
@@ -663,7 +663,7 @@ export function Profile({ session, onError }: ProfileProps) {
                               key={item.id}
                               name={item.display_name}
                               label={item.student_id === studentId ? 'You' : item.display_name}
-                              meta={shortDate.format(new Date(item.created_at))}
+                              meta={shortDate.format(new Date(parseServerTime(item.created_at)))}
                             >
                               <span className="ui-row__aside profile__xp-gain">+{item.xp} XP</span>
                             </PersonRow>
@@ -737,7 +737,7 @@ export function Profile({ session, onError }: ProfileProps) {
                       key={event.id}
                       name={event.display_name}
                       label={`${event.student_id === studentId ? 'You' : event.display_name} earned ${event.xp} XP`}
-                      meta={new Date(event.created_at).toLocaleDateString()}
+                      meta={new Date(parseServerTime(event.created_at)).toLocaleDateString()}
                     >
                       {event.student_id !== studentId ? (
                         <button
@@ -898,7 +898,7 @@ export function Profile({ session, onError }: ProfileProps) {
                             <span style={{ width: `${percent(quest.progress_xp, quest.target_xp)}%` }} />
                           </div>
                           <span className="profile__quest-meta">
-                            {quest.progress_xp >= quest.target_xp ? 'Complete' : `${quest.target_xp - quest.progress_xp} XP to go`} · ends {shortDate.format(new Date(quest.expires_at))}
+                            {quest.progress_xp >= quest.target_xp ? 'Complete' : `${quest.target_xp - quest.progress_xp} XP to go`} · ends {shortDate.format(new Date(parseServerTime(quest.expires_at)))}
                           </span>
                         </li>
                       ))}
@@ -933,7 +933,7 @@ export function Profile({ session, onError }: ProfileProps) {
                         {item.is_read ? null : <span className="sr-only">New: </span>}
                         {item.message}
                       </span>
-                      <time dateTime={item.created_at}>{shortDate.format(new Date(item.created_at))}</time>
+                      <time dateTime={item.created_at}>{shortDate.format(new Date(parseServerTime(item.created_at)))}</time>
                     </li>
                   ))}
                 </ul>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, type Profile, type StudyGroup, type Task } from './api'
+import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, parseServerTime, type Profile, type StudyGroup, type Task } from './api'
 import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
@@ -165,7 +165,7 @@ function nestGroups(groups: StudyGroup[]) {
   const rows: { group: StudyGroup; child: boolean }[] = []
   let parentWord = ''
   // Oldest first, so the group that started a family ("LM work team") comes before the ones that grew from it.
-  const ordered = groups.toSorted((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+  const ordered = groups.toSorted((a, b) => parseServerTime(a.created_at) - parseServerTime(b.created_at))
   for (const group of ordered) {
     const word = group.name.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
     const child = Boolean(word) && word === parentWord

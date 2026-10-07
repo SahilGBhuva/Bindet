@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
-import { getCachedStudyGroups, getStudyGroups, type StudyGroup } from '../lib/api'
+import { getCachedStudyGroups, getStudyGroups, parseServerTime, type StudyGroup } from '../lib/api'
 import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import {
@@ -56,7 +56,7 @@ function readActiveGroup(): string {
 }
 
 function time(iso: string | null | undefined) {
-  const value = iso ? new Date(iso).getTime() : 0
+  const value = iso ? parseServerTime(iso) : 0
   return Number.isFinite(value) ? value : 0
 }
 
@@ -70,7 +70,7 @@ function dayLabel(iso: string) {
   const days = Math.round((startOfDay(Date.now()) - startOfDay(time(iso))) / 86_400_000)
   if (days === 0) return 'Today'
   if (days === 1) return 'Yesterday'
-  return dayFormat.format(new Date(iso))
+  return dayFormat.format(new Date(time(iso)))
 }
 
 function listTime(iso: string) {
