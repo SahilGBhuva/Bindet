@@ -22,6 +22,7 @@ import database
 import flashcards
 import main
 import note_store
+import practice_tests
 import questions
 import rate_limit
 import tasks
@@ -42,7 +43,7 @@ CONFIRM = {"confirm": "DELETE MY ACCOUNT"}
 # tables; test_every_locked_table_is_checked fails when a new table is not listed.
 ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
-    questions.metadata, tutor.tutor_metadata, tasks.task_metadata,
+    questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
 )
 
 
@@ -115,6 +116,7 @@ class AccountDeletionTests(unittest.TestCase):
         tutor.reset_tutor()
         questions.reset_questions()
         ai_cache.reset_caches()
+        practice_tests.reset_practice()
         with database.engine().begin() as connection:
             connection.execute(delete(note_store.notes))
         rate_limit.limiter.reset()
@@ -202,6 +204,13 @@ class AccountDeletionTests(unittest.TestCase):
         questions.save_question(ALEX, "1+1?", "2", "addition", 1)
         questions.save_to_bank("private-bank-key", "Alex note question?", "Yes", "cells", 1, owner_id=ALEX)
         questions.save_to_bank("shared-bank-key", "Shared question?", "Yes", "addition", 1)
+        # Practice tests (with their items) and a cached test tied to Alex's note; Sam's stay.
+        question = {"type": "short_answer", "prompt": "Which organelle makes ATP?", "choices": [], "answer": "Mitochondria",
+                    "explanation": "The notes say so.", "topic": "cells"}
+        self.alex_test = practice_tests.create_test(ALEX, "Bio", "Cells", 600, [question])
+        self.sam_test = practice_tests.create_test(SAM, "Bio", "Cells", 600, [question])
+        ai_cache.store_practice_test("b" * 64, ALEX, [question])
+        ai_cache.add_ref("practice_test_cache", "b" * 64, ALEX, self.alex_note["id"])
         self.shared_key, self.private_key = shared_key, private_key
 
     # --- helpers --------------------------------------------------------------------
@@ -243,7 +252,8 @@ class AccountDeletionTests(unittest.TestCase):
                      "tutor_reply_cache", "progress_claims", "study_tasks", "study_notes", "flashcards",
                      "flashcard_jobs", "flashcard_styles", "generated_questions", "tutor_conversations",
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
-                     "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones"):
+                     "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
+                     "practice_tests", "practice_test_cache"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
@@ -296,6 +306,13 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertIsNone(ai_cache.cached_extraction(self.private_key))
         self.assertIsNone(questions.cached_question("private-bank-key", SAM))
         self.assertIsNotNone(questions.cached_question("shared-bank-key", SAM))
+        # Alex's practice tests and their items are gone (items name no owner, so check them by test); Sam's remain.
+        with database.engine().connect() as connection:
+            remaining = set(connection.execute(select(practice_tests.items.c.test_id)).scalars().all())
+        self.assertEqual(remaining, {self.sam_test["id"]})
+        self.assertIsNone(practice_tests.get_test(ALEX, self.alex_test["id"]))
+        self.assertIsNotNone(practice_tests.get_test(SAM, self.sam_test["id"]))
+        self.assertIsNone(ai_cache.cached_practice_test("b" * 64, ALEX))
 
     def test_a_retry_after_success_is_harmless(self):
         self.assertEqual(self.delete().status_code, 200)

@@ -708,9 +708,11 @@ class CacheLockdownTests(unittest.TestCase):
             self.assertIn(name, database.metadata.tables)
 
     def test_migration_locks_down_every_cache_table(self):
-        path = os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", "20261007_ai_cache.sql")
-        with open(path) as handle:
-            sql = handle.read()
+        sql = ""
+        # Caches added later are locked down by the migration that adds their feature.
+        for name in ("20261007_ai_cache.sql", "20261012_practice_tests.sql"):
+            with open(os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", name)) as handle:
+                sql += handle.read()
         for name in ai_cache.RETENTION:
             self.assertIn(f"'{name}'", sql)
         self.assertIn("to_regclass", sql)

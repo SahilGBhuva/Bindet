@@ -219,6 +219,17 @@ tutor_reply_cache = Table(
     Column("hits", Integer, nullable=False, default=0),
 )
 
+# Per-account practice tests (questions with their answers), keyed by the notes text sent,
+# the question count and the student's preferences. Every read filters by owner.
+practice_test_cache = Table(
+    "practice_test_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("owner_id", String(100), nullable=False, index=True),
+    Column("questions", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("hits", Integer, nullable=False, default=0),
+)
+
 # Which owner and source (a note ID, "conversation:<id>", or "" for none) produced or
 # used each cache entry. A shared entry (flashcards, OCR text) is deleted when its last
 # reference goes; see ai_cache.release_source and ai_cache.purge_user_ai_data.
@@ -285,6 +296,9 @@ RLS_TABLES = (
     "student_progress",
     "study_tasks",
     "topic_progress",
+    "practice_test_cache",
+    "practice_test_items",
+    "practice_tests",
     "tutor_conversations",
     "tutor_messages",
     "tutor_reply_cache",
@@ -311,6 +325,9 @@ CLIENT_REVOKED_TABLES = (
     "flashcard_styles",
     "flashcards",
     "grading_cache",
+    "practice_test_cache",
+    "practice_test_items",
+    "practice_tests",
     "tutor_conversations",
     "tutor_messages",
     "tutor_reply_cache",
@@ -815,6 +832,35 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
             for row in topics
         },
     }
+
+
+def award_xp(student_id: str, xp: int) -> dict:
+    """Add XP that is not tied to one answer (a finished practice test). Respects the daily
+    cap and counts no attempt. Returns {"xp_awarded", "total_xp", "streak"}."""
+    init_db()
+    now = datetime.now(timezone.utc)
+    with engine().begin() as connection:
+        _advisory_lock(connection, f"xp:{student_id}")
+        day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
+        earned_today = connection.execute(select(func.coalesce(func.sum(xp_events.c.xp), 0)).where(
+            xp_events.c.student_id == student_id, xp_events.c.created_at >= day_start,
+        )).scalar_one()
+        xp = max(0, min(int(xp), DAILY_XP_CAP - int(earned_today)))
+        progress = connection.execute(select(student_progress).where(student_progress.c.student_id == student_id)).mappings().first()
+        if progress is None:
+            connection.execute(student_progress.insert().values(
+                student_id=student_id, total_xp=xp, attempts=0, correct_answers=0, streak=0, best_streak=0,
+                last_active_date=None, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
+            ))
+            total, streak = xp, 0
+        else:
+            total, streak = int(progress["total_xp"]) + xp, int(progress["streak"])
+            if xp:
+                connection.execute(update(student_progress).where(student_progress.c.student_id == student_id)
+                                   .values(total_xp=total, updated_at=now))
+        if xp > 0:
+            connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
+    return {"xp_awarded": xp, "total_xp": total, "streak": streak}
 
 
 def record_daily_login(student_id: str) -> dict:
@@ -1880,6 +1926,7 @@ def reset_db() -> None:
         connection.execute(delete(extraction_cache))
         connection.execute(delete(grading_cache))
         connection.execute(delete(tutor_reply_cache))
+        connection.execute(delete(practice_test_cache))
         connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))

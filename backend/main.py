@@ -39,6 +39,7 @@ import flashcards
 import questions
 import note_ingestion
 import note_store
+import practice_tests
 import rate_limit
 import storage
 import tutor
@@ -1376,7 +1377,10 @@ def move_notes(data: NotesMove, authorization: Annotated[str | None, Header()] =
     new_unit = data.new_unit.strip() if data.new_unit is not None else None
     if not course or not new_course or (unit is not None and not unit) or (new_unit is not None and (unit is None or not new_unit)):
         raise HTTPException(status_code=400, detail="Name the course (and unit) to rename")
-    return {"moved": flashcards.move_notes(user["id"], course, unit, new_course, new_unit)}
+    moved = flashcards.move_notes(user["id"], course, unit, new_course, new_unit)
+    # Practice test history follows its course or unit too.
+    practice_tests.move_scope(user["id"], course, unit, new_course, new_unit)
+    return {"moved": moved}
 
 
 @app.get("/api/notes", response_model=list[NoteResponse])
@@ -2837,6 +2841,248 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         total_xp=record["total_xp"],
         streak=record["streak"],
     )
+
+
+# --- Practice tests ------------------------------------------------------------------
+#
+# A timed test written from a unit's (or a whole course's) notes in ONE model call, and
+# graded in at most one more (every short answer the deterministic checks can't judge,
+# batched). Answers and explanations never leave the server before submission.
+# Errors carry {"code", "message"}.
+
+PRACTICE_TESTS_PER_DAY = 10        # tests the AI writes per student per day (cache misses)
+PRACTICE_STARTS_PER_DAY = 40       # tests started per day, retakes served from the cache included
+PRACTICE_SUBMITS_PER_HOUR = 60
+PRACTICE_GRADING_PER_DAY = 120     # the same "ai_grading" budget single answers use
+PRACTICE_MESSAGES = {
+    "no_notes": "Add notes first — practice tests are written only from your notes.",
+    "notes_too_short": "These notes are too short for a practice test. Add a few more facts or definitions first.",
+    "ai_unavailable": "Couldn’t write a practice test right now. Try again in a moment.",
+    "ai_bad_output": "Couldn’t write a usable practice test from these notes right now. Try again in a moment.",
+    "grading_unavailable": "We couldn’t grade your test right now. Your answers are still here — try submitting again in a moment.",
+    "test_not_found": "That practice test couldn’t be found.",
+    "already_submitted": "This test was already submitted.",
+    "grading_in_progress": "This test is being graded. Wait a moment, then open it again.",
+}
+
+
+def practice_error(status: int, code: str, message: str | None = None, retry_after: int | None = None) -> HTTPException:
+    headers = {"Retry-After": str(retry_after)} if retry_after else None
+    return HTTPException(status_code=status, detail={"code": code, "message": message or PRACTICE_MESSAGES[code]}, headers=headers)
+
+
+def practice_rate_limit(student_id: str, action: str, limit: int, message: str, window_minutes: int = 1440) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        wait = limit_retry_after(student_id, action, window_minutes)
+        raise practice_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+
+
+class PracticeTestCreate(BaseModel):
+    """What the student chooses. The notes, prompt and every model setting are server-side."""
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(min_length=1, max_length=120)
+    unit: str | None = Field(default=None, min_length=1, max_length=160)  # None: the whole course
+    count: int | None = Field(default=None, ge=ai_tutor.PRACTICE_MIN_QUESTIONS, le=ai_tutor.PRACTICE_MAX_QUESTIONS)
+    time_limit_min: int | None = Field(default=None, ge=5, le=60)
+    untimed: bool = False
+    # Optional steering, screened like quiz instructions (see checked_instructions).
+    instructions: str | None = Field(default=None, max_length=200)
+    # Skip the saved test for these notes and settings and have the AI write new questions.
+    new_questions: bool = False
+
+
+class PracticeAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    position: int = Field(ge=0, lt=ai_tutor.PRACTICE_MAX_QUESTIONS)
+    answer: str = Field(max_length=ai_tutor.PRACTICE_STUDENT_ANSWER_MAX)
+
+
+class PracticeSubmit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    answers: list[PracticeAnswer] = Field(default_factory=list, max_length=ai_tutor.PRACTICE_MAX_QUESTIONS)
+
+
+def practice_time_limit(data: PracticeTestCreate, count: int) -> int | None:
+    """Seconds allowed: the student's choice, or 1.5 minutes per question; None when untimed."""
+    if data.untimed:
+        return None
+    if data.time_limit_min is not None:
+        return data.time_limit_min * 60
+    return round(count * 90)
+
+
+@app.post("/api/practice-tests", status_code=201)
+def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    instructions = checked_instructions(data.instructions, owner, "generate_test")
+    course = data.course.strip()
+    unit = data.unit.strip() if data.unit is not None else None
+    if not course or (unit is not None and not unit):
+        raise HTTPException(status_code=400, detail="Choose a course (and unit) for the practice test")
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_test", outcome=outcome, student_id=owner, tier="text", started=started, **fields)  # noqa: E731
+    count = ai_tutor.practice_count(data.count)
+    time_limit_s = practice_time_limit(data, count)
+    _, source_text, note_ids = note_store.practice_context(owner, course, unit, ai_tutor.PRACTICE_NOTE_CHARS)
+    text = ai_tutor.practice_source_text(source_text)
+    if not text:
+        raise practice_error(400, "no_notes")
+    if ai_tutor.note_too_short(text):
+        raise practice_error(400, "notes_too_short")
+    practice_rate_limit(owner, "practice_test_start", PRACTICE_STARTS_PER_DAY, "You’ve started a lot of practice tests today.")
+    steering = ai_tutor.instructions_hash(instructions)
+    cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count, instructions_hash=steering)
+    questions: list[dict] = []
+    if not data.new_questions:
+        # The same notes, settings and preferences already made a test for this student:
+        # serve it again (a retake) with no AI call, AI quota or budget.
+        cached = ai_cache.cached_practice_test(cache_key, owner)
+        if cached is not None:
+            questions, _ = ai_tutor.clean_practice_questions(cached, text, count, default_topic=unit or course)
+            if len(questions) < ai_tutor.practice_min_kept(count):
+                questions = []
+        if ai_cache.enabled():
+            log("cache_hit" if questions else "cache_miss", cards_kept=len(questions) or None)
+    if not questions:
+        try:
+            practice_rate_limit(owner, "practice_test", PRACTICE_TESTS_PER_DAY, "You’ve made a lot of practice tests today.")
+        except HTTPException:
+            log("rate_limited")
+            raise
+        if not global_ai_available():
+            raise practice_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
+        try:
+            ai_tutor.warm_connection()
+            batch = ai_tutor.generate_practice_test(
+                course=course, unit=unit or "", note_text=text, count=count, instructions=instructions,
+                session_id=ai_session_id(owner, course, unit or "", "practice"),
+            )
+        except ai_tutor.AIBadOutput as exc:
+            log("bad_output", error=exc)
+            raise practice_error(503, "ai_bad_output", retry_after=30) from exc
+        except ai_tutor.AITutorError as exc:
+            log("ai_error", error=exc)
+            raise practice_error(503, "ai_unavailable", retry_after=30) from exc
+        questions = batch.questions
+        log("ok", cards_in=batch.received, cards_kept=len(questions))
+        if ai_cache.store_practice_test(cache_key, owner, questions):
+            # Tied to every note it was written from: deleting any of them deletes it.
+            for note_id in note_ids:
+                ai_cache.add_ref("practice_test_cache", cache_key, owner, note_id)
+    return practice_tests.create_test(owner, course, unit, time_limit_s, practice_tests.shuffled_choices(questions))
+
+
+@app.get("/api/practice-tests")
+def list_practice_tests(
+    course: Annotated[str, Query(min_length=1, max_length=120)],
+    unit: Annotated[str | None, Query(min_length=1, max_length=160)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """The student's last 20 tests in a course (or one unit of it), newest first. Never calls the AI."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return {"tests": practice_tests.list_tests(owner, course.strip(), unit.strip() if unit is not None else None)}
+
+
+@app.get("/api/practice-tests/{test_id}")
+def get_practice_test(test_id: Annotated[str, PathParam(min_length=1, max_length=64)], authorization: Annotated[str | None, Header()] = None):
+    """One of the student's tests: without answers until it is submitted."""
+    owner = auth.authenticated_user(authorization)["id"]
+    test = practice_tests.get_test(owner, test_id)
+    if test is None:
+        raise practice_error(404, "test_not_found")
+    return test
+
+
+def _practice_answer(value: str | None) -> str:
+    return ai_tutor._CONTROL_CHARS.sub("", unicodedata.normalize("NFC", value or "")).strip()[:ai_tutor.PRACTICE_STUDENT_ANSWER_MAX]
+
+
+def grade_practice_items(owner: str, rows: list[dict], answers: dict[int, str]) -> dict[int, dict]:
+    """{position: {student_answer, correct, grading_source, feedback}} for every item.
+    Multiple choice is exact; short answers use the deterministic checks first, and every
+    one they can't judge goes to the AI grader in ONE batched call (one ai_grading unit and
+    one global budget call). Raises HTTPException when the AI is needed but unavailable."""
+    results: dict[int, dict] = {}
+    pending: list[dict] = []
+    for row in rows:
+        position = row["position"]
+        answer = answers.get(position, "")
+        if row["type"] == "multiple_choice":
+            correct = bool(answer) and answer == row["answer"]
+            results[position] = {"student_answer": answer, "correct": correct, "grading_source": "deterministic", "feedback": ""}
+            continue
+        verdict = deterministic_verdict(answer, row["answer"], row["topic"]) if answer else False
+        if verdict is None:
+            pending.append({"id": position, "question": row["prompt"], "reference": row["answer"], "answer": answer})
+        else:
+            results[position] = {"student_answer": answer, "correct": verdict, "grading_source": "deterministic", "feedback": ""}
+    if not pending:
+        return results
+    started = time.perf_counter()
+    practice_rate_limit(owner, "ai_grading", PRACTICE_GRADING_PER_DAY, "You’ve had a lot of answers checked today.")
+    if not global_ai_available():
+        raise practice_error(503, "grading_unavailable", retry_after=30)
+    try:
+        graded = ai_tutor.grade_practice_answers(pending, session_id=ai_session_id(owner, "practice-grading"))
+    except ai_tutor.AITutorError as exc:
+        ai_tutor.log_ai_event("grade_test", outcome="bad_output" if isinstance(exc, ai_tutor.AIBadOutput) else "ai_error",
+                              student_id=owner, tier="text", started=started, error=exc)
+        raise practice_error(503, "grading_unavailable", retry_after=30) from exc
+    ai_tutor.log_ai_event("grade_test", outcome="ok", student_id=owner, tier="text", started=started, cards_in=len(pending))
+    for item in pending:
+        grade = graded[item["id"]]
+        results[item["id"]] = {"student_answer": item["answer"], "correct": grade["correct"], "grading_source": "ai", "feedback": grade["feedback"]}
+    return results
+
+
+@app.post("/api/practice-tests/{test_id}/submit")
+def submit_practice_test(
+    test_id: Annotated[str, PathParam(min_length=1, max_length=64)],
+    data: PracticeSubmit,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Grade the test once: per-item results, explanations, score, a topic breakdown and XP.
+    A test submitted after its time limit (plus a short grace) is still graded, marked over time."""
+    owner = auth.authenticated_user(authorization)["id"]
+    submitted_at = datetime.now(timezone.utc)
+    limit_action(owner, "practice_submit", PRACTICE_SUBMITS_PER_HOUR)
+    loaded = practice_tests.graded_items(owner, test_id)
+    if loaded is None:
+        raise practice_error(404, "test_not_found")
+    test, rows = loaded
+    if test["status"] == "submitted":
+        raise practice_error(409, "already_submitted")
+    answers: dict[int, str] = {}
+    for entry in data.answers:
+        if entry.position < len(rows):
+            answers[entry.position] = _practice_answer(entry.answer)
+    try:
+        token = practice_tests.claim_grading(owner, test_id)
+    except LookupError as error:
+        raise practice_error(404, "test_not_found") from error
+    except practice_tests.Conflict as error:
+        raise practice_error(409, "already_submitted" if str(error) == "already_submitted" else "grading_in_progress") from error
+    try:
+        results = grade_practice_items(owner, rows, answers)
+        started_at = test["started_at"] if test["started_at"].tzinfo else test["started_at"].replace(tzinfo=timezone.utc)
+        limit = test["time_limit_s"]
+        over_time = bool(limit) and submitted_at > started_at + timedelta(seconds=int(limit) + practice_tests.GRACE_SECONDS)
+        xp = practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"])
+        public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=xp)
+    except practice_tests.Conflict as error:
+        raise practice_error(409, "grading_in_progress") from error
+    except BaseException:
+        practice_tests.release_grading(owner, test_id, token)
+        raise
+    # XP once: only the request that held the grading claim reaches this point.
+    award = database.award_xp(owner, xp)
+    if award["xp_awarded"] != xp:
+        practice_tests.set_xp_awarded(owner, test_id, award["xp_awarded"])
+    public["xp_earned"] = award["xp_awarded"]
+    public["total_xp"] = award["total_xp"]
+    return public
 
 
 @app.get("/api/progress/me", response_model=ProgressResponse)
