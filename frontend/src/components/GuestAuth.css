@@ -4,7 +4,7 @@
  * landing page's stylesheet, which is loaded lazily.
  */
 
-.auth-backdrop { min-height: 100vh; background: var(--color-bg); }
+.auth-backdrop { min-height: 100vh; min-height: 100dvh; background: var(--color-bg); }
 
 .auth {
   display: grid;
@@ -22,7 +22,12 @@
   justify-content: center;
   width: min(420px, 100%);
   margin: 0 auto;
-  padding: 48px 24px;
+  /* Clear the notch, the rounded corners and the home bar on phones (viewport-fit=cover). */
+  padding:
+    calc(48px + env(safe-area-inset-top))
+    calc(24px + env(safe-area-inset-right))
+    calc(48px + env(safe-area-inset-bottom))
+    calc(24px + env(safe-area-inset-left));
   animation: ui-pop var(--duration-base) var(--ease-out);
 }
 
@@ -40,6 +45,10 @@
 }
 
 .auth-card__mascot { width: 72px; height: auto; margin-bottom: 18px; }
+/* Sign in and sign up: the small mascot sits in the card's top corner, beside the heading. */
+.auth-card__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.auth-card__head > div { min-width: 0; }
+.auth-card__mascot--corner { flex: none; width: 64px; margin: 0 0 6px; }
 
 .auth-eyebrow {
   margin: 0 0 10px;
@@ -245,12 +254,15 @@
 @media (max-width: 900px) {
   .auth { grid-template-columns: 1fr; }
   .auth-aside { display: none; }
-  .auth-card { justify-content: flex-start; padding-top: 28px; }
+  .auth-card { justify-content: flex-start; padding-top: calc(28px + env(safe-area-inset-top)); }
+  .auth-card__mascot--corner { width: 56px; }
   .auth-card__top { margin-bottom: 40px; }
 
   /* Touch: 16px fields (no iOS zoom on focus) and 40px tall text actions. */
   .auth-input { height: 46px; font-size: 16px; }
   .auth-google__btn { min-height: 48px; font-size: 16px; }
   .auth-pass button { top: 3px; height: 40px; }
-  .auth-text-btn { min-height: 40px; }
+  .auth-text-btn { min-height: 44px; }
+  /* The Log in / Sign up switch is a full 44px target, not just its line of text. */
+  .auth-switch .auth-text-btn { display: inline-flex; align-items: center; min-width: 44px; padding: 0 4px; }
 }
