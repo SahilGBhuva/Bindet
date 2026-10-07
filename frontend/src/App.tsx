@@ -103,22 +103,30 @@ function useKeyboardAwareness() {
       const covered = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop))
       root.style.setProperty('--keyboard-inset', `${covered}px`)
     }
+    // A focused field that is removed (a dialog closing) fires no focusout: watch for that while typing.
+    const removal = new MutationObserver(() => {
+      const active = document.activeElement
+      if (!active || active === document.body || !active.isConnected) window.setTimeout(sync, 0)
+    })
     const sync = () => {
       const active = document.activeElement
       const typing = phone.matches && active instanceof HTMLElement && active.matches(TYPING_FIELD) && !active.matches(':disabled, [readonly]')
       root.classList.toggle('is-typing', typing)
+      removal.disconnect()
+      if (typing) removal.observe(document.body, { childList: true, subtree: true })
       measure()
     }
     // focusout fires before the next field gains focus, so wait a frame before deciding.
-    const onFocusOut = () => window.requestAnimationFrame(sync)
+    const later = () => window.setTimeout(sync, 0)
     document.addEventListener('focusin', sync)
-    document.addEventListener('focusout', onFocusOut)
-    viewport?.addEventListener('resize', measure)
+    document.addEventListener('focusout', later)
+    viewport?.addEventListener('resize', sync)
     phone.addEventListener('change', sync)
     return () => {
       document.removeEventListener('focusin', sync)
-      document.removeEventListener('focusout', onFocusOut)
-      viewport?.removeEventListener('resize', measure)
+      document.removeEventListener('focusout', later)
+      viewport?.removeEventListener('resize', sync)
+      removal.disconnect()
       phone.removeEventListener('change', sync)
       root.classList.remove('is-typing')
       root.style.removeProperty('--keyboard-inset')
