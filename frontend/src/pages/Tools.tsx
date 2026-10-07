@@ -592,6 +592,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     if (data.sandboxed) return
     const sync = () => {
       if (!reviewRequested()) return
+      // A practice test in progress stays on the server; its unit's Quiz panel offers Resume.
+      setPractice(null)
       setReviewAll(true)
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
     }
@@ -1903,7 +1905,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
         </div>
         <div className="tools__header-actions">
           {reviewSummary?.due && !reviewAll ? (
-            <button className="ui-button ui-button--primary tools__review-all" type="button" onClick={() => setReviewAll(true)}>
+            <button className="ui-button ui-button--primary tools__review-all" type="button" onClick={() => { setPractice(null); setReviewAll(true) }}>
               {plural(reviewSummary.due, 'card')} due
             </button>
           ) : null}
