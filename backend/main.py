@@ -1291,6 +1291,27 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
     return note_response(row, pages_skipped)
 
 
+class NotesMove(BaseModel):
+    """Rename a course (no unit) or one unit, moving the student's saved notes with it."""
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(min_length=1, max_length=120)
+    unit: str | None = Field(default=None, min_length=1, max_length=160)
+    new_course: str = Field(min_length=1, max_length=120)
+    new_unit: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+@app.post("/api/notes/move")
+def move_notes(data: NotesMove, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "note_move", 120)
+    course, new_course = data.course.strip(), data.new_course.strip()
+    unit = data.unit.strip() if data.unit is not None else None
+    new_unit = data.new_unit.strip() if data.new_unit is not None else None
+    if not course or not new_course or (unit is not None and not unit) or (new_unit is not None and (unit is None or not new_unit)):
+        raise HTTPException(status_code=400, detail="Name the course (and unit) to rename")
+    return {"moved": flashcards.move_notes(user["id"], course, unit, new_course, new_unit)}
+
+
 @app.get("/api/notes", response_model=list[NoteResponse])
 def get_notes(course: Annotated[str, Query(max_length=120)], unit: Annotated[str, Query(max_length=160)], authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)

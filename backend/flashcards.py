@@ -319,6 +319,27 @@ def delete_note_and_cards(owner_id: str, note_id: str) -> bool:
     return True
 
 
+def move_notes(owner_id: str, course: str, unit: str | None, new_course: str, new_unit: str | None) -> int:
+    """Rename where the owner's notes (and their cards) live: a whole course, or one unit of it.
+
+    Notes are kept by course and unit name, so renaming a course or unit on the Study page
+    has to move them too, or the renamed unit shows no notes. Returns how many notes moved.
+    """
+    init_flashcards()
+    notes = note_store.notes
+    note_filter = [notes.c.student_id == owner_id, notes.c.course == course]
+    card_filter = [cards.c.owner_id == owner_id, cards.c.course == course]
+    values = {"course": new_course}
+    if unit is not None:
+        note_filter.append(notes.c.unit == unit)
+        card_filter.append(cards.c.unit == unit)
+        values["unit"] = new_unit if new_unit is not None else unit
+    with database.engine().begin() as connection:
+        moved = connection.execute(update(notes).where(*note_filter).values(**values)).rowcount
+        connection.execute(update(cards).where(*card_filter).values(**values))
+    return int(moved or 0)
+
+
 def reset_flashcards() -> None:
     """Test helper."""
     init_flashcards()

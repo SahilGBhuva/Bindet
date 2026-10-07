@@ -314,6 +314,14 @@ export function deleteNote(noteId: string, accessToken?: string) {
   return request<{ deleted: boolean }>(`/api/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' }, accessToken)
 }
 
+/* Renames a course (no unit) or one of its units on the server, moving the saved notes and flashcards with it. */
+export function moveNotes(scope: { course: string; unit?: string; newCourse: string; newUnit?: string }, accessToken?: string) {
+  return request<{ moved: number }>('/api/notes/move', {
+    method: 'POST',
+    body: JSON.stringify({ course: scope.course, unit: scope.unit, new_course: scope.newCourse, new_unit: scope.newUnit }),
+  }, accessToken)
+}
+
 export function generateQuestion(topic: Topic, difficulty: number, notes?: NoteQuizContext, accessToken?: string, signal?: AbortSignal) {
   return request<GeneratedQuestion>('/api/generate-question', {
     method: 'POST',

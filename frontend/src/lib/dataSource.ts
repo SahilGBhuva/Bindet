@@ -40,6 +40,7 @@ export type DataSource = {
   analyzeAnswer: typeof api.analyzeAnswer
   uploadNote: typeof api.uploadNote
   deleteNote: typeof api.deleteNote
+  moveNotes: typeof api.moveNotes
   answerFriendRequest: typeof api.answerFriendRequest
   blockSocialUser: typeof api.blockSocialUser
   createStudyGroup: typeof api.createStudyGroup
@@ -86,6 +87,7 @@ export const realData: DataSource = {
   analyzeAnswer: api.analyzeAnswer,
   uploadNote: api.uploadNote,
   deleteNote: api.deleteNote,
+  moveNotes: api.moveNotes,
   answerFriendRequest: api.answerFriendRequest,
   blockSocialUser: api.blockSocialUser,
   createStudyGroup: api.createStudyGroup,

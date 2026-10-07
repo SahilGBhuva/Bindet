@@ -123,8 +123,13 @@ export function unitsFor(courses: Course[], courseName: string): string[] {
   return courses.find((course) => course.name === courseName)?.units ?? []
 }
 
+/* Course and unit names as the server keeps them: it trims the ends of each name. */
+export function sameName(a: string, b: string): boolean {
+  return a.trim() === b.trim()
+}
+
 export function notesFor(deposits: NoteDeposit[], course: string, unit: string): NoteDeposit[] {
-  return deposits.filter((item) => item.course === course && item.unit === unit)
+  return deposits.filter((item) => sameName(item.course, course) && sameName(item.unit, unit))
 }
 
 export function loadAvatar(): string {

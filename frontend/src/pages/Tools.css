@@ -1205,3 +1205,18 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 }
 
 .tools__deck-status:empty { display: none; }
+
+/* A text-styled action inside a sentence (e.g. Retry in the quiz source line). */
+.tools__inline-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tools__unsaved { margin-bottom: var(--space-3, 12px); }

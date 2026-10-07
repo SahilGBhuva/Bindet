@@ -420,6 +420,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
 
     uploadNote: locked('upload notes'),
     deleteNote: locked('remove notes'),
+    moveNotes: locked('rename courses and units'),
     answerFriendRequest: locked('answer friend requests'),
     blockSocialUser: locked('manage friends'),
     createStudyGroup: locked('create a study group'),

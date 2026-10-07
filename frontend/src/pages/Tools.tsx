@@ -1,12 +1,13 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { AI_BREAK_MESSAGE, ApiError, isAbortError, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
-import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, Topic, UploadedNote } from '../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, UploadedNote } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import {
   fileToCourseImageDataUrl,
   notesFor,
   pickCourseTone,
+  sameName,
   unitsFor,
   withCourseTones,
 } from '../lib/session'
@@ -16,14 +17,6 @@ import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
 type NoteSource = 'file' | 'paste'
-
-const QUIZ_TOPICS: { id: Topic; label: string }[] = [
-  { id: 'mixed', label: 'Mixed' },
-  { id: 'addition', label: 'Addition' },
-  { id: 'subtraction', label: 'Subtraction' },
-  { id: 'multiplication', label: 'Multiplication' },
-  { id: 'division', label: 'Division' },
-]
 
 const QUIZ_LEVELS = [
   { id: 1, label: 'Level 1' },
@@ -206,6 +199,14 @@ function questionFingerprint(text: string) {
   return (text.normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(' ')
 }
 
+/* Why a unit's notes or flashcards didn't load, in words the student can act on. */
+function libraryFailure(error: unknown, what: 'notes' | 'flashcards' = 'notes') {
+  const fallback = `Couldn’t load your ${what}.`
+  if (error instanceof RequestTimeoutError) return `${fallback} ${error.message}`
+  if (error instanceof ApiError && (error.status === 401 || error.status === 429)) return `${fallback} ${error.message}`
+  return `${fallback} Check your connection and try again.`
+}
+
 /* Why a question didn't load, in words the student can act on. */
 function quizLoadFailure(error: unknown) {
   if (error instanceof RequestTimeoutError) return error.message
@@ -241,7 +242,6 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [uploadError, setUploadError] = useState<{ source: NoteSource; message: string; retry: boolean } | null>(null)
   const [cardIndex, setCardIndex] = useState(0)
   const [cardFlipped, setCardFlipped] = useState(false)
-  const [quizTopic, setQuizTopic] = useState<Topic>('mixed')
   const [quizDifficulty, setQuizDifficulty] = useState(1)
   const [quizQuestion, setQuizQuestion] = useState<GeneratedQuestion | null>(null)
   const [quizAnswer, setQuizAnswer] = useState('')
@@ -254,7 +254,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [savedCards, setSavedCards] = useState<Flashcard[]>([])
   const [serverNotes, setServerNotes] = useState<NoteDeposit[]>([])
   const [noteCards, setNoteCards] = useState<Record<string, NoteCards>>({})
-  const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string }>({ key: '', status: 'loading', error: '' })
+  // cardsFailed: the notes loaded but their flashcards didn't (each is shown on its own).
+  const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string; cardsFailed: boolean }>({ key: '', status: 'loading', error: '', cardsFailed: false })
   const [libraryRequest, setLibraryRequest] = useState(0)
   const [panelFn, setPanelFn] = useState<ToolView>('scan')
   const [orderOpen, setOrderOpen] = useState(false)
@@ -293,25 +294,27 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     ...notesFor(serverNotes, activeCourse, activeUnit).filter((note) => !localUnitNotes.some((item) => item.id === note.id)),
   ].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
   const courseNoteCount = new Set([
-    ...notebook.deposits.filter((note) => note.course === activeCourse).map((note) => note.id),
-    ...serverNotes.filter((note) => note.course === activeCourse).map((note) => note.id),
+    ...notebook.deposits.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
+    ...serverNotes.filter((note) => sameName(note.course, activeCourse)).map((note) => note.id),
   ]).size
   const unitKey = `${activeCourse}|${activeUnit}`
   const libraryLoaded = library.key === unitKey && library.status === 'ready'
   const libraryLoading = library.key !== unitKey || library.status === 'loading'
+  const libraryFailed = library.key === unitKey && library.status === 'error'
+  const cardsFailed = libraryFailed || (libraryLoaded && library.cardsFailed)
   const unitNoteIds = new Set(unitNotes.map((note) => note.id))
   const cards = savedCards.filter((item) => unitNoteIds.has(item.note_id))
   const card = cards.length ? cards[cardIndex % cards.length] : null
   // A note the server has not reported on yet has no flashcards so far.
   const cardsFor = (note: NoteDeposit): NoteCards | undefined =>
-    noteCards[note.id] ?? (libraryLoaded ? { status: 'none', count: 0, error: '', retry: false } : undefined)
+    noteCards[note.id] ?? (libraryLoaded && !library.cardsFailed ? { status: 'none', count: 0, error: '', retry: false } : undefined)
   const notesWith = (status: NoteFlashcardStatus) => unitNotes.filter((note) => cardsFor(note)?.status === status)
   const makingNotes = notesWith('generating')
   const failedNotes = notesWith('failed')
   const waitingNotes = notesWith('none')
   const shortNotes = notesWith('too_short')
   const uploadBusy = Boolean(uploading)
-  const quizKey = `${activeCourse}|${activeUnit}|${unitNotes.length ? `notes:${unitNotes.length}` : quizTopic}|${quizDifficulty}`
+  const quizKey = `${activeCourse}|${activeUnit}|notes:${unitNotes.length}|${quizDifficulty}`
 
   useEffect(() => {
     data.saveNotebook(notebook)
@@ -358,13 +361,17 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }, [])
 
   // Takes in what the server reports for a unit: its notes, saved cards, and each note's state.
-  function applyLibrary(course: string, unit: string, result: FlashcardLibrary, notes: UploadedNote[] | null) {
-    const listed = (notes ?? []).map(noteFromServer)
-    const fromStates: NoteDeposit[] = result.notes
+  // Either list may be missing (its request failed); the other still counts.
+  function applyLibrary(course: string, unit: string, result: FlashcardLibrary | null, notes: UploadedNote[] | null) {
+    // The server matched these to the course and unit asked for, so they are filed under
+    // exactly those names (the server trims names; this page's may differ only in spacing).
+    const listed = (notes ?? []).map((note) => ({ ...noteFromServer(note), course, unit }))
+    const fromStates: NoteDeposit[] = (result?.notes ?? [])
       .filter((state) => !listed.some((note) => note.id === state.note_id))
       .map((state) => ({ id: state.note_id, course, unit, fileName: state.file_name, createdAt: state.updated_at ?? '', status: 'ready' }))
     const incoming = [...listed, ...fromStates]
-    setServerNotes((current) => [...current.filter((note) => note.course !== course || note.unit !== unit), ...incoming])
+    setServerNotes((current) => [...current.filter((note) => !sameName(note.course, course) || !sameName(note.unit, unit)), ...incoming])
+    if (!result) return
     setSavedCards((current) => mergeCards(current, result.cards))
     setNoteCards((current) => {
       const next = { ...current }
@@ -382,23 +389,24 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
   const loadUnitLibrary = useEffectEvent((course: string, unit: string, signal: AbortSignal) => {
     const key = `${course}|${unit}`
-    Promise.all([
+    // Notes and flashcards load side by side and independently: a failure of one never
+    // hides the other (the flashcard states name every note too, so either lists the notes).
+    void Promise.allSettled([
       data.listFlashcards({ course, unit }, accessToken, signal),
-      // The flashcard states name every note too, so a failed note list only loses previews.
-      data.listNotes(course, unit, accessToken, signal).catch((error: unknown) => {
-        if (isAbortError(error)) throw error
-        return null
-      }),
-    ])
-      .then(([result, notes]) => {
-        if (signal.aborted) return
-        applyLibrary(course, unit, result, notes)
-        setLibrary({ key, status: 'ready', error: '' })
-      })
-      .catch((error: unknown) => {
-        if (signal.aborted || isAbortError(error)) return
-        setLibrary({ key, status: 'error', error: error instanceof Error ? error.message : 'Couldn’t load your flashcards.' })
-      })
+      data.listNotes(course, unit, accessToken, signal),
+    ]).then(([cardsResult, notesResult]) => {
+      if (signal.aborted) return
+      const result = cardsResult.status === 'fulfilled' ? cardsResult.value : null
+      const notes = notesResult.status === 'fulfilled' ? notesResult.value : null
+      if (!result && !notes) {
+        const reason = cardsResult.status === 'rejected' ? cardsResult.reason : null
+        if (isAbortError(reason)) return
+        setLibrary({ key, status: 'error', error: libraryFailure(reason), cardsFailed: true })
+        return
+      }
+      applyLibrary(course, unit, result, notes)
+      setLibrary({ key, status: 'ready', error: result ? '' : libraryFailure(cardsResult.status === 'rejected' ? cardsResult.reason : null, 'flashcards'), cardsFailed: !result })
+    })
   })
 
   // Opening a unit reads its saved notes and flashcards. This never asks the AI for anything.
@@ -410,7 +418,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }, [activeCourse, activeUnit, libraryRequest])
 
   function reloadLibrary() {
-    setLibrary({ key: unitKey, status: 'loading', error: '' })
+    setLibrary({ key: unitKey, status: 'loading', error: '', cardsFailed: false })
     setLibraryRequest((count) => count + 1)
   }
 
@@ -587,14 +595,37 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setNotice(`“${to}” is already a course.`)
       return
     }
+    renameCourseLocally(from, to)
+    cancelRenameCourse()
+    void moveServerNotes({ course: from, newCourse: to }, () => renameCourseLocally(to, from))
+  }
+
+  function renameCourseLocally(from: string, to: string) {
     setNotebook((current) => ({
       ...current,
       courses: current.courses.map((course) => (course.name === from ? { ...course, name: to } : course)),
-      deposits: current.deposits.map((item) => (item.course === from ? { ...item, course: to } : item)),
+      deposits: current.deposits.map((item) => (sameName(item.course, from) ? { ...item, course: to } : item)),
       activeCourse: current.activeCourse === from ? to : current.activeCourse,
     }))
+    setServerNotes((current) => current.map((item) => (sameName(item.course, from) ? { ...item, course: to } : item)))
     setLookCourse((current) => (current === from ? to : current))
-    cancelRenameCourse()
+  }
+
+  /*
+   * Notes are saved on the server under their course and unit names, so a rename moves
+   * them there too; otherwise the renamed unit would show no notes on the next load or on
+   * another device. If the server can't do it, the rename is undone and the student told.
+   */
+  async function moveServerNotes(scope: { course: string; unit?: string; newCourse: string; newUnit?: string }, undo: () => void) {
+    try {
+      await data.moveNotes(scope, accessToken)
+      if (mounted.current) reloadLibrary()
+    } catch (error) {
+      if (!mounted.current) return
+      undo()
+      const what = scope.unit ?? scope.course
+      setNotice(`Couldn’t rename “${what}”${error instanceof ApiError && error.message ? `: ${error.message}` : '. Check your connection and try again.'}`)
+    }
   }
 
   function setCourseImage(name: string, image: string | undefined) {
@@ -717,23 +748,30 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setNotice(`“${to}” already exists in ${activeCourse}.`)
       return
     }
+    const course = activeCourse
+    renameUnitLocally(course, from, to)
+    cancelRename()
+    void moveServerNotes({ course, unit: from, newCourse: course, newUnit: to }, () => renameUnitLocally(course, to, from))
+  }
+
+  function renameUnitLocally(courseName: string, from: string, to: string) {
     setNotebook((current) => {
       const courses = current.courses.map((course) =>
-        course.name === current.activeCourse
+        course.name === courseName
           ? { ...course, units: course.units.map((item) => (item === from ? to : item)) }
           : course,
       )
       const deposits = current.deposits.map((item) =>
-        item.course === current.activeCourse && item.unit === from ? { ...item, unit: to } : item,
+        sameName(item.course, courseName) && sameName(item.unit, from) ? { ...item, unit: to } : item,
       )
       return {
         ...current,
         courses,
         deposits,
-        activeUnit: current.activeUnit === from ? to : current.activeUnit,
+        activeUnit: current.activeCourse === courseName && current.activeUnit === from ? to : current.activeUnit,
       }
     })
-    cancelRename()
+    setServerNotes((current) => current.map((item) => (sameName(item.course, courseName) && sameName(item.unit, from) ? { ...item, unit: to } : item)))
   }
 
   function onPickFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -798,8 +836,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   }
 
   function requestQuizQuestion(signal?: AbortSignal) {
+    // A unit always has a course and unit, so the server writes the question from its
+    // notes (or, without notes, from the unit name); the math topics are never used here.
     return data.generateQuestion(
-      quizTopic,
+      'mixed',
       quizDifficulty,
       activeCourse && activeUnit
         ? {
@@ -893,15 +933,19 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setUploadError({ source, message: `“${candidate.name}” is ${formatBytes(candidate.size)}. Notes must be 10 MB or smaller.`, retry: false })
       return false
     }
+    // The note is filed under the course and unit it was sent to, even if the student moves on meanwhile.
+    const course = activeCourse
+    const unit = activeUnit
     setUploading(source)
     setUploadError(null)
     setNotice('')
     try {
-      const uploaded = await data.uploadNote(candidate, activeCourse, activeUnit, accessToken)
+      const uploaded = await data.uploadNote(candidate, course, unit, accessToken)
       const deposit: NoteDeposit = {
         id: uploaded.id,
-        course: uploaded.course,
-        unit: uploaded.unit,
+        // The server trims names; keep this page's spelling so the note shows in its unit.
+        course,
+        unit,
         fileName: uploaded.file_name,
         createdAt: uploaded.created_at,
         status: uploaded.status,
@@ -910,7 +954,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
       setNotebook((current) => ({ ...current, deposits: [deposit, ...current.deposits.filter((note) => note.id !== deposit.id)] }))
       setFile(null)
       if (fileInput.current) fileInput.current.value = ''
-      setNotice(`Added “${deposit.fileName}” to ${activeCourse} → ${activeUnit}.`)
+      setNotice(`Added “${deposit.fileName}” to ${course} → ${unit}.`)
       // Flashcards are written in the background; the note's row shows how that is going.
       void makeFlashcards(deposit)
       return true
@@ -1125,6 +1169,13 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     </div>
   ) : null
   const loadingQuestion = quizBusy && !quizChecking
+  // Pasted text is only saved by "Add typed notes"; leaving it behind would look like saved notes.
+  const unsavedPaste = pastedNotes.trim() && panelFn !== 'scan' ? (
+    <div className="ui-alert tools__unsaved" role="status">
+      <span>Your typed notes aren’t saved yet, so they aren’t used here.</span>
+      <button className="ui-button ui-button--sm" type="button" onClick={() => setPanelFn('scan')}>Review and save</button>
+    </div>
+  ) : null
 
   return (
     <div className="ui-page tools" style={current ? { ['--course' as string]: courseTone(current) } : undefined}>
@@ -1133,7 +1184,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
           <span className="ui-eyebrow">Study</span>
           <h1 className="ui-page-title tools__title">{activeCourse || 'Your binder'}</h1>
           <p className="ui-page-subtitle">
-            {current ? `${plural(current.units.length, 'unit')} · ${plural(courseNoteCount, 'note')}` : 'Pick a course to get started.'}
+            {current ? `${plural(current.units.length, 'unit')} · ${libraryFailed && !courseNoteCount ? 'notes didn’t load' : plural(courseNoteCount, 'note')}` : 'Pick a course to get started.'}
           </p>
         </div>
         <div className="tools__header-actions">
@@ -1377,6 +1428,13 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           setPastedNotes(event.target.value)
                           if (uploadError?.source === 'paste') setUploadError(null)
                         }}
+                        onKeyDown={(event) => {
+                          // Ctrl/⌘ + Enter saves, like the button.
+                          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                            event.preventDefault()
+                            event.currentTarget.form?.requestSubmit()
+                          }
+                        }}
                         placeholder="Paste from Google Docs, a class handout, or your own notes"
                         rows={6}
                         readOnly={uploading === 'paste'}
@@ -1399,6 +1457,12 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                       <h3 className="tools__label" id="tools-sources-title">Sources in {activeUnit}</h3>
                       <span className="ui-count">{plural(unitNotes.length, 'file')}</span>
                     </div>
+                    {libraryFailed ? (
+                      <div className="ui-alert" role="alert">
+                        <span>{library.error}</span>
+                        <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Retry</button>
+                      </div>
+                    ) : null}
                     {unitNotes.length ? (
                       <ul className="ui-list tools__source-list">
                         {unitNotes.map((note) => (
@@ -1423,6 +1487,8 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                           </li>
                         ))}
                       </ul>
+                    ) : libraryFailed ? null : libraryLoading ? (
+                      <p className="tools__status" role="status"><span className="ui-spinner" />Loading your notes…</p>
                     ) : (
                       <div className="tools__sources-empty">
                         <p className="tools__sources-empty-title">Nothing here yet</p>
@@ -1435,6 +1501,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
               {panelFn === 'cards' ? (
                 <div className="tools__cards" role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
+                  {unsavedPaste}
                   {card ? (
                     <>
                       <button
@@ -1478,11 +1545,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
                         <span className="ui-spinner" />{makingNotes.length ? 'Making flashcards from your notes…' : 'Loading your flashcards…'}
                       </p>
                     </div>
-                  ) : library.key === unitKey && library.status === 'error' ? (
+                  ) : cardsFailed ? (
                     <div className="tools__cards-error">
                       <div className="ui-alert" role="alert">
                         <span>{library.error}</span>
-                        <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Try again</button>
+                        <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Retry</button>
                       </div>
                     </div>
                   ) : unitNotes.length === 0 ? (
@@ -1513,18 +1580,18 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
               {panelFn === 'quiz' ? (
                 <div className="tools__quiz" role="tabpanel" aria-label="Quiz">
+                  {unsavedPaste}
                   <div className="tools__quiz-bar">
                     <p className="tools__quiz-source">
                       {unitNotes.length
                         ? `Questions come from ${plural(unitNotes.length, 'note')} in ${activeUnit}.`
-                        : `No notes in ${activeUnit} yet, so these are math practice questions.`}
+                        : libraryFailed
+                          ? <>Couldn’t load your notes for {activeUnit}, so questions are based on the unit name. <button className="tools__inline-button" type="button" onClick={reloadLibrary}>Retry</button></>
+                          : libraryLoading
+                            ? `Checking ${activeUnit} for notes…`
+                            : `No notes in ${activeUnit} yet — questions are based on the unit name. Add notes for questions from your own material.`}
                     </p>
                     <div className="tools__quiz-controls">
-                      {unitNotes.length === 0 ? (
-                        <select className="ui-select" aria-label="Topic" value={quizTopic} onChange={(event) => setQuizTopic(event.target.value as Topic)}>
-                          {QUIZ_TOPICS.map((topic) => <option key={topic.id} value={topic.id}>{topic.label}</option>)}
-                        </select>
-                      ) : null}
                       <select className="ui-select" aria-label="Level" value={quizDifficulty} onChange={(event) => setQuizDifficulty(Number(event.target.value))}>
                         {QUIZ_LEVELS.map((level) => <option key={level.id} value={level.id}>{level.label}</option>)}
                       </select>

@@ -78,5 +78,40 @@ class BinditFlashcardTests(unittest.TestCase):
         self.assertNotIn('offline', str(context.exception.detail))
 
 
+    # --- Renaming a unit or course moves its notes ------------------------------------
+
+    def _as(self, student='student-1'):
+        return patch.object(main.auth, 'authenticated_user', return_value={'id': student})
+
+    def test_renaming_a_unit_moves_its_notes_and_cards(self):
+        note = self.add_note('Precalc', 'Trig identities', 'sin squared plus cos squared equals one.')
+        main.flashcards.complete('student-1', note['id'], 'Precalc', 'Trig identities',
+                                 [{'front': 'What is sin^2 + cos^2?', 'back': 'sin squared plus cos squared equals one', 'topic': 'Trig'}])
+        other = self.add_note('Precalc', 'Logs', 'Logarithms undo exponentials and turn products into sums.')
+        with self._as():
+            moved = main.move_notes(main.NotesMove(course='Precalc', unit='Trig identities', new_course='Precalc', new_unit='Trig Identities'), 'Bearer t')
+            listed = main.list_flashcards('Precalc', 'Trig Identities', 'Bearer t')
+            old = main.get_notes('Precalc', 'Trig identities', 'Bearer t')
+        self.assertEqual(moved, {'moved': 1})
+        self.assertEqual([state['note_id'] for state in listed['notes']], [note['id']])
+        self.assertEqual(len(listed['cards']), 1)
+        self.assertEqual(listed['cards'][0]['unit'], 'Trig Identities')
+        self.assertEqual(old, [])
+        self.assertEqual(note_store.get_note('student-1', other['id'])['unit'], 'Logs')
+
+    def test_renaming_a_course_moves_every_unit_and_only_the_owners_notes(self):
+        self.add_note('Precalc', 'Logs', 'Logarithms undo exponentials and turn products into sums.')
+        stranger = note_store.save_note('student-2', 'Precalc', 'Logs', 'n.txt', 'text/plain', 'their notes', 11)
+        with self._as():
+            main.move_notes(main.NotesMove(course='Precalc ', new_course='Precalculus'), 'Bearer t')
+            self.assertEqual(len(main.get_notes('Precalculus', 'Logs', 'Bearer t')), 1)
+        self.assertEqual(note_store.get_note('student-2', stranger['id'])['course'], 'Precalc')
+
+    def test_move_rejects_a_new_unit_without_the_old_one(self):
+        with self._as(), self.assertRaises(main.HTTPException) as context:
+            main.move_notes(main.NotesMove(course='Precalc', new_course='Precalc', new_unit='Logs'), 'Bearer t')
+        self.assertEqual(context.exception.status_code, 400)
+
+
 if __name__ == '__main__':
     unittest.main()
