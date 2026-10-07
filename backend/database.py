@@ -177,8 +177,12 @@ uploaded_images = Table(
 )
 
 # --- AI result caches (see ai_cache.py) ---------------------------------------------
-# Backend-only. Keys are sha256 hashes that include a prompt/generator version; no
-# raw input (note text, file bytes, answers, messages) is ever stored in them.
+# Backend-only. Keys are sha256 hashes that include a prompt/generator version. The
+# request input itself (file bytes, typed answers, messages) is not stored, but the
+# outputs can contain student content: extraction_cache holds the full text read from
+# an uploaded file, cards and tutor replies quote notes, and grade explanations can
+# quote the answer. cache_refs ties each entry to where it came from, so deleting a
+# note or tutor conversation (or an account) deletes the entries that came from it.
 
 flashcard_cache = Table(
     "flashcard_cache", metadata,
@@ -215,6 +219,20 @@ tutor_reply_cache = Table(
     Column("hits", Integer, nullable=False, default=0),
 )
 
+# Which owner and source (a note ID, "conversation:<id>", or "" for none) produced or
+# used each cache entry. A shared entry (flashcards, OCR text) is deleted when its last
+# reference goes; see ai_cache.release_source and ai_cache.purge_user_ai_data.
+cache_refs = Table(
+    "cache_refs", metadata,
+    Column("cache_table", String(32), primary_key=True),
+    Column("key", String(64), primary_key=True),
+    Column("owner_id", String(100), primary_key=True),
+    Column("note_id", String(80), primary_key=True, default=""),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Index("ix_cache_refs_owner_note", "owner_id", "note_id"),
+    Index("ix_cache_refs_table_key", "cache_table", "key"),
+)
+
 progress_claims = Table(
     "progress_claims", metadata,
     Column("guest_id", String(100), primary_key=True),
@@ -244,6 +262,7 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "cache_refs",
     "extraction_cache",
     "flashcard_cache",
     "flashcard_jobs",
@@ -285,6 +304,7 @@ RLS_TABLES = (
 # client-facing RLS policies (study_group_members) or read by the browser
 # (study_notes) must not be listed here.
 CLIENT_REVOKED_TABLES = (
+    "cache_refs",
     "extraction_cache",
     "flashcard_cache",
     "flashcard_jobs",
@@ -1774,6 +1794,7 @@ def reset_db() -> None:
     if active_engine.dialect.name != "sqlite":
         raise RuntimeError("reset_db is only available for local SQLite databases")
     with active_engine.begin() as connection:
+        connection.execute(delete(cache_refs))
         connection.execute(delete(flashcard_cache))
         connection.execute(delete(extraction_cache))
         connection.execute(delete(grading_cache))

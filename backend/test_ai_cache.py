@@ -575,6 +575,95 @@ class TutorCacheTests(CacheTestCase):
         self.assertNotIn("distinctive", json.dumps(row, default=str))
 
 
+class CachePurgeTests(CacheTestCase):
+    """BE-M2: cache entries go with the note, conversation or account they came from."""
+
+    def note(self, student_id, text=NOTE_TEXT):
+        return note_store.save_note(student_id, "Biology", "Photosynthesis", "handout.txt", "text/plain", text, len(text))["id"]
+
+    def generate(self, note_id, student_id):
+        with self.as_user(student_id), patch.object(ai_tutor, "_chat_json", return_value={"cards": GOOD_CARDS}):
+            return main.make_note_flashcards(note_id, None, False, "Bearer t")
+
+    def delete(self, note_id, student_id):
+        with self.as_user(student_id):
+            return main.delete_note(note_id, "Bearer t")
+
+    def upload(self, student_id, unit="Cells"):
+        upload = UploadFile(filename="handout.png", file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
+        with self.as_user(student_id), patch.object(ai_tutor, "extract_image_notes", return_value="Cell membranes regulate transport."):
+            return asyncio.run(main.upload_note("Biology", unit, upload, "Bearer t"))
+
+    def test_deleting_the_only_note_deletes_its_flashcard_cache_entry(self):
+        note_id = self.note("alex")
+        self.generate(note_id, "alex")
+        self.assertEqual(len(self.rows("flashcard_cache")), 1)
+        self.delete(note_id, "alex")
+        self.assertEqual(self.rows("flashcard_cache"), [])
+        self.assertEqual(self.rows("cache_refs"), [])
+
+    def test_a_shared_entry_stays_until_the_last_note_referencing_it_is_deleted(self):
+        alex_note, sam_note = self.note("alex"), self.note("sam")
+        self.generate(alex_note, "alex")
+        self.generate(sam_note, "sam")  # a cache hit: Sam's note references the same entry
+        self.delete(alex_note, "alex")
+        self.assertEqual(len(self.rows("flashcard_cache")), 1)
+        self.delete(sam_note, "sam")
+        self.assertEqual(self.rows("flashcard_cache"), [])
+
+    def test_deleting_an_uploaded_note_deletes_its_ocr_text(self):
+        first = self.upload("alex")
+        second = self.upload("sam")
+        self.assertEqual(len(self.rows("extraction_cache")), 1)
+        self.delete(first.id, "alex")
+        self.assertEqual(len(self.rows("extraction_cache")), 1)  # Sam's note still holds it
+        self.delete(second.id, "sam")
+        self.assertEqual(self.rows("extraction_cache"), [])
+
+    def test_deleting_a_tutor_conversation_deletes_its_cached_reply(self):
+        def fake_stream(**_):
+            yield "Photosynthesis makes glucose."
+            return {"finish_reason": "stop", "done": True}
+
+        with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream):
+            events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="What is photosynthesis?"), "Bearer t"))
+        self.assertEqual(len(self.rows("tutor_reply_cache")), 1)
+        conversation_id = events[0][1]["conversation"]["id"]
+        with self.as_user("alex"):
+            main.delete_tutor_conversation(conversation_id, "Bearer t")
+        self.assertEqual(self.rows("tutor_reply_cache"), [])
+        self.assertEqual(self.rows("cache_refs"), [])
+
+    def test_purge_user_ai_data_removes_everything_tied_to_the_account(self):
+        alex_note, sam_note = self.note("alex"), self.note("sam")
+        self.generate(alex_note, "alex")
+        self.generate(sam_note, "sam")
+        own_note = self.note("alex", NOTE_TEXT + " Starch stores glucose in plants.")
+        self.generate(own_note, "alex")
+        question_id = questions.save_question("alex", "Which organelle makes ATP?", "Mitochondria", "Cells", 2)
+        with self.as_user("alex"), patch.object(ai_tutor, "grade_answer", return_value={
+                "correct": True, "score": 90, "mistake_type": None, "misconception": None, "explanation": "Yes.", "hint": None}):
+            main.analyze_answer(main.AnswerRequest(question_id=question_id, student_answer="the powerhouse"), "Bearer t")
+        with database.engine().begin() as connection:
+            connection.execute(database.tutor_reply_cache.insert().values(key="k" * 64, owner_id="alex", reply="hi", created_at=ai_cache._now(), hits=0))
+        self.assertEqual(len(self.rows("grading_cache")), 1)
+        removed = ai_cache.purge_user_ai_data("alex")
+        self.assertEqual(removed, 3)  # Alex's own flashcards entry, the grade and the tutor reply
+        self.assertEqual(len(self.rows("flashcard_cache")), 1)  # still referenced by Sam's note
+        self.assertEqual(self.rows("grading_cache"), [])
+        self.assertEqual(self.rows("tutor_reply_cache"), [])
+        self.assertEqual({row["owner_id"] for row in self.rows("cache_refs")}, {"sam"})
+        self.assertIsNone(questions.get_question("alex", question_id))
+
+    def test_private_banked_questions_are_purged_with_the_account(self):
+        questions.save_to_bank("private-key", "What does my note say?", "x", "Lab", 1, "alex")
+        questions.save_to_bank("shared-key", "What is ATP?", "x", "Cells", 1)
+        ai_cache.purge_user_ai_data("alex")
+        with database.engine().connect() as connection:
+            keys = connection.execute(select(questions.question_bank.c.cache_key)).scalars().all()
+        self.assertEqual(keys, ["shared-key"])
+
+
 class QuestionBankTests(CacheTestCase):
     QUESTION = {"question": "What molecule is the main energy currency of a cell?", "correct_answer": "ATP", "topic": "Respiration"}
 

@@ -219,8 +219,13 @@ def fallback_question(cache_key: str, recent: list[str], extra: list[dict] | Non
     return question, best_rank <= len(recent)
 
 
-def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int) -> None:
+def save_to_bank(cache_key: str, question: str, correct_answer: str, topic: str, difficulty: int, owner_id: str | None = None) -> None:
+    """Bank a question under cache_key. owner_id marks a private bank (note-grounded or
+    instructed questions) as that student's, so purging their AI data removes it."""
     init_questions()
+    if owner_id:
+        import ai_cache  # local: ai_cache imports questions lazily too
+        ai_cache.add_ref("question_bank", cache_key, owner_id)
     question, correct_answer, topic = clip_question(question, correct_answer, topic)
     with database.engine().begin() as connection:
         fingerprint = question_fingerprint(question)

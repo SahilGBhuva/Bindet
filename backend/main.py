@@ -1268,6 +1268,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
     suffix = Path(filename).suffix.lower()
     content_type = note_content_type(suffix, claimed_type)
     pages_skipped = 0
+    cache_key = None  # set when the text came from (or went into) the OCR cache
     try:
         if suffix in note_ingestion.IMAGE_EXTENSIONS:
             if len(content) > note_ingestion.MAX_NOTE_BYTES:
@@ -1318,6 +1319,10 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
     if not text:
         raise HTTPException(status_code=400, detail="No readable text was found in that file")
     row = note_store.save_note(owner, course.strip(), unit.strip(), Path(filename).name[:255], content_type, text, len(content))
+    if cache_key:
+        # The OCR text cached for these bytes now belongs to this note too: deleting the
+        # note deletes it once no other note of any user references it.
+        ai_cache.add_ref("extraction_cache", cache_key, owner, row["id"])
     return note_response(row, pages_skipped)
 
 
@@ -1668,6 +1673,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             return
         if cached_reply is not None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_hit", student_id=owner, tier=route["tier"], started=started)
+            ai_cache.add_ref("tutor_reply_cache", tutor_cache_key, owner, ai_cache.conversation_source(conversation["id"]))
             yield from ai_cache.reply_pieces(cached_reply)
             return
         produced: list[str] = []
@@ -1708,7 +1714,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             if tutor_cache_key and ai_tutor.finished_normally(finish.get("result")):
                 # Reached only when the whole reply streamed and the model said it was done:
                 # never a refusal, error, or a reply cut off by the token limit.
-                ai_cache.store_tutor_reply(tutor_cache_key, owner, "".join(produced))
+                if ai_cache.store_tutor_reply(tutor_cache_key, owner, "".join(produced)):
+                    ai_cache.add_ref("tutor_reply_cache", tutor_cache_key, owner, ai_cache.conversation_source(conversation["id"]))
 
     def saved_user() -> bool:
         try:
@@ -2176,10 +2183,13 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
         )
         if not cached:
             # Banking the new question for reuse does not need to delay this response.
+            # A private bank (note-grounded or instructed) is tied to its student, so
+            # ai_cache.purge_user_ai_data can delete it with the account.
+            bank_owner = None if shared else student_id
             if background is not None:
-                background.add_task(questions.save_to_bank, cache_key, question_text, correct_answer, topic, difficulty)
+                background.add_task(questions.save_to_bank, cache_key, question_text, correct_answer, topic, difficulty, bank_owner)
             else:
-                questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty)
+                questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty, bank_owner)
         generated = GeneratedQuestion(
             question=question_text,
             correct_answer=correct_answer,
@@ -2328,6 +2338,7 @@ def make_note_flashcards(
             stored = flashcards.complete(owner, note_id, note["course"], note["unit"], reused)
             if stored is None:
                 raise HTTPException(status_code=404, detail="Note not found")
+            ai_cache.add_ref("flashcard_cache", cache_key, owner, note_id)  # this note now holds the entry too
             log("cache_hit", cards_kept=len(reused))
             return _note_flashcards_result(note_id, "ready", True, stored)
     elif ai_cache.enabled():
@@ -2367,7 +2378,8 @@ def make_note_flashcards(
     stored = flashcards.complete(owner, note_id, note["course"], note["unit"], batch.cards)
     if stored is None:
         raise HTTPException(status_code=404, detail="Note not found")
-    ai_cache.store_flashcards(cache_key, batch.cards)
+    if ai_cache.store_flashcards(cache_key, batch.cards):
+        ai_cache.add_ref("flashcard_cache", cache_key, owner, note_id)
     log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
     return _note_flashcards_result(note_id, "ready", True, stored)
 
@@ -2427,6 +2439,7 @@ def remake_note_flashcards(
         raise
     if reused:
         new_cards = reused
+        ai_cache.add_ref("flashcard_cache", cache_key, owner, note_id)
         log("cache_hit", cards_kept=len(reused))
     else:
         try:
@@ -2448,7 +2461,8 @@ def remake_note_flashcards(
             log("ai_error", error=exc)
             raise
         new_cards = batch.cards
-        ai_cache.store_flashcards(cache_key, batch.cards)
+        if ai_cache.store_flashcards(cache_key, batch.cards):
+            ai_cache.add_ref("flashcard_cache", cache_key, owner, note_id)
         log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
     try:
         stored = flashcards.replace(owner, note_id, note["course"], note["unit"], new_cards, steering, attempt=attempt)
@@ -2599,7 +2613,8 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                 # A "correct" verdict for an answer that talks to the grader may be a successful
                 # jailbreak: use it this once, but never cache it for replay.
                 if grade_key and not (ai_result["correct"] and ai_tutor.answer_steers_grader(data.student_answer)):
-                    ai_cache.store_grade(grade_key, ai_result)
+                    if ai_cache.store_grade(grade_key, ai_result):
+                        ai_cache.add_ref("grading_cache", grade_key, student_id)
                 correct = ai_result["correct"]
                 score = ai_result["score"]
                 mistake_type = ai_result["mistake_type"]

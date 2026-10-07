@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
+import ai_cache
 import ai_tutor
 import database
 import note_store
@@ -462,8 +463,11 @@ def list_for_unit(owner_id: str, course: str, unit: str) -> tuple[list[dict], li
 
 
 def delete_note_and_cards(owner_id: str, note_id: str) -> bool:
-    """Delete one of the owner's notes together with its cards and job, in one transaction."""
+    """Delete one of the owner's notes together with its cards, job and the AI cache
+    entries made from it (flashcards, OCR text) that no other note of any user still
+    references, in one transaction."""
     init_flashcards()
+    database.init_db()
     notes = note_store.notes
     with _guard(), database.engine().begin() as connection:
         _lock_note(connection, note_id)
@@ -473,6 +477,7 @@ def delete_note_and_cards(owner_id: str, note_id: str) -> bool:
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
         connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
+        ai_cache.release_source(connection, owner_id, note_id)
     return True
 
 

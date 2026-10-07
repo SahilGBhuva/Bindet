@@ -153,11 +153,15 @@ def add_message(owner_id: str, conversation_id: str, role: str, content: str, at
 
 
 def delete_conversation(owner_id: str, conversation_id: str) -> bool:
+    """Delete the owner's conversation, its messages and the cached tutor reply to its
+    first message (ai_cache.release_conversation), in one transaction."""
+    import ai_cache  # local: ai_cache imports the AI modules, which tutor does not need otherwise
     init_tutor()
     with database.engine().begin() as connection:
         _owned(connection, owner_id, conversation_id)
         connection.execute(delete(messages).where(messages.c.conversation_id == conversation_id))
         connection.execute(delete(conversations).where(conversations.c.id == conversation_id))
+        ai_cache.release_conversation(connection, owner_id, conversation_id)
     return True
 
 

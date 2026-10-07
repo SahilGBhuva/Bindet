@@ -6,10 +6,19 @@ requester already supplied. Shared (cross-user) caches are keyed on a sha256 of 
 retrieve another student's output without already holding the identical input. The
 tutor cache is per-account: its key includes the owner and the row stores it too.
 
-Only hashes and model outputs are stored, never the raw input. Every key includes a
-version that fingerprints the prompt, model and generator settings, so changing any
-of them invalidates old entries. Failures, empty results, refusals and partial
-replies are never stored. Cache errors never fail a request: a broken cache is a miss.
+Keys are hashes, and the request input itself (file bytes, typed answers, tutor
+messages) is never stored as such. The stored outputs can still contain student
+content, though: extraction_cache holds the full text read from an uploaded file,
+flashcards and tutor replies quote notes, and grade explanations can quote an answer.
+So every entry is tied to the owner and source that produced or used it (cache_refs):
+deleting a note removes the entries made from it once no other note of any user
+references them, deleting a tutor conversation removes its cached reply, and
+purge_user_ai_data() removes everything an account is tied to.
+
+Every key includes a version that fingerprints the prompt, model and generator
+settings, so changing any of them invalidates old entries. Failures, empty results,
+refusals and partial replies are never stored. Cache errors never fail a request: a
+broken cache is a miss.
 
 AI_CACHE_ENABLED=0 (or false/no/off) turns every cache off.
 """
@@ -83,9 +92,117 @@ def prune_if_due(now: float | None = None) -> bool:
             for name, keep in RETENTION.items():
                 table = _table(name)
                 connection.execute(delete(table).where(table.c.created_at < _now() - keep))
+            # References whose entry expired (or was never stored) point at nothing.
+            refs = database.cache_refs
+            for name in RETENTION:
+                table = _table(name)
+                connection.execute(delete(refs).where(
+                    refs.c.cache_table == name, refs.c.created_at < _now() - timedelta(days=1),
+                    ~select(table.c.key).where(table.c.key == refs.c.key).exists(),
+                ))
     except Exception:  # noqa: BLE001 - pruning is best effort
         return False
     return True
+
+
+# --- Where entries came from (cache_refs) ---------------------------------------------
+
+REF_TABLES = ("flashcard_cache", "extraction_cache", "grading_cache", "tutor_reply_cache", "question_bank")
+
+
+def _cache_table_and_key(name: str):
+    if name == "question_bank":
+        import questions  # local: questions does not import ai_cache, but keep the graph one-way
+        return questions.question_bank, questions.question_bank.c.cache_key
+    table = _table(name)
+    return table, table.c.key
+
+
+def conversation_source(conversation_id: str) -> str:
+    return f"conversation:{conversation_id}"
+
+
+def add_ref(name: str, key: str, owner_id: str, source: str = "") -> bool:
+    """Record that owner_id (via source: a note ID, conversation_source(...) or "") holds
+    this cache entry. Idempotent. Never raises: a missing reference only means the entry
+    lives until it expires instead of going with its source."""
+    if not enabled() or not key or not owner_id or name not in REF_TABLES:
+        return False
+    try:
+        database.init_db()
+        refs = database.cache_refs
+        insert = postgres_insert if database.engine().dialect.name == "postgresql" else sqlite_insert
+        with database.engine().begin() as connection:
+            connection.execute(insert(refs).values(
+                cache_table=name, key=key, owner_id=owner_id, note_id=source[:80], created_at=_now(),
+            ).on_conflict_do_nothing(index_elements=["cache_table", "key", "owner_id", "note_id"]))
+        return True
+    except Exception:  # noqa: BLE001 - caching is best effort
+        return False
+
+
+def _drop_unreferenced(connection, entries) -> int:
+    """Delete each (cache_table, key) entry that no reference points to any more."""
+    refs = database.cache_refs
+    removed = 0
+    for name, key in sorted(set(entries)):
+        still_used = connection.execute(select(refs.c.key).where(refs.c.cache_table == name, refs.c.key == key).limit(1)).first()
+        if still_used is None:
+            table, key_column = _cache_table_and_key(name)
+            removed += connection.execute(delete(table).where(key_column == key)).rowcount or 0
+    return removed
+
+
+def release_source(connection, owner_id: str, source: str) -> int:
+    """Inside the caller's transaction: drop owner_id's references from source (a deleted
+    note) and delete every entry that is now referenced by nobody (no other note of any
+    user). Returns how many cache rows were deleted."""
+    refs = database.cache_refs
+    mine = (refs.c.owner_id == owner_id, refs.c.note_id == source)
+    entries = connection.execute(select(refs.c.cache_table, refs.c.key).where(*mine)).all()
+    if not entries:
+        return 0
+    connection.execute(delete(refs).where(*mine))
+    return _drop_unreferenced(connection, [(name, key) for name, key in entries])
+
+
+def release_conversation(connection, owner_id: str, conversation_id: str) -> int:
+    """Inside the caller's transaction: delete the owner's cached tutor replies for this
+    conversation's first message (even if another of the owner's conversations reused
+    them) and every reference to them."""
+    refs = database.cache_refs
+    source = conversation_source(conversation_id)
+    keys = connection.execute(select(refs.c.key).where(
+        refs.c.cache_table == "tutor_reply_cache", refs.c.owner_id == owner_id, refs.c.note_id == source,
+    )).scalars().all()
+    if not keys:
+        return 0
+    connection.execute(delete(refs).where(refs.c.cache_table == "tutor_reply_cache", refs.c.owner_id == owner_id, refs.c.key.in_(keys)))
+    table = _table("tutor_reply_cache")
+    return connection.execute(delete(table).where(table.c.owner_id == owner_id, table.c.key.in_(keys))).rowcount or 0
+
+
+def purge_user_ai_data(owner_id: str) -> int:
+    """Delete every cached AI result tied to an account (for account deletion).
+
+    Removes the owner's tutor replies, grades, private banked questions and recent
+    questions outright, and the owner's references to shared entries (flashcards, OCR
+    text), deleting those entries when nobody else references them. Returns how many
+    cache rows were deleted. Entries cached before references were recorded are not
+    linked to anyone and simply expire (RETENTION).
+    """
+    import questions
+    database.init_db()
+    questions.init_questions()
+    refs = database.cache_refs
+    with database.engine().begin() as connection:
+        entries = connection.execute(select(refs.c.cache_table, refs.c.key).where(refs.c.owner_id == owner_id)).all()
+        connection.execute(delete(refs).where(refs.c.owner_id == owner_id))
+        removed = _drop_unreferenced(connection, [(name, key) for name, key in entries])
+        tutor_table = _table("tutor_reply_cache")
+        removed += connection.execute(delete(tutor_table).where(tutor_table.c.owner_id == owner_id)).rowcount or 0
+        connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
+    return removed
 
 
 def lookup(name: str, key: str, owner_id: str | None = None):
@@ -288,5 +405,6 @@ def reset_caches() -> None:
     if database.engine().dialect.name != "sqlite":
         raise RuntimeError("reset_caches is only available for local SQLite databases")
     with database.engine().begin() as connection:
+        connection.execute(delete(database.cache_refs))
         for name in RETENTION:
             connection.execute(delete(_table(name)))
