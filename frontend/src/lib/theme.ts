@@ -3,7 +3,12 @@
  * index.html applies the saved choice before first paint; this module keeps
  * <html data-theme> in sync afterwards. Stored per device only.
  */
+import { useSyncExternalStore } from 'react'
+
 export type ThemePreference = 'system' | 'light' | 'dark'
+
+/* Fired on window whenever the saved preference changes, so every theme control stays in step. */
+export const THEME_CHANGED_EVENT = 'bindit:theme-changed'
 
 const KEY = 'bindit:theme'
 const media = typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null
@@ -36,6 +41,33 @@ export function saveThemePreference(preference: ThemePreference) {
     // Storage can be unavailable; the choice still applies for this visit.
   }
   applyTheme(preference)
+  window.dispatchEvent(new Event(THEME_CHANGED_EVENT))
+}
+
+function subscribeTheme(onChange: () => void) {
+  // Another tab changing the theme arrives as a storage event; apply it here too.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== KEY && event.key !== null) return
+    applyTheme()
+    onChange()
+  }
+  window.addEventListener(THEME_CHANGED_EVENT, onChange)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    window.removeEventListener(THEME_CHANGED_EVENT, onChange)
+    window.removeEventListener('storage', onStorage)
+  }
+}
+
+const ignore = () => () => undefined
+const SYSTEM = (): ThemePreference => 'system'
+
+/*
+ * The saved preference, shared by every theme control (Home, Settings, the phone menu).
+ * With enabled false (the landing page's sandboxed demo) it never touches storage.
+ */
+export function useThemePreference(enabled = true): ThemePreference {
+  return useSyncExternalStore(enabled ? subscribeTheme : ignore, enabled ? loadThemePreference : SYSTEM, SYSTEM)
 }
 
 /* Follow OS changes while the preference is 'system'. Call once at startup. */

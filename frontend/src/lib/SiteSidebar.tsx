@@ -6,7 +6,7 @@ import { listChatUnreads } from './chat'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
-import { loadThemePreference, saveThemePreference, type ThemePreference } from './theme'
+import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer } from './useDrawer'
 import './SiteSidebar.css'
@@ -73,12 +73,8 @@ const THEME_NEXT: Record<ThemePreference, ThemePreference> = { system: 'light', 
 const THEME_LABEL: Record<ThemePreference, string> = { system: 'Theme: match system', light: 'Theme: light', dark: 'Theme: dark' }
 
 function ThemeButton() {
-  const [preference, setPreference] = useState<ThemePreference>(loadThemePreference)
-  const next = () => {
-    const value = THEME_NEXT[preference]
-    setPreference(value)
-    saveThemePreference(value)
-  }
+  const preference = useThemePreference()
+  const next = () => saveThemePreference(THEME_NEXT[preference])
   return (
     <button className="bindit-rail__theme" type="button" onClick={next} aria-label={`${THEME_LABEL[preference]}. Change theme`} title={THEME_LABEL[preference]}>
       <svg viewBox="0 0 24 24" aria-hidden="true">
