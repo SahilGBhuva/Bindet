@@ -2,18 +2,21 @@
 
 Every AI call is mocked.
 """
+import asyncio
 import json
 import os
 import tempfile
 import unittest
 from datetime import timedelta
+from io import BytesIO
 from unittest.mock import patch
 
 TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
+from pypdf import PdfWriter
 from sqlalchemy import select, update
 
 import ai_cache
@@ -21,6 +24,7 @@ import ai_tutor
 import database
 import flashcards
 import main
+import note_ingestion
 import note_store
 import questions
 import rate_limit
@@ -197,6 +201,91 @@ class FlashcardCacheTests(CacheTestCase):
             result = self.generate(note_id, "alex")
         chat.assert_called_once()
         self.assertEqual(result["status"], "ready")
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+
+def blank_pdf(pages):
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=72, height=72)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+class ExtractionCacheTests(CacheTestCase):
+    def upload(self, student_id, raw=PNG_BYTES, name="handout.png", content_type="image/png", unit="Cells"):
+        upload = UploadFile(filename=name, file=BytesIO(raw), headers={"content-type": content_type})
+        with self.as_user(student_id):
+            return asyncio.run(main.upload_note("Biology", unit, upload, "Bearer t"))
+
+    def test_reuploading_the_same_image_skips_ocr_quota_and_budget(self):
+        with patch.object(ai_tutor, "extract_image_notes", return_value="Cell membranes regulate transport.") as vision:
+            first = self.upload("alex")
+        vision.assert_called_once()
+        # Only the upload limit may be checked on a hit: no ai_ocr quota and no global budget.
+        with patch.object(ai_tutor, "extract_image_notes") as vision, \
+                patch.object(main, "limit_action") as limits, \
+                patch.object(main, "global_ai_available", side_effect=AssertionError("budget charged")), \
+                self.assertLogs("bindit.ai", "INFO") as logs:
+            again = self.upload("alex", unit="Membranes")
+            classmate = self.upload("sam")
+        vision.assert_not_called()
+        self.assertEqual({call.args[1] for call in limits.call_args_list}, {"note_upload"})
+        self.assertTrue(any('"outcome":"cache_hit"' in line for line in logs.output))
+        self.assertEqual(again.text_preview, first.text_preview)
+        self.assertEqual(classmate.text_preview, "Cell membranes regulate transport.")
+        # Each upload is still its own note, owned by its uploader.
+        self.assertEqual(len(note_store.list_notes("sam", "Biology", "Cells")), 1)
+        self.assertEqual(self.rows("extraction_cache")[0]["hits"], 2)
+
+    def test_the_cache_holds_a_hash_not_the_file(self):
+        with patch.object(ai_tutor, "extract_image_notes", return_value="Cell membranes regulate transport."):
+            self.upload("alex")
+        [row] = self.rows("extraction_cache")
+        self.assertEqual(set(row), {"key", "text", "created_at", "hits"})
+        self.assertRegex(row["key"], r"^[0-9a-f]{64}$")
+
+    def test_different_bytes_are_a_miss(self):
+        with patch.object(ai_tutor, "extract_image_notes", return_value="Text one.") as vision:
+            self.upload("alex")
+            self.upload("sam", raw=PNG_BYTES + b"1")
+        self.assertEqual(vision.call_count, 2)
+
+    def test_ocr_failures_are_not_cached(self):
+        for error in ("OpenRouter request failed", "No readable notes were found in that image"):
+            with patch.object(ai_tutor, "extract_image_notes", side_effect=ai_tutor.AITutorError(error)), self.assertRaises(HTTPException):
+                self.upload("alex")
+        with patch.object(ai_tutor, "extract_image_notes", return_value="   "), self.assertRaises(HTTPException):
+            self.upload("alex")
+        self.assertEqual(self.rows("extraction_cache"), [])
+
+    def test_scanned_pdfs_are_cached_with_their_skipped_page_notice(self):
+        scanned = blank_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 2)
+        no_text = patch.object(main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file"))
+        with no_text, patch.object(ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
+            first = self.upload("alex", raw=scanned, name="scan.pdf", content_type="application/pdf")
+        ocr.assert_called_once()
+        quota, budget = self.no_quota_or_budget()
+        with no_text, quota, budget, patch.object(main, "limit_action"), patch.object(ai_tutor, "extract_pdf_notes") as ocr:
+            second = self.upload("sam", raw=scanned, name="copy.pdf", content_type="application/pdf")
+        ocr.assert_not_called()
+        self.assertEqual(second.text_preview, "OCR text about mitosis")
+        self.assertEqual(second.pages_skipped, first.pages_skipped)
+        self.assertEqual(second.pages_skipped, 2)
+
+    def test_stored_text_is_capped(self):
+        key = ai_cache.extraction_key(b"x", "image/png")
+        ai_cache.store_extraction(key, "a" * (note_ingestion.MAX_STORED_CHARS + 50))
+        self.assertEqual(len(ai_cache.cached_extraction(key)), note_ingestion.MAX_STORED_CHARS)
+
+    def test_the_key_depends_on_content_type_and_version(self):
+        key = ai_cache.extraction_key(PNG_BYTES, "image/png")
+        self.assertNotEqual(ai_cache.extraction_key(PNG_BYTES, "image/jpeg"), key)
+        with patch.object(ai_tutor, "OCR_IMAGE_PROMPT", "changed"):
+            self.assertNotEqual(ai_cache.extraction_key(PNG_BYTES, "image/png"), key)
 
 
 class CacheLockdownTests(unittest.TestCase):

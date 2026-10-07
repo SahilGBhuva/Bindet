@@ -22,11 +22,11 @@
 --   select relname, relrowsecurity
 --   from pg_class
 --   where relnamespace = 'public'::regnamespace
---     and relname in ('flashcard_cache');
+--     and relname in ('flashcard_cache', 'extraction_cache');
 --   Every row should show relrowsecurity = true, and
 --   select grantee, table_name from information_schema.role_table_grants
 --   where table_schema = 'public' and grantee in ('anon', 'authenticated')
---     and table_name in ('flashcard_cache');
+--     and table_name in ('flashcard_cache', 'extraction_cache');
 --   should return no rows.
 
 do $$
@@ -34,7 +34,8 @@ declare
   t text;
 begin
   foreach t in array array[
-    'flashcard_cache'
+    'flashcard_cache',
+    'extraction_cache'
   ]
   loop
     if to_regclass('public.' || t) is not null then

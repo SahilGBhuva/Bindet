@@ -1224,6 +1224,16 @@ async def upload_note(
     return await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
 
 
+def cached_ocr_text(owner: str, cache_key: str) -> str | None:
+    """Text already read from identical file bytes, or None (logged as a hit or miss)."""
+    text = ai_cache.cached_extraction(cache_key)
+    if text is not None:
+        ai_tutor.log_ai_event("extract_notes", outcome="cache_hit", student_id=owner, tier="vision")
+    elif ai_cache.enabled():
+        ai_tutor.log_ai_event("extract_notes", outcome="cache_miss", student_id=owner, tier="vision")
+    return text
+
+
 def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type: str | None, content: bytes) -> NoteResponse:
     suffix = Path(filename).suffix.lower()
     content_type = note_content_type(suffix, claimed_type)
@@ -1240,23 +1250,33 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             if actual_type is None or actual_type != NOTE_IMAGE_TYPES.get(suffix):
                 raise HTTPException(status_code=415, detail=NOTE_IMAGE_MISMATCH)
             content_type = actual_type
-            limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-            spend_global_ai_call()
-            ai_tutor.warm_connection()
-            # The image goes to the vision model only; it is never stored.
-            text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
-                image_bytes=content, content_type=content_type
-            ))
+            # The same image was read before (by anyone: the key hashes its full bytes),
+            # so reuse that text without an OCR quota, budget or model call.
+            cache_key = ai_cache.extraction_key(content, content_type)
+            text = cached_ocr_text(owner, cache_key)
+            if text is None:
+                limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+                spend_global_ai_call()
+                ai_tutor.warm_connection()
+                # The image goes to the vision model only; it is never stored.
+                text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
+                    image_bytes=content, content_type=content_type
+                ))
+                ai_cache.store_extraction(cache_key, text)
         else:
             try:
                 text = note_ingestion.extract_text(filename, content)
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
-                    limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-                    spend_global_ai_call()
-                    ai_tutor.warm_connection()
                     ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
-                    text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
+                    cache_key = ai_cache.extraction_key(content, "application/pdf")
+                    text = cached_ocr_text(owner, cache_key)
+                    if text is None:
+                        limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
+                        spend_global_ai_call()
+                        ai_tutor.warm_connection()
+                        text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
+                        ai_cache.store_extraction(cache_key, text)
                 else:
                     raise
     except ai_tutor.AITutorError as exc:

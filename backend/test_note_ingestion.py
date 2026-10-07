@@ -10,6 +10,7 @@ from pypdf import PdfReader, PdfWriter
 
 os.environ.setdefault("POCKET_TUTOR_DB_PATH", tempfile.mktemp(suffix=".db"))
 
+import ai_cache
 import database
 import main
 import note_ingestion
@@ -57,6 +58,7 @@ class NoteIngestionTests(unittest.TestCase):
         note_store.init_notes()
         with database.engine().begin() as connection:
             connection.execute(note_store.notes.delete())
+        ai_cache.reset_caches()  # each test reads its files afresh
 
     def test_text_ingestion(self):
         self.assertEqual(note_ingestion.extract_text("lesson.md", b"# Cells\nMitochondria make ATP."), "# Cells\nMitochondria make ATP.")

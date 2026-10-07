@@ -28,10 +28,12 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 import ai_tutor
 import database
+import note_ingestion
 
 # How long entries stay usable; older rows are ignored and pruned.
 RETENTION = {
     "flashcard_cache": timedelta(days=30),
+    "extraction_cache": timedelta(days=30),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
@@ -149,6 +151,37 @@ def store_flashcards(key: str, cards: list[dict]) -> bool:
         return False
     kept = [{"front": card["front"], "back": card["back"], "topic": card["topic"]} for card in cards]
     return store("flashcard_cache", key, cards=kept, card_count=len(kept))
+
+
+# --- Note OCR / extraction by file content ---------------------------------------------
+#
+# Only the vision OCR path (images and scanned PDFs) is cached; ordinary text, DOCX and
+# text-layer PDF extraction is local and costs no AI call. Shared across students only
+# through a hash of the complete file bytes, so a hit returns text read from a file the
+# uploader already holds.
+
+def extraction_version() -> str:
+    return "extract-v1:" + fingerprint(
+        ai_tutor.OCR_IMAGE_PROMPT, ai_tutor.OCR_PDF_PROMPT, ai_tutor.OPENROUTER_VISION_MODEL,
+        note_ingestion.MAX_OCR_PDF_PAGES, note_ingestion.MAX_STORED_CHARS,
+    )
+
+
+def extraction_key(content: bytes, content_type: str) -> str:
+    return make_key("extraction", extraction_version(), content_type, content)
+
+
+def cached_extraction(key: str) -> str | None:
+    row = lookup("extraction_cache", key)
+    text = row["text"] if row is not None else None
+    return text if isinstance(text, str) and text.strip() else None
+
+
+def store_extraction(key: str, text: str) -> bool:
+    text = (text or "")[:note_ingestion.MAX_STORED_CHARS]
+    if not text.strip():
+        return False
+    return store("extraction_cache", key, text=text)
 
 
 def reset_caches() -> None:
