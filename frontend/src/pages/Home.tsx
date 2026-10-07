@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
-import { parseServerTime, type FriendsHub, type Profile, type StudyGroup, type Task } from '../lib/api'
+import { parseServerTime, type FriendsHub, type NoteScope, type Profile, type Progress, type StudyGroup, type Task } from '../lib/api'
 import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
-import { withCourseTones } from '../lib/session'
+import { mergeNoteScopes, withCourseTones } from '../lib/session'
+import { loadHiddenCourses } from '../lib/studyPrefs'
 import { REVIEW_ALL_HASH, useReviewSummary } from '../lib/useReviewSummary'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
@@ -197,7 +198,7 @@ function Diagram({ done, total }: { done: number; total: number }) {
   )
 }
 
-type IconName = 'gear' | 'chart' | 'clock' | 'person' | 'bell' | 'smile'
+type IconName = 'gear' | 'chart' | 'clock' | 'person' | 'bell' | 'smile' | 'target' | 'flame' | 'star' | 'check' | 'heart' | 'cards' | 'test' | 'bolt' | 'chat'
 const ICONS: Record<IconName, ReactNode> = {
   gear: <><circle cx="8" cy="8" r="2.2" /><path d="M8 2v1.6M8 12.4V14M2 8h1.6M12.4 8H14M3.8 3.8l1.1 1.1M11.1 11.1l1.1 1.1M3.8 12.2l1.1-1.1M11.1 4.9l1.1-1.1" /></>,
   chart: <><path d="M2.5 13.5h11" /><path d="M4.5 11V8M8 11V4.5M11.5 11V6.5" /></>,
@@ -205,6 +206,15 @@ const ICONS: Record<IconName, ReactNode> = {
   person: <><circle cx="6" cy="5.5" r="2.2" /><path d="M2 13a4 4 0 0 1 8 0" /><path d="M10.5 3.6a2 2 0 0 1 0 3.8M12 9.8a3.6 3.6 0 0 1 2 3.2" /></>,
   bell: <><path d="M4 11V7.5a4 4 0 0 1 8 0V11l1 1.5H3z" /><path d="M6.8 14a1.4 1.4 0 0 0 2.4 0" /></>,
   smile: <><circle cx="8" cy="8" r="6" /><path d="M5.6 9.6a3 3 0 0 0 4.8 0" /><path d="M6 6.4v.1M10 6.4v.1" /></>,
+  target: <><circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="2.5" /><path d="M8 8h.01" /></>,
+  flame: <path d="M8 14c2.5 0 4-1.7 4-4 0-2.6-2-3.8-2.6-6.2C8.4 5 7.6 6.2 7.4 7.6 6.6 7 6.3 6.2 6.2 5.4 4.9 6.6 4 8 4 10c0 2.3 1.5 4 4 4z" />,
+  star: <path d="M8 2.2l1.7 3.5 3.8.5-2.8 2.7.7 3.8L8 10.9l-3.4 1.8.7-3.8L2.5 6.2l3.8-.5z" />,
+  check: <><circle cx="8" cy="8" r="5.5" /><path d="M5.6 8.2l1.7 1.7 3.2-3.4" /></>,
+  heart: <path d="M8 13.2S2.5 10 2.5 6.3A2.8 2.8 0 0 1 8 5a2.8 2.8 0 0 1 5.5 1.3C13.5 10 8 13.2 8 13.2z" />,
+  cards: <><rect x="2.5" y="4.5" width="8.5" height="9" rx="1.2" /><path d="M5 2.5h7.3a1.2 1.2 0 0 1 1.2 1.2V11" /></>,
+  test: <><rect x="3" y="2.5" width="10" height="11" rx="1.2" /><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3" /></>,
+  bolt: <path d="M9 1.8L3.8 9h3.6L7 14.2 12.2 7H8.6z" />,
+  chat: <><path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" /></>,
 }
 
 function Icon({ name }: { name: IconName }) {
@@ -240,7 +250,27 @@ export function Home({ session }: { session: AuthSession | null }) {
   const cardLinks = useRef(new Map<string, HTMLAnchorElement>())
   const focusAfterOpen = useRef(false)
   // Flashcards due today: one extra row in the notification box (none when nothing is due).
-  const reviewDue = useReviewSummary(token)?.due ?? 0
+  const reviewSummary = useReviewSummary(token)
+  const reviewDue = reviewSummary?.due ?? 0
+  const studentId = session?.user.id ?? data.getStudentId()
+  const [stats, setStats] = useState<Progress | null>(() => data.getCachedProgress(studentId))
+  // Saved notes per course and unit on the server, so Home counts notes added on any device.
+  const [scopes, setScopes] = useState<NoteScope[] | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void data.getProgress(studentId, token).then((value) => { if (active) setStats(value) }).catch(() => undefined)
+    void data.listNoteScopes(token).then((listed) => {
+      if (!active) return
+      setScopes(listed)
+      const hidden = data.sandboxed ? [] : loadHiddenCourses()
+      setNotebook((current) => {
+        const merged = mergeNoteScopes(current, listed, hidden)
+        return merged === current ? current : { ...merged, courses: withCourseTones(merged.courses) }
+      })
+    }, () => undefined)
+    return () => { active = false }
+  }, [data, studentId, token])
 
   // Cached values above render first; everything refreshes in parallel in the background.
   useEffect(() => {
@@ -339,7 +369,9 @@ export function Home({ session }: { session: AuthSession | null }) {
     ...courses.map((course): Project => {
       const related = (tasks ?? []).filter((task) => task.course === course.name)
       const next = related.filter((task) => task.status !== 'done' && dueAt(task) !== Infinity).toSorted(byDue)[0]
-      const notes = notebook.deposits.filter((note) => note.course === course.name).length
+      const localNotes = notebook.deposits.filter((note) => note.course === course.name).length
+      const serverNotes = (scopes ?? []).filter((scope) => scope.course === course.name).reduce((sum, scope) => sum + scope.note_count, 0)
+      const notes = Math.max(localNotes, serverNotes)
       return {
         key: `course-${course.name}`,
         type: 'course',
@@ -424,6 +456,24 @@ export function Home({ session }: { session: AuthSession | null }) {
   const teamMembers = group?.members.slice(0, 6) ?? []
   const teamNames = shortNames(teamMembers.map((member) => member.display_name))
 
+  // Today's numbers for the colored stat cards (the same server totals the Progress page shows).
+  const goal = profile?.daily_goal ?? 20
+  const todayXp = stats?.recent_xp?.find((day) => day.day === localDate(now))?.xp ?? 0
+  const goalPercent = Math.min(100, Math.round((todayXp / Math.max(goal, 1)) * 100))
+  const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
+  const accuracy = stats && stats.attempts > 0 ? Math.round(stats.accuracy) : null
+  const friendCount = social?.friends.length ?? 0
+  const reviewNew = reviewSummary?.new_available ?? 0
+  const studyNext: { key: string; tone: string; icon: IconName; title: string; copy: string; href: string; review?: boolean }[] = [
+    {
+      key: 'review', tone: 'violet', icon: 'cards', href: REVIEW_ALL_HASH, review: true, title: 'Review flashcards',
+      copy: reviewDue ? `${reviewDue} ${reviewDue === 1 ? 'card is' : 'cards are'} due now` : reviewNew ? `${reviewNew} new ${reviewNew === 1 ? 'card' : 'cards'} to learn` : 'All caught up for now',
+    },
+    { key: 'test', tone: 'blue', icon: 'test', href: '#tools', title: 'Take a practice test', copy: 'A timed test from your notes' },
+    { key: 'round', tone: 'orange', icon: 'bolt', href: '#games', title: 'Play a quick round', copy: 'Beat your best in 1, 2 or 5 minutes' },
+    { key: 'tutor', tone: 'teal', icon: 'chat', href: '#tutor', title: 'Ask the tutor', copy: 'Get unstuck on a problem' },
+  ]
+
   function currentlyOn(studentId: string) {
     const mine = groupOpenTasks.filter((task) => task.assignees.some((person) => person.student_id === studentId))
     return mine.find((task) => task.status === 'in_progress') ?? mine[0]
@@ -490,6 +540,46 @@ export function Home({ session }: { session: AuthSession | null }) {
         </header>
 
         {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
+
+        <ul className="home-today" aria-label="Today at a glance">
+          <li className="home-today__card ui-tone--blue">
+            <a href="#settings" className="home-today__link">
+              <span className="home-today__icon"><Icon name="target" /></span>
+              <span className="home-today__label">Daily goal</span>
+              <span className="home-today__value">{todayXp}<small> / {goal} XP</small></span>
+              <span className="home-today__meter" aria-hidden="true"><span style={{ width: `${goalPercent}%` }} /></span>
+            </a>
+          </li>
+          <li className="home-today__card ui-tone--orange">
+            <a href="#stats" className="home-today__link">
+              <span className="home-today__icon"><Icon name="flame" /></span>
+              <span className="home-today__label">Streak</span>
+              <span className="home-today__value">{streak}<small> {streak === 1 ? 'day' : 'days'}</small></span>
+              {streak >= 7 ? <img className="ui-mascot-cheer home-today__cheer" src="/bindit-mascot-cutout.webp" alt="" width="36" height="43" /> : null}
+            </a>
+          </li>
+          <li className="home-today__card ui-tone--violet">
+            <a href="#stats" className="home-today__link">
+              <span className="home-today__icon"><Icon name="star" /></span>
+              <span className="home-today__label">Total XP</span>
+              <span className="home-today__value">{(stats?.total_xp ?? profile?.total_xp ?? 0).toLocaleString()}</span>
+            </a>
+          </li>
+          <li className={`home-today__card ${accuracy === null || accuracy >= 70 ? 'ui-tone--green' : 'ui-tone--amber'}`}>
+            <a href="#stats" className="home-today__link">
+              <span className="home-today__icon"><Icon name="check" /></span>
+              <span className="home-today__label">Quiz accuracy</span>
+              <span className="home-today__value">{accuracy === null ? '—' : <>{accuracy}<small>%</small></>}</span>
+            </a>
+          </li>
+          <li className="home-today__card ui-tone--pink">
+            <a href="#profile" className="home-today__link">
+              <span className="home-today__icon"><Icon name="heart" /></span>
+              <span className="home-today__label">Friends</span>
+              <span className="home-today__value">{friendCount}</span>
+            </a>
+          </li>
+        </ul>
 
         <div className="home__grid">
           <div className="home__main">
@@ -678,6 +768,24 @@ export function Home({ session }: { session: AuthSession | null }) {
                 <a className="ui-link" href="#profile">Find or start a group</a>
               </div>
             )}
+
+            <section className="home-next" aria-labelledby="home-next-title">
+              <h2 className="home-next__title" id="home-next-title">Study next</h2>
+              <ul className="home-next__list">
+                {studyNext.map((item) => (
+                  <li key={item.key}>
+                    <a className={`home-next__item ui-tone--${item.tone}`} href={item.href} data-review-link={item.review ? '' : undefined}>
+                      <span className="ui-icon"><Icon name={item.icon} /></span>
+                      <span className="home-next__text">
+                        <strong>{item.title}</strong>
+                        <span>{item.copy}</span>
+                      </span>
+                      <span className="home-next__arrow" aria-hidden="true">›</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
           </aside>
         </div>
       </div>
