@@ -242,6 +242,57 @@ class InstructionTests(unittest.TestCase):
             self.client.post(f"/api/notes/{note['id']}/flashcards", headers={"Authorization": "Bearer t"})
         self.assertNotIn(ai_tutor.PREFS_OPEN, captured["user_content"])
 
+    # --- Remake claims, limits and stale attempts (AI-F5 / BE-L5) ----------------------
+
+    def charges(self, action="flashcards_note"):
+        events = main.database.social_action_events
+        with main.database.engine().connect() as connection:
+            return connection.execute(main.select(main.func.count()).select_from(events).where(events.c.action == action)).scalar_one()
+
+    def test_a_remake_refused_with_409_is_not_charged(self):
+        note_id = self.note_with_cards()
+        self.assertEqual(flashcards.claim_regeneration("alex", note_id)[0], "claimed")
+        with patch.object(ai_tutor, "_chat_json") as model:
+            response = self.remake(note_id)
+        self.assertEqual(response.status_code, 409)
+        model.assert_not_called()
+        self.assertEqual(self.charges(), 0)
+
+    def test_a_rate_limited_remake_gives_its_claim_back(self):
+        note_id = self.note_with_cards()
+        with patch.object(main, "FLASHCARD_NOTES_PER_DAY", 0):
+            self.assertEqual(self.remake(note_id).status_code, 429)
+        self.assertEqual(flashcards.job_state("alex", note_id)["status"], "ready")
+        fresh = note_store.save_note("alex", "Biology", "Photosynthesis", "m.txt", "text/plain", NOTE_TEXT, len(NOTE_TEXT))
+        with patch.object(main, "FLASHCARD_NOTES_PER_DAY", 0):
+            self.assertEqual(self.remake(fresh["id"]).status_code, 429)
+        self.assertEqual(flashcards.job_state("alex", fresh["id"])["status"], "none")
+
+    def test_a_stale_remake_never_overwrites_a_newer_one(self):
+        note_id = self.note_with_cards()
+        _, attempt = flashcards.claim_regeneration("alex", note_id)
+        with main.database.engine().begin() as connection:  # a newer attempt took over
+            connection.execute(main.flashcards.jobs.update().values(attempts=attempt + 1))
+        with self.assertRaises(flashcards.Superseded):
+            flashcards.replace("alex", note_id, "Biology", "Photosynthesis", BLANK_CARDS, "h", attempt=attempt)
+        self.assertEqual([card["front"] for card in flashcards.note_cards("alex", note_id)], [card["front"] for card in PLAIN_CARDS])
+        self.assertIsNone(flashcards.style_of("alex", note_id))
+
+    def test_a_failing_warm_up_still_releases_the_claim(self):
+        note_id = self.note_with_cards()
+        with patch.object(ai_tutor, "warm_connection", side_effect=RuntimeError("no threads")), self.assertRaises(RuntimeError):
+            self.remake(note_id)
+        self.assertEqual(flashcards.job_state("alex", note_id)["status"], "ready")
+
+    def test_deleting_a_note_mid_generation_leaves_no_style_row(self):
+        note_id = self.note_with_cards()
+        flashcards.replace("alex", note_id, "Biology", "Photosynthesis", BLANK_CARDS, "hash")
+        self.assertEqual(flashcards.style_of("alex", note_id), "hash")
+        note_store.remove_note("alex", note_id)  # gone while cards were being made
+        self.assertIsNone(flashcards.complete("alex", note_id, "Biology", "Photosynthesis", PLAIN_CARDS))
+        self.assertIsNone(flashcards.style_of("alex", note_id))
+        self.assertEqual(flashcards.job_state("alex", note_id)["status"], "none")
+
 
 
 class HardenedScreenTests(unittest.TestCase):

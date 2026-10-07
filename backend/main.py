@@ -2331,8 +2331,8 @@ def make_note_flashcards(
         raise ai_error(409, "generation_in_progress")
     if outcome == "failed":
         return _note_flashcards_result(note_id, "failed", False, [], flashcards.job_state(owner, note_id)["error"])
-    ai_tutor.warm_connection()
     try:
+        ai_tutor.warm_connection()  # inside the try: if it fails, the claim is still released
         batch = ai_tutor.generate_note_flashcards(
             course=note["course"], unit=note["unit"], file_name=note["file_name"], note_text=text,
             session_id=ai_session_id(owner, note_id, "flashcards"),
@@ -2396,21 +2396,26 @@ def remake_note_flashcards(
     cache_key = ai_cache.flashcard_key(course=note["course"], unit=note["unit"], file_name=note["file_name"], source_text=text, instructions_hash=steering)
     cached = ai_cache.cached_flashcards(cache_key)
     reused = ai_tutor.clean_flashcards(cached, text, ai_tutor.flashcard_target(text), default_topic=note["unit"] or note["course"])[0] if cached else []
-    # Every remake counts against the same daily limit as a first generation (only an
-    # identical repeat, answered above from the stored cards, is free); the AI budget is
-    # spent only when the model is called.
-    flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
-    if not reused:
-        flashcard_budget()
+    # Claim first, so a request refused with 409 (another remake is running) is not charged.
     outcome, attempt = flashcards.claim_regeneration(owner, note_id)
     if outcome != "claimed":
         raise ai_error(409, "generation_in_progress")
+    # Every remake counts against the same daily limit as a first generation (only an
+    # identical repeat, answered above from the stored cards, is free); the AI budget is
+    # spent only when the model is called. A refused remake gives its claim back.
+    try:
+        flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
+        if not reused:
+            flashcard_budget()
+    except BaseException:
+        flashcards.cancel_regeneration(owner, note_id, attempt, state["status"], state["error"])
+        raise
     if reused:
         new_cards = reused
         log("cache_hit", cards_kept=len(reused))
     else:
-        ai_tutor.warm_connection()
         try:
+            ai_tutor.warm_connection()
             batch = ai_tutor.generate_note_flashcards(
                 course=note["course"], unit=note["unit"], file_name=note["file_name"], note_text=text,
                 session_id=ai_session_id(owner, note_id, "flashcards"), instructions=instructions,
@@ -2430,7 +2435,15 @@ def remake_note_flashcards(
         new_cards = batch.cards
         ai_cache.store_flashcards(cache_key, batch.cards)
         log("ok", cards_in=batch.received, cards_kept=len(batch.cards))
-    stored = flashcards.replace(owner, note_id, note["course"], note["unit"], new_cards, steering)
+    try:
+        stored = flashcards.replace(owner, note_id, note["course"], note["unit"], new_cards, steering, attempt=attempt)
+    except flashcards.Superseded:
+        # A newer remake took over while this one ran; its cards win.
+        log("superseded")
+        current = flashcards.job_state(owner, note_id)
+        if current["status"] == "generating" and not current["interrupted"]:
+            raise ai_error(409, "generation_in_progress")
+        return _note_flashcards_result(note_id, current["status"], False, flashcards.note_cards(owner, note_id), current["error"])
     if stored is None:
         raise HTTPException(status_code=404, detail="Note not found")
     return _note_flashcards_result(note_id, "ready", True, stored)

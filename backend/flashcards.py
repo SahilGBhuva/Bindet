@@ -120,6 +120,14 @@ def _lock_note(connection, note_id: str) -> None:
     database._advisory_lock(connection, f"flashcards:{note_id}")
 
 
+def _note_location(connection, owner_id: str, note_id: str) -> tuple[str, str] | None:
+    """(course, unit) of the owner's note, or None when it no longer exists."""
+    notes = note_store.notes
+    row = connection.execute(select(notes.c.course, notes.c.unit).where(
+        notes.c.id == note_id, notes.c.student_id == owner_id)).first()
+    return (row[0], row[1]) if row is not None else None
+
+
 def _is_stale(row, now: datetime) -> bool:
     started = _utc(row["started_at"]) or _utc(row["updated_at"])
     return started is None or now - started > timedelta(seconds=STALE_SECONDS)
@@ -237,10 +245,52 @@ def claim_regeneration(owner_id: str, note_id: str) -> tuple[str, int | None]:
     return "claimed", attempt
 
 
+def _note_exists(connection, owner_id: str, note_id: str) -> bool:
+    notes = note_store.notes
+    return connection.execute(select(notes.c.id).where(notes.c.id == note_id, notes.c.student_id == owner_id)).first() is not None
+
+
+def _drop_orphan(connection, owner_id: str, note_id: str) -> None:
+    """The note was deleted while its cards were being made: remove everything kept for it."""
+    connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
+    connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
+    connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
+
+
+def cancel_regeneration(owner_id: str, note_id: str, attempt: int, prior_status: str, prior_error: str | None = None) -> None:
+    """Undo a remake claim that never reached the AI (it was refused by a limit).
+
+    The note keeps its cards (ready) or goes back to the state it was in before the
+    claim: failed or too_short as before, or no job at all when it never had one.
+    Only this attempt's claim is undone; a newer attempt is left alone.
+    """
+    init_flashcards()
+    with _guard(), database.engine().begin() as connection:
+        _lock_note(connection, note_id)
+        row = _job_row(connection, owner_id, note_id, for_update=True)
+        if row is None or row["status"] != "generating" or int(row["attempts"] or 0) != attempt:
+            return
+        mine = (jobs.c.note_id == note_id, jobs.c.owner_id == owner_id)
+        count = connection.execute(select(func.count()).select_from(cards).where(
+            cards.c.note_id == note_id, cards.c.owner_id == owner_id)).scalar_one()
+        if count:
+            values = {"status": "ready", "card_count": int(count), "error": None}
+        elif prior_status in ("failed", "too_short"):
+            values = {"status": prior_status, "card_count": 0, "error": (prior_error or None) if prior_status == "failed" else None}
+        else:
+            connection.execute(delete(jobs).where(*mine))
+            return
+        connection.execute(update(jobs).where(*mine).values(attempts=max(0, attempt - 1), updated_at=_now(), **values))
+
+
 def release(owner_id: str, note_id: str, attempt: int, code: str) -> None:
     """A remake failed: the note keeps its old cards (ready) or, with none, is marked failed."""
     init_flashcards()
     with _guard(), database.engine().begin() as connection:
+        _lock_note(connection, note_id)
+        if not _note_exists(connection, owner_id, note_id):
+            _drop_orphan(connection, owner_id, note_id)
+            return
         count = connection.execute(select(func.count()).select_from(cards).where(
             cards.c.note_id == note_id, cards.c.owner_id == owner_id)).scalar_one()
         values = ({"status": "ready", "card_count": int(count), "error": None} if count
@@ -250,19 +300,34 @@ def release(owner_id: str, note_id: str, attempt: int, code: str) -> None:
         ).values(updated_at=_now(), **values))
 
 
-def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list[dict], instructions_hash: str) -> list[dict] | None:
+class Superseded(Exception):
+    """A newer attempt claimed this note's cards while this one was running, so its result
+    must not overwrite them."""
+
+
+def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list[dict], instructions_hash: str,
+            attempt: int | None = None) -> list[dict] | None:
     """Swap the note's cards for new_cards and record the instructions they were made with,
-    in one transaction. Returns the stored cards, or None if the note was deleted meanwhile."""
+    in one transaction. Returns the stored cards, or None if the note was deleted meanwhile.
+
+    With attempt, the swap only happens while that attempt still holds the job (status
+    generating, same attempt number); otherwise Superseded is raised and nothing changes,
+    so a slow, stale remake can never overwrite a newer one. The course and unit stored on
+    the cards are read from the note row under the note's lock (a rename may have moved it).
+    """
     init_flashcards()
     now = _now()
     with _guard(), database.engine().begin() as connection:
         _lock_note(connection, note_id)
-        notes = note_store.notes
-        if connection.execute(select(notes.c.id).where(notes.c.id == note_id, notes.c.student_id == owner_id)).first() is None:
-            connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
-            connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
-            connection.execute(delete(styles).where(styles.c.note_id == note_id, styles.c.owner_id == owner_id))
+        location = _note_location(connection, owner_id, note_id)
+        if location is None:
+            _drop_orphan(connection, owner_id, note_id)
             return None
+        course, unit = location
+        if attempt is not None:
+            row = _job_row(connection, owner_id, note_id, for_update=True)
+            if row is None or row["status"] != "generating" or int(row["attempts"] or 0) != attempt:
+                raise Superseded()
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         _insert_ignoring_duplicates(connection, [
             {
@@ -332,12 +397,13 @@ def complete(owner_id: str, note_id: str, course: str, unit: str, new_cards: lis
     now = _now()
     with _guard(), database.engine().begin() as connection:
         _lock_note(connection, note_id)
-        notes = note_store.notes
-        exists = connection.execute(select(notes.c.id).where(notes.c.id == note_id, notes.c.student_id == owner_id)).first()
-        if exists is None:
-            connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
-            connection.execute(delete(jobs).where(jobs.c.note_id == note_id, jobs.c.owner_id == owner_id))
+        # Where the note lives now, read under its lock: a rename (move_notes) takes the same
+        # lock, so cards are never stored under the old course or unit.
+        location = _note_location(connection, owner_id, note_id)
+        if location is None:
+            _drop_orphan(connection, owner_id, note_id)
             return None
+        course, unit = location
         row = _job_row(connection, owner_id, note_id, for_update=True)
         if row is None or row["status"] != "ready":
             _insert_ignoring_duplicates(connection, [
