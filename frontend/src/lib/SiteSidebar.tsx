@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Profile, StudyGroup, Task } from './api'
+import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
 import { useData } from './dataSource'
@@ -283,7 +284,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const closeMenu = useCallback(() => setMenuOpen(false), [])
   useDrawer({ open: menuOpen, onClose: closeMenu, panel: menuPanel, returnFocus: menuButton })
 
-  const displayName = profile?.display_name || session?.user.user_metadata?.username || 'Your account'
+  const displayName = profile?.display_name || accountDisplayName(session?.user) || 'Your account'
   const initials = displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'B'
   const badge = (id: Screen) => id === 'chat' && unreadTotal ? <b className="bindit-rail__badge" aria-label={`${unreadTotal} unread`}>{unreadTotal > 99 ? '99+' : unreadTotal}</b> : null
   const allItems = SECTIONS.flatMap((section) => section.items)

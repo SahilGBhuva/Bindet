@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
+import { accountDisplayName, suggestedUsername } from '../lib/accountName'
 import { requestPasswordReset, signIn, signOutAndReload, signUp, type AuthSession } from '../lib/auth'
 import { loadThemePreference, saveThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
@@ -43,9 +44,13 @@ function initialLoaded(session: AuthSession | null): Loaded | null {
   return cached ? { userId: session.user.id, profile: cached, ready: true } : null
 }
 
-function metadataName(session: AuthSession | null) {
-  const value = session?.user.user_metadata?.username
-  return typeof value === 'string' ? value : ''
+// Before a profile is saved: the Google name (or chosen username) and a username built from it.
+function defaultDisplayName(session: AuthSession | null) {
+  return accountDisplayName(session?.user)
+}
+
+function defaultUsername(session: AuthSession | null) {
+  return suggestedUsername(session?.user)
 }
 
 export function Settings({ session, onSession }: SettingsProps) {
@@ -55,8 +60,8 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState<Loaded | null>(() => initialLoaded(session))
-  const [displayName, setDisplayName] = useState(() => loaded?.profile?.display_name ?? metadataName(session))
-  const [username, setUsername] = useState(() => loaded?.profile?.username ?? metadataName(session))
+  const [displayName, setDisplayName] = useState(() => loaded?.profile?.display_name ?? defaultDisplayName(session))
+  const [username, setUsername] = useState(() => loaded?.profile?.username ?? defaultUsername(session))
   const [profileStatus, setProfileStatus] = useState('')
   const [goalStatus, setGoalStatus] = useState('')
   const [privacyStatus, setPrivacyStatus] = useState('')
@@ -81,8 +86,8 @@ export function Settings({ session, onSession }: SettingsProps) {
           setDisplayName(saved.display_name)
           setUsername(saved.username)
         } else {
-          setUsername(metadataName(session))
-          setDisplayName(metadataName(session))
+          setUsername(defaultUsername(session))
+          setDisplayName(defaultDisplayName(session))
         }
       })
       .catch(() => {

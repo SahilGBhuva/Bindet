@@ -598,6 +598,7 @@ class AccountResponse(BaseModel):
 class AuthConfigResponse(BaseModel):
     supabase_url: str
     supabase_anon_key: str
+    google_enabled: bool = False
 
 
 class DailyLoginRequest(BaseModel):
@@ -1189,7 +1190,7 @@ def warm_ai():
 @app.get("/api/auth/config", response_model=AuthConfigResponse)
 def auth_config():
     url, key = auth.public_settings()
-    return {"supabase_url": url, "supabase_anon_key": key}
+    return {"supabase_url": url, "supabase_anon_key": key, "google_enabled": auth.google_enabled()}
 
 
 def note_response(row: dict, pages_skipped: int = 0) -> NoteResponse:

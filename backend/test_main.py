@@ -11,6 +11,13 @@ os.environ['POCKET_TUTOR_DB_PATH'] = TEST_DB.name
 
 import main
 
+GOOGLE_USER = {
+    'id': 'google-account-1',
+    'email': 'ada@example.com',
+    'app_metadata': {'provider': 'google', 'providers': ['google']},
+    'user_metadata': {'full_name': 'Ada Lovelace', 'name': 'Ada Lovelace', 'email_verified': True},
+}
+
 
 class BinditBackendTests(unittest.TestCase):
     def setUp(self):
@@ -352,6 +359,25 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(main.database.get_progress('victim-account')['total_xp'], 0)
         self.assertEqual(main.database.get_progress(main.guest_student_id('victim-account'))['total_xp'], 10)
 
+    # A Google identity has no password, no username metadata and may lack email_confirmed fields.
+    def test_google_me_works_without_username_metadata(self):
+        with patch.object(main.auth, 'authenticated_user', return_value=GOOGLE_USER):
+            me = main.auth_me('Bearer token')
+        self.assertEqual(me, {'id': 'google-account-1', 'email': 'ada@example.com', 'username': None})
+
+    def test_google_first_profile_save_creates_the_profile(self):
+        with patch.object(main.auth, 'authenticated_user', return_value=GOOGLE_USER):
+            with self.assertRaises(main.HTTPException) as missing:
+                main.get_account_profile('Bearer token')
+            self.assertEqual(missing.exception.status_code, 404)
+            profile = main.update_account_profile(
+                main.AccountProfileUpdate(username='ada_lovelace', display_name='Ada Lovelace'),
+                'Bearer token',
+            )
+            self.assertEqual(profile['username'], 'ada_lovelace')
+            self.assertEqual(profile['display_name'], 'Ada Lovelace')
+            self.assertEqual(main.get_account_profile('Bearer token')['student_id'], 'google-account-1')
+
 
 class HealthTests(unittest.TestCase):
     def setUp(self):
@@ -373,6 +399,35 @@ class HealthTests(unittest.TestCase):
             response = main.health(db=True)
         self.assertEqual(response.status_code, 503)
         self.assertNotIn(b"secret", response.body)
+
+
+class AuthConfigTests(unittest.TestCase):
+    """The Google sign-in button only appears once the owner turns it on."""
+
+    def config(self, **env):
+        base = {'SUPABASE_URL': 'https://example.supabase.co/', 'SUPABASE_ANON_KEY': 'anon-key'}
+        with patch.dict(os.environ, {**base, **env}, clear=False):
+            if 'AUTH_GOOGLE_ENABLED' not in env:
+                os.environ.pop('AUTH_GOOGLE_ENABLED', None)
+            return main.auth_config()
+
+    def test_google_is_off_by_default(self):
+        result = self.config()
+        self.assertFalse(result['google_enabled'])
+        self.assertEqual(result['supabase_url'], 'https://example.supabase.co')
+        self.assertEqual(main.AuthConfigResponse(**result).google_enabled, False)
+
+    def test_google_flag_reads_the_environment(self):
+        for value in ('true', 'TRUE', '1', 'yes', 'on'):
+            self.assertTrue(self.config(AUTH_GOOGLE_ENABLED=value)['google_enabled'], value)
+        for value in ('', 'false', '0', 'no', 'maybe'):
+            self.assertFalse(self.config(AUTH_GOOGLE_ENABLED=value)['google_enabled'], value)
+
+    def test_config_never_exposes_server_keys(self):
+        with patch.dict(os.environ, {'SUPABASE_SERVICE_ROLE_KEY': 'service-secret', 'AUTH_GOOGLE_ENABLED': 'true'}):
+            result = self.config(AUTH_GOOGLE_ENABLED='true')
+        self.assertEqual(set(result), {'supabase_url', 'supabase_anon_key', 'google_enabled'})
+        self.assertNotIn('service-secret', str(result))
 
 
 if __name__ == '__main__':

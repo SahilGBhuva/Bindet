@@ -33,6 +33,15 @@ def public_settings() -> tuple[str, str]:
     return url, anon_key
 
 
+def google_enabled() -> bool:
+    """True once the owner has configured the Google provider in Supabase and set AUTH_GOOGLE_ENABLED.
+
+    Off by default, so the "Continue with Google" button never appears before the
+    provider exists (it would only lead to a Supabase error page).
+    """
+    return os.getenv('AUTH_GOOGLE_ENABLED', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _cache_key(authorization: str) -> str:
     return hashlib.blake2s(authorization.encode('utf-8'), digest_size=16).hexdigest()
 
