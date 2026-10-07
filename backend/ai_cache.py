@@ -46,6 +46,7 @@ RETENTION = {
     "extraction_cache": timedelta(days=30),
     "grading_cache": timedelta(days=30),
     "tutor_reply_cache": timedelta(days=7),
+    "practice_test_cache": timedelta(days=14),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
@@ -107,7 +108,10 @@ def prune_if_due(now: float | None = None) -> bool:
 
 # --- Where entries came from (cache_refs) ---------------------------------------------
 
-REF_TABLES = ("flashcard_cache", "extraction_cache", "grading_cache", "tutor_reply_cache", "question_bank")
+REF_TABLES = ("flashcard_cache", "extraction_cache", "grading_cache", "tutor_reply_cache", "question_bank", "practice_test_cache")
+# Entries made from several notes at once: deleting any one of those notes deletes the
+# entry (and every reference to it), since it can quote the deleted note.
+WHOLE_SOURCE_TABLES = ("practice_test_cache",)
 
 
 def _cache_table_and_key(name: str):
@@ -163,7 +167,13 @@ def release_source(connection, owner_id: str, source: str) -> int:
     if not entries:
         return 0
     connection.execute(delete(refs).where(*mine))
-    return _drop_unreferenced(connection, [(name, key) for name, key in entries])
+    removed = 0
+    for name, key in entries:
+        if name in WHOLE_SOURCE_TABLES:
+            connection.execute(delete(refs).where(refs.c.cache_table == name, refs.c.key == key))
+            table = _table(name)
+            removed += connection.execute(delete(table).where(table.c.key == key, table.c.owner_id == owner_id)).rowcount or 0
+    return removed + _drop_unreferenced(connection, [(name, key) for name, key in entries if name not in WHOLE_SOURCE_TABLES])
 
 
 def release_conversation(connection, owner_id: str, conversation_id: str) -> int:
@@ -208,6 +218,8 @@ def purge_user_ai_data_in(connection, owner_id: str) -> int:
     removed = _drop_unreferenced(connection, [(name, key) for name, key in entries])
     tutor_table = _table("tutor_reply_cache")
     removed += connection.execute(delete(tutor_table).where(tutor_table.c.owner_id == owner_id)).rowcount or 0
+    practice_table = _table("practice_test_cache")
+    removed += connection.execute(delete(practice_table).where(practice_table.c.owner_id == owner_id)).rowcount or 0
     connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
     return removed
 
@@ -404,6 +416,50 @@ def store_tutor_reply(key: str, owner_id: str, reply: str) -> bool:
 def reply_pieces(reply: str) -> list[str]:
     """A cached reply in small pieces, streamed as ordinary delta events."""
     return [reply[index:index + TUTOR_REPLY_PIECE_CHARS] for index in range(0, len(reply), TUTOR_REPLY_PIECE_CHARS)]
+
+
+# --- Practice tests (per account, never shared) ---------------------------------------
+#
+# A test holds its answers, so it is kept per student: the key includes the owner, and
+# every read filters by it. The key also covers the exact note text sent, the course and
+# unit the prompt names, the question count and the hash of the student's preferences.
+# A note it was made from being deleted deletes it (cache_refs, WHOLE_SOURCE_TABLES).
+
+def practice_version() -> str:
+    return "practice-v1:" + fingerprint(
+        ai_tutor.GENERATE_TEST_PROMPT, ai_tutor._TEST_SCHEMA, ai_tutor.OPENROUTER_MODEL, ai_tutor.PRACTICE_NOTE_CHARS,
+        ai_tutor.OPERATIONS["generate_test"]["max_tokens"], ai_tutor.OPERATIONS["generate_test"]["temperature"],
+        ai_tutor.PRACTICE_MIN_KEPT_RATIO,
+    )
+
+
+def practice_key(*, owner_id: str, course: str, unit: str, source_text: str, count: int, instructions_hash: str = "") -> str:
+    return make_key("practice", practice_version(), owner_id, course, unit, source_text, int(count), instructions_hash)
+
+
+def cached_practice_test(key: str, owner_id: str) -> list[dict] | None:
+    row = lookup("practice_test_cache", key, owner_id=owner_id)
+    questions = row["questions"] if row is not None else None
+    return questions if isinstance(questions, list) and questions else None
+
+
+PRACTICE_FIELDS = ("type", "prompt", "choices", "answer", "explanation", "topic")
+
+
+def store_practice_test(key: str, owner_id: str, questions: list[dict]) -> bool:
+    """Store (or replace: a student asking for new questions gets those next time) a test."""
+    if not enabled() or not questions:
+        return False
+    kept = [{field: question[field] for field in PRACTICE_FIELDS} for question in questions]
+    try:
+        database.init_db()
+        table = _table("practice_test_cache")
+        with database.engine().begin() as connection:
+            connection.execute(delete(table).where(table.c.key == key))
+            connection.execute(table.insert().values(key=key, owner_id=owner_id, questions=kept, created_at=_now(), hits=0))
+        return True
+    except Exception:  # noqa: BLE001 - failing to cache must not fail the request
+        return False
 
 
 def reset_caches() -> None:

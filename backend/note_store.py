@@ -67,6 +67,41 @@ def context_for(student_id: str, course: str, unit: str, limit_chars: int = 18_0
     return labels, '\n\n'.join(chunks)
 
 
+def practice_context(student_id: str, course: str, unit: str | None, limit_chars: int = 16_000) -> tuple[list[str], str, list[str]]:
+    """(file names, note text, note IDs) for a practice test: one unit's notes, or with unit
+    None the whole course's, where each unit gets an even share of limit_chars so a course
+    test covers every unit rather than only the newest one. Only the owner's notes."""
+    init_notes()
+    excerpt = func.substr(notes.c.text, 1, max(0, limit_chars)).label('text')
+    query = select(notes.c.id, notes.c.unit, notes.c.file_name, excerpt).where(notes.c.student_id == student_id, notes.c.course == course)
+    if unit is not None:
+        query = query.where(notes.c.unit == unit)
+    with database.engine().connect() as connection:
+        rows = connection.execute(query.order_by(notes.c.unit, notes.c.created_at.desc())).mappings().all()
+    by_unit: dict[str, list] = {}
+    for row in rows:
+        by_unit.setdefault(row['unit'], []).append(row)
+    share = limit_chars // max(1, len(by_unit))
+    labels: list[str] = []
+    chunks: list[str] = []
+    ids: list[str] = []
+    for unit_name, unit_rows in by_unit.items():
+        used = 0
+        for row in unit_rows:
+            remaining = share - used
+            if remaining <= 0:
+                break
+            text = row['text'][:remaining]
+            if not text.strip():
+                continue
+            labels.append(row['file_name'])
+            ids.append(row['id'])
+            source = row['file_name'] if unit is not None else f"{unit_name} / {row['file_name']}"
+            chunks.append(f"SOURCE: {source}\n{text}")
+            used += len(text)
+    return labels, '\n\n'.join(chunks), ids
+
+
 def get_note(student_id: str, note_id: str) -> dict | None:
     init_notes()
     with database.engine().begin() as connection:

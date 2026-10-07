@@ -77,6 +77,11 @@ export type DataSource = {
   // Flashcards kept on this device for offline study (IndexedDB). The demo keeps none.
   saveOfflineCards: typeof offlineCards.saveOfflineCards
   loadOfflineCards: typeof offlineCards.loadOfflineCards
+  // Practice tests. The demo runs them in memory.
+  createPracticeTest: typeof api.createPracticeTest
+  getPracticeTest: typeof api.getPracticeTest
+  submitPracticeTest: typeof api.submitPracticeTest
+  listPracticeTests: typeof api.listPracticeTests
 }
 
 export const realData: DataSource = {
@@ -133,6 +138,10 @@ export const realData: DataSource = {
   gradeReviewCard: api.gradeReviewCard,
   saveOfflineCards: offlineCards.saveOfflineCards,
   loadOfflineCards: offlineCards.loadOfflineCards,
+  createPracticeTest: api.createPracticeTest,
+  getPracticeTest: api.getPracticeTest,
+  submitPracticeTest: api.submitPracticeTest,
+  listPracticeTests: api.listPracticeTests,
 }
 
 const DataContext = createContext<DataSource>(realData)

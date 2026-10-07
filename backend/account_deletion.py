@@ -10,7 +10,8 @@ safe for foreign keys:
 - Tasks: personal tasks are deleted. Group tasks the student created stay with the
   group and pass to the group's owner, so the group keeps its work. The student's
   comments, attachments, assignments and activity on any task are removed.
-- Notes, flashcards (cards, jobs, styles, review state), tutor conversations and messages,
+- Notes, flashcards (cards, jobs, styles, review state), practice tests and their items,
+  tutor conversations and messages,
   generated questions, private question banks and every AI cache entry tied to the
   account (ai_cache.purge_user_ai_data_in; shared entries another user's identical
   upload still references are kept).
@@ -35,6 +36,7 @@ import ai_cache
 import database
 import flashcards
 import note_store
+import practice_tests
 import questions
 import tasks
 import tutor
@@ -52,6 +54,7 @@ def init_all() -> None:
     questions.init_questions()
     tutor.init_tutor()
     tasks.init_tasks()
+    practice_tests.init_practice()
 
 
 def _now() -> datetime:
@@ -179,6 +182,7 @@ def _delete_study_material(connection, student_id: str) -> int:
     connection.execute(delete(flashcards.jobs).where(flashcards.jobs.c.owner_id == student_id))
     connection.execute(delete(flashcards.styles).where(flashcards.styles.c.owner_id == student_id))
     connection.execute(delete(notes).where(notes.c.student_id == student_id))
+    practice_tests.delete_for_owner(connection, student_id)
     conversation_ids = select(tutor.conversations.c.id).where(tutor.conversations.c.owner_id == student_id)
     connection.execute(delete(tutor.messages).where(tutor.messages.c.conversation_id.in_(conversation_ids)))
     connection.execute(delete(tutor.conversations).where(tutor.conversations.c.owner_id == student_id))

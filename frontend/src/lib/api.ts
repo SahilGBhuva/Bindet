@@ -184,7 +184,7 @@ async function resolvedToken(explicit?: string): Promise<string | undefined> {
  * AI requests fail fast with a clear message instead of hanging. The budgets sit
  * above the server's own model timeouts, so a slow but working answer still lands.
  */
-export const AI_TIMEOUTS = { question: 25_000, grade: 25_000, flashcards: 60_000, upload: 60_000 } as const
+export const AI_TIMEOUTS = { question: 25_000, grade: 25_000, flashcards: 60_000, upload: 60_000, practiceTest: 75_000, practiceGrade: 45_000 } as const
 export const AI_TIMEOUT_MESSAGE = 'This is taking longer than usual. Try again in a moment.'
 
 export class RequestTimeoutError extends Error {
@@ -428,6 +428,93 @@ export function remakeNoteFlashcards(noteId: string, instructions: string, acces
     signal,
     timeoutMs: AI_TIMEOUTS.flashcards,
   }, accessToken)
+}
+
+/* A practice test: one question per item. Answers, explanations and topics arrive only once it is submitted. */
+export type PracticeItem = {
+  position: number
+  type: 'multiple_choice' | 'short_answer'
+  prompt: string
+  choices: string[]
+  answer?: string
+  explanation?: string
+  topic?: string
+  student_answer?: string
+  correct?: boolean
+  grading_source?: 'deterministic' | 'ai'
+  feedback?: string
+}
+export type PracticeTopic = { topic: string; correct: number; total: number; weak: boolean }
+export type PracticeTest = {
+  id: string
+  course: string
+  unit: string | null
+  status: 'in_progress' | 'submitted'
+  created_at: string
+  started_at: string
+  submitted_at: string | null
+  time_limit_s: number | null
+  deadline: string | null
+  server_now: string
+  question_count: number
+  score: number | null
+  over_time: boolean
+  xp_earned: number
+  items: PracticeItem[]
+  time_used_s?: number | null
+  topics?: PracticeTopic[]
+  total_xp?: number
+}
+export type PracticeTestSummary = Pick<PracticeTest, 'id' | 'course' | 'unit' | 'status' | 'created_at' | 'submitted_at' | 'question_count' | 'score' | 'time_limit_s' | 'deadline' | 'over_time'>
+export type PracticeTestOptions = {
+  course: string
+  // null: the whole course.
+  unit: string | null
+  count: number
+  // null: untimed.
+  timeLimitMin: number | null
+  instructions?: string
+  // Ask for new questions instead of retaking the saved test for these notes and settings.
+  newQuestions?: boolean
+}
+
+/* Writes a practice test from the unit's (or course's) notes, or serves the saved one again. */
+export function createPracticeTest(options: PracticeTestOptions, accessToken?: string, signal?: AbortSignal) {
+  return request<PracticeTest>('/api/practice-tests', {
+    method: 'POST',
+    body: JSON.stringify({
+      course: options.course,
+      unit: options.unit ?? undefined,
+      count: options.count,
+      time_limit_min: options.timeLimitMin ?? undefined,
+      untimed: options.timeLimitMin === null,
+      instructions: options.instructions?.trim() || undefined,
+      new_questions: Boolean(options.newQuestions),
+    }),
+    signal,
+    timeoutMs: AI_TIMEOUTS.practiceTest,
+  }, accessToken)
+}
+
+export function getPracticeTest(testId: string, accessToken?: string, signal?: AbortSignal) {
+  return request<PracticeTest>(`/api/practice-tests/${encodeURIComponent(testId)}`, { signal }, accessToken)
+}
+
+/* Grades the test once. A second submit answers 409 already_submitted. */
+export function submitPracticeTest(testId: string, answers: { position: number; answer: string }[], accessToken?: string) {
+  return request<PracticeTest>(`/api/practice-tests/${encodeURIComponent(testId)}/submit`, {
+    method: 'POST',
+    body: JSON.stringify({ answers }),
+    timeoutMs: AI_TIMEOUTS.practiceGrade,
+  }, accessToken)
+}
+
+/* The last 20 tests in a course, or in one unit of it. Never calls the AI. */
+export async function listPracticeTests(course: string, unit: string | null, accessToken?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ course })
+  if (unit !== null) query.set('unit', unit)
+  const result = await request<{ tests: PracticeTestSummary[] }>(`/api/practice-tests?${query}`, { signal }, accessToken)
+  return result.tests
 }
 
 /* The saved flashcards for a unit and each note's flashcard state. Never calls the AI. */

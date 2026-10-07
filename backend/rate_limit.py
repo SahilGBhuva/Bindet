@@ -37,7 +37,7 @@ ANONYMOUS_PER_MINUTE = 60       # requests without a sign-in, per address
 UNVERIFIED_TOKENS_PER_MINUTE = 600
 AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation, grading, note uploads, per student
 
-AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes")
+AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes", "/api/practice-tests")
 # /api/auth/config only returns public values (the Supabase URL and anon key) and every
 # page load asks for it, so it is never limited.
 EXEMPT_PATHS = ("/api/health", "/api/auth/config")

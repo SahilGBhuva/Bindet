@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { AI_BREAK_MESSAGE, ApiError, isAbortError, OFFLINE_MESSAGE, OfflineError, parseServerTime, RATE_LIMITED_MESSAGE, RequestTimeoutError } from '../lib/api'
-import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, NoteScope, UploadedNote } from '../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, GeneratedQuestion, NoteFlashcardState, NoteFlashcardStatus, NoteScope, PracticeTestSummary, UploadedNote } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import { isOffline, useOnline } from '../lib/pwa'
 import {
@@ -19,6 +19,7 @@ import { MathText } from '../components/math/Math'
 import { announceReviewChange } from '../lib/review'
 import { useReviewSummary } from '../lib/useReviewSummary'
 import { ReviewSession } from './ReviewSession'
+import { PracticeTest } from '../components/practice/PracticeTest'
 import { prepareNotePhoto } from '../lib/notePhoto'
 import {
   FOCUS_SIZES,
@@ -416,6 +417,11 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [lookCourse, setLookCourse] = useState('')
   const [lookBusy, setLookBusy] = useState(false)
   const [lookHint, setLookHint] = useState('')
+  // An open practice test (setup, test or results) for a unit, or for the whole course (unit null).
+  const [practice, setPractice] = useState<{ course: string; unit: string | null; openId?: string; key: number } | null>(null)
+  // The active unit's practice tests (for Resume and the last score on the Quiz panel).
+  const [unitTests, setUnitTests] = useState<{ key: string; tests: PracticeTestSummary[] } | null>(null)
+  const [unitTestsRequest, setUnitTestsRequest] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
   const photoInput = useRef<HTMLInputElement>(null)
   const [photo, setPhoto] = useState<PhotoJob | null>(null)
@@ -578,7 +584,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     return () => document.removeEventListener('keydown', onKey)
   }, [orderOpen])
 
-  const focusOn = focusMode && (panelFn !== 'scan' || reviewAll)
+  const focusOn = focusMode && (panelFn !== 'scan' || reviewAll || practice !== null)
 
   // Home and the sidebar link to "#tools?review=all": open Review over every unit, then
   // drop the request from the address so a reload or Back doesn't reopen it.
@@ -696,6 +702,27 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     loadUnitLibrary(activeCourse, activeUnit, controller.signal)
     return () => controller.abort()
   }, [activeCourse, activeUnit, libraryRequest])
+
+  // The Quiz panel shows a test in progress (Resume) and the last score. Never asks the AI.
+  const loadUnitTests = useEffectEvent((course: string, unit: string, signal: AbortSignal) => {
+    const key = `${course}|${unit}`
+    data.listPracticeTests(course, unit, accessToken, signal)
+      .then((tests) => { if (!signal.aborted) setUnitTests({ key, tests }) })
+      .catch(() => { /* the panel simply shows no history */ })
+  })
+
+  useEffect(() => {
+    if (panelFn !== 'quiz' || practice || !activeCourse || !activeUnit) return
+    const controller = new AbortController()
+    loadUnitTests(activeCourse, activeUnit, controller.signal)
+    return () => controller.abort()
+  }, [panelFn, practice, activeCourse, activeUnit, unitTestsRequest])
+
+  function openPractice(unit: string | null, openId?: string) {
+    setFocusMode(false)
+    setReviewAll(false)
+    setPractice({ course: activeCourse, unit, openId, key: Date.now() })
+  }
 
   function reloadLibrary() {
     setLibrary({ key: unitKey, status: 'loading', error: '', cardsFailed: false })
@@ -894,6 +921,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   }
 
   function chooseCourse(name: string) {
+    // A test in progress stays on the server and can be resumed from its unit's Quiz panel.
+    if (practice && !sameName(practice.course, name)) setPractice(null)
     setAddingUnit(false)
     setNewUnit('')
     setRenamingUnit('')
@@ -1832,6 +1861,36 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     </div>
   ) : null
 
+  const testsHere = unitTests?.key === unitKey ? unitTests.tests : []
+  const inProgressTest = testsHere.find((test) => test.status === 'in_progress')
+  const lastTest = testsHere.find((test) => test.status === 'submitted')
+  const practiceEntry = (
+    <section className="tools__practice" aria-labelledby="tools-practice-title">
+      <div className="tools__practice-text">
+        <h3 className="tools__label" id="tools-practice-title">Practice test</h3>
+        <p className="tools__hint">
+          {!unitNotes.length
+            ? `Add notes to ${activeUnit} to take a timed practice test.`
+            : inProgressTest
+              ? `You have a test in progress from ${formatDay(inProgressTest.created_at) || 'earlier'}.`
+              : lastTest
+                ? `Last score: ${lastTest.score ?? 0} of ${lastTest.question_count} (${formatDay(lastTest.created_at)}).`
+                : `A timed test of 5–15 questions from ${plural(unitNotes.length, 'note')}, with a score report and weak spots.`}
+        </p>
+      </div>
+      <div className="tools__practice-actions">
+        {inProgressTest ? (
+          <button className="ui-button ui-button--primary tools__practice-entry" type="button" onClick={() => openPractice(activeUnit, inProgressTest.id)}>
+            Resume practice test
+          </button>
+        ) : null}
+        <button className="ui-button tools__practice-entry" type="button" disabled={!unitNotes.length} onClick={() => openPractice(activeUnit)}>
+          Take a practice test
+        </button>
+      </div>
+    </section>
+  )
+
   return (
     <div className="ui-page tools" style={current ? { ['--course' as string]: courseTone(current) } : undefined}>
       <header className="ui-page-header">
@@ -1846,6 +1905,17 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           {reviewSummary?.due && !reviewAll ? (
             <button className="ui-button ui-button--primary tools__review-all" type="button" onClick={() => setReviewAll(true)}>
               {plural(reviewSummary.due, 'card')} due
+            </button>
+          ) : null}
+          {current ? (
+            <button
+              className="ui-button tools__practice-entry"
+              type="button"
+              disabled={!courseNoteCount}
+              title={courseNoteCount ? `A timed test from every unit in ${activeCourse}` : 'Add notes to this course first'}
+              onClick={() => openPractice(null)}
+            >
+              Test the whole course
             </button>
           ) : null}
           <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
@@ -1938,6 +2008,20 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
         </nav>
 
         <section className="ui-panel tools__workspace" aria-label={activeCourse ? `${activeCourse} workspace` : 'Workspace'}>
+          {practice ? (
+            <PracticeTest
+              key={practice.key}
+              course={practice.course}
+              unit={practice.unit}
+              openId={practice.openId}
+              accessToken={accessToken}
+              focusOn={focusOn}
+              focusStyle={focusStyle}
+              focusControls={focusControls}
+              onClose={() => { setPractice(null); setFocusMode(false) }}
+              onChanged={() => setUnitTestsRequest((count) => count + 1)}
+            />
+          ) : (<>
           <div className="ui-tabs tools__unit-tabs" role="tablist" aria-label={`Units in ${activeCourse}`}>
             {units.map((item) =>
               item === renamingUnit ? (
@@ -2384,6 +2468,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
 
                   {instructionsField('quiz', quizInstructionsKey, quizInstructions)}
 
+                  {practiceEntry}
+
                   <div className={`tools__question${loadingQuestion ? ' is-loading' : ''}`} aria-busy={quizBusy}>
                     {loadingQuestion || (!quizQuestion && !quizError) ? (
                       <div className="tools__question-skeleton">
@@ -2498,6 +2584,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               ) : null}
             </>
           )}
+          </>)}
         </section>
       </div>
       )}

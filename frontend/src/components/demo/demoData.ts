@@ -1,4 +1,5 @@
 import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, PracticeItem, PracticeTest, PracticeTestSummary, Profile, Progress, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { nextValues, previewFor, stateName, type SchedulerState } from '../../lib/review'
@@ -263,6 +264,19 @@ function initialReviews(notebook: Notebook): Map<string, DemoReview> {
     })
   }
   return reviews
+type DemoQuestion = { type: PracticeItem['type']; prompt: string; choices: string[]; answer: string; explanation: string; topic: string }
+
+/* A practice test from the demo unit's (or course's) own material: its quiz questions, plus short answers from its shortest cards. */
+function demoTestQuestions(course: string, unit: string | null): DemoQuestion[] {
+  const units = unit === null
+    ? Object.entries(COURSES.find((item) => item.name === course)?.units ?? {})
+    : [[unit, findContent(course, unit)] as const]
+  return units.flatMap(([name, content]) => [
+    ...content.questions.map((item) => ({ type: 'multiple_choice' as const, prompt: item.q, choices: item.choices, answer: item.answer, explanation: item.why, topic: name })),
+    ...content.cards
+      .filter(([, back]) => back.replace(/\.$/, '').length <= 12)
+      .map(([front, back]) => ({ type: 'short_answer' as const, prompt: front, choices: [], answer: back.replace(/\.$/, ''), explanation: `Your notes: ${back}`, topic: name })),
+  ])
 }
 
 export function createDemoData(onLocked: (action: string) => void): DataSource {
@@ -371,6 +385,16 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
         : { state: 'new', due_at: null, interval_days: 0, ease: 2.5, reps: 0, lapses: 0, preview: previewFor(null, card.id) },
     }
   }
+  // Practice tests run entirely in memory: written from the demo material, graded here.
+  const practice = new Map<string, { test: PracticeTest; questions: DemoQuestion[] }>()
+  const practiceSummary = (test: PracticeTest): PracticeTestSummary => ({
+    id: test.id, course: test.course, unit: test.unit, status: test.status, created_at: test.created_at, submitted_at: test.submitted_at,
+    question_count: test.question_count, score: test.score, time_limit_s: test.time_limit_s, deadline: test.deadline, over_time: test.over_time,
+  })
+  const hidden = (test: PracticeTest): PracticeTest => (test.status === 'submitted' ? structuredClone(test) : {
+    ...structuredClone(test),
+    items: test.items.map(({ position, type, prompt, choices }) => ({ position, type, prompt, choices: [...choices] })),
+  })
 
   const notebookListeners = new Set<() => void>()
   return {
@@ -577,5 +601,64 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     // The demo never touches the visitor's storage: nothing is kept for offline use.
     saveOfflineCards: () => Promise.resolve(),
     loadOfflineCards: () => Promise.resolve(null),
+    // Untimed in the demo: its clock is fixed, so a countdown would never move.
+    createPracticeTest: (options) => {
+      const pool = demoTestQuestions(options.course, options.unit)
+      const turn = practice.size
+      // Each new test starts at a different question, so "New questions" shows a change.
+      // Choices are rotated (no randomness, so the demo stays the same for everyone) so the answer isn't always A.
+      const rotate = (choices: string[], by: number) => choices.map((_, index) => choices[(index + by) % choices.length])
+      const questions = pool
+        .map((_, index) => pool[(index + (options.newQuestions ? turn : 0)) % pool.length])
+        .slice(0, Math.max(1, Math.min(options.count, pool.length)))
+        .map((question, index) => (question.choices.length ? { ...question, choices: rotate(question.choices, (index * 3 + 1) % question.choices.length) } : question))
+      const id = `demo-test-${turn + 1}`
+      const test: PracticeTest = {
+        id, course: options.course, unit: options.unit, status: 'in_progress', created_at: new Date(DEMO_NOW + turn * 60_000).toISOString(),
+        started_at: new Date(DEMO_NOW).toISOString(), submitted_at: null, time_limit_s: null, deadline: null, server_now: new Date(DEMO_NOW).toISOString(),
+        question_count: questions.length, score: null, over_time: false, xp_earned: 0,
+        items: questions.map((question, position) => ({ position, type: question.type, prompt: question.prompt, choices: [...question.choices] })),
+      }
+      practice.set(id, { test, questions })
+      return wait(hidden(test), 700)
+    },
+    getPracticeTest: (testId) => {
+      const entry = practice.get(testId)
+      return entry ? wait(hidden(entry.test)) : Promise.reject(new Error('That practice test couldn’t be found.'))
+    },
+    submitPracticeTest: (testId, answers) => {
+      const entry = practice.get(testId)
+      if (!entry) return Promise.reject(new Error('That practice test couldn’t be found.'))
+      if (entry.test.status === 'submitted') return wait(hidden(entry.test))
+      const given = new Map(answers.map((item) => [item.position, item.answer]))
+      const normalize = (value: string) => value.toLowerCase().replace(/[.!?]+$/, '').replace(/\s+/g, ' ').trim()
+      const items: PracticeItem[] = entry.questions.map((question, position) => {
+        const answer = given.get(position) ?? ''
+        const correct = question.type === 'multiple_choice' ? answer === question.answer : Boolean(answer) && normalize(answer) === normalize(question.answer)
+        return { position, type: question.type, prompt: question.prompt, choices: [...question.choices], answer: question.answer, explanation: question.explanation,
+          topic: question.topic, student_answer: answer, correct, grading_source: 'deterministic', feedback: '' }
+      })
+      const score = items.filter((item) => item.correct).length
+      const topics = new Map<string, { topic: string; correct: number; total: number; weak: boolean }>()
+      for (const item of items) {
+        const topic = topics.get(item.topic ?? '') ?? { topic: item.topic ?? '', correct: 0, total: 0, weak: false }
+        topic.total += 1
+        if (item.correct) topic.correct += 1
+        topic.weak = topic.correct / topic.total < 0.7
+        topics.set(topic.topic, topic)
+      }
+      stats.total_xp += score * 2
+      profile.total_xp = stats.total_xp
+      entry.test = {
+        ...entry.test, status: 'submitted', submitted_at: new Date(DEMO_NOW + 6 * 60_000).toISOString(), score, xp_earned: score * 2,
+        items, topics: [...topics.values()], time_used_s: 6 * 60, total_xp: stats.total_xp,
+      }
+      return wait(hidden(entry.test), 500)
+    },
+    listPracticeTests: (course, unit) => wait([...practice.values()]
+      .map((entry) => entry.test)
+      .filter((test) => test.course === course && (unit === null || test.unit === unit))
+      .reverse()
+      .map(practiceSummary)),
   }
 }
