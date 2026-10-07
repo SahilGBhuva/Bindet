@@ -927,8 +927,9 @@ export function getCachedGroupAnalytics(groupId: string) {
   return analyticsCache.get(groupId) ?? null
 }
 
-export async function getGroupAnalytics(groupId: string, accessToken: string) {
-  const data = await request<GroupAnalytics>(`/api/study-groups/${encodeURIComponent(groupId)}/analytics`, undefined, accessToken)
+/* `today` is the student's local date, so "overdue" and the burn-down end on their day, not the server's (UTC). */
+export async function getGroupAnalytics(groupId: string, accessToken: string, today = localDay()) {
+  const data = await request<GroupAnalytics>(`/api/study-groups/${encodeURIComponent(groupId)}/analytics?today=${encodeURIComponent(today)}`, undefined, accessToken)
   analyticsCache.set(groupId, data)
   return data
 }
