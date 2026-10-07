@@ -241,7 +241,41 @@ MATH_STYLE = (
 )
 # $$…$$, \[…\], \(…\), and $…$ where the opening $ is not followed by a space and the
 # closing $ is on the same line and not preceded by one (so "$5 and $6" is not math).
-_MATH_SEGMENT = re.compile(r"\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<![\\$])\$(?=\S)[^$\n]*?(?<=\S)\$(?!\d)")
+# Found by a linear scan (math_spans), not a regex: a lazy "[\s\S]+?" retried from every
+# unclosed "\[" made 50,000 characters of "\[\[\[…" take seconds.
+_DISPLAY_OPENERS = {"$$": "$$", "\\[": "\\]", "\\(": "\\)"}
+
+
+def math_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) of each math segment, left to right, in time linear in len(text)."""
+    spans: list[tuple[int, int]] = []
+    closed_out: set[str] = set()  # closers known not to occur again after some opener
+    n = len(text)
+    i = 0
+    while i < n:
+        char = text[i]
+        if char not in "$\\":
+            i += 1
+            continue
+        opener = text[i:i + 2]
+        closer = _DISPLAY_OPENERS.get(opener)
+        if closer is not None and closer not in closed_out:
+            end = text.find(closer, i + 3)  # at least one character between them
+            if end == -1:
+                closed_out.add(closer)
+            else:
+                spans.append((i, end + 2))
+                i = end + 2
+                continue
+        if char == "$" and (i == 0 or text[i - 1] not in "\\$") and i + 1 < n and not text[i + 1].isspace():
+            end = text.find("$", i + 1)
+            if (end != -1 and "\n" not in text[i + 1:end] and not text[end - 1].isspace()
+                    and not (end + 1 < n and text[end + 1].isdigit())):
+                spans.append((i, end + 1))
+                i = end + 1
+                continue
+        i += 1
+    return spans
 _LATEX_TEXT_COMMAND = re.compile(r"\\(?:text|mathrm|textbf|mathbf|mathit|operatorname|textit)\s*\{([^{}]*)\}")
 _LATEX_FRACTION = re.compile(r"\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}")
 _LATEX_ROOT = re.compile(r"\\sqrt\s*\{([^{}]*)\}")
@@ -249,7 +283,15 @@ _LATEX_ROOT = re.compile(r"\\sqrt\s*\{([^{}]*)\}")
 
 def without_math(text: str) -> str:
     """The text with every math segment removed (for screens that must not read LaTeX as markup)."""
-    return _MATH_SEGMENT.sub(" ", text or "")
+    text = text or ""
+    pieces: list[str] = []
+    position = 0
+    for start, end in math_spans(text):
+        pieces.append(text[position:start])
+        pieces.append(" ")
+        position = end
+    pieces.append(text[position:])
+    return "".join(pieces)
 
 
 def _simple(value: str) -> str:
@@ -262,6 +304,9 @@ def latex_to_plain(text: str) -> str:
     if not text or not re.search(r"[\\$]", text):
         return text or ""
     value = re.sub(r"\\[()\[\]]", " ", text).replace("$", " ")
+    # One space between words before any pattern with \s* runs: a long run of spaces (or of
+    # "$" and "\[" turned into spaces) would otherwise be rescanned from every position.
+    value = " ".join(value.split())
     for _ in range(4):  # nested \frac{\sqrt{3}}{2}
         value = _LATEX_TEXT_COMMAND.sub(lambda match: match.group(1), value)
         value = _LATEX_ROOT.sub(lambda match: f"sqrt({match.group(1).strip()})", value)

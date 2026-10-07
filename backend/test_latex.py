@@ -68,5 +68,25 @@ class LatexTests(unittest.TestCase):
         self.assertIsNone(main.deterministic_verdict("2", "$\\frac{1}{2}$", "Trig"))
 
 
+    def test_math_screens_are_fast_on_hostile_input(self):
+        """BE-L3: 50,000 characters never take more than 200 ms in either function."""
+        import time
+        hostile = [
+            "$" + " " * 50_000, "\\frac {" + " " * 50_000, "\\[" * 25_000, "\\(" * 25_000, "$$" * 25_000,
+            "\\frac" + " " * 50_000 + "{a}", "$a" * 25_000, "\\frac{a}{" * 5_000, "\\" * 50_000,
+        ]
+        for text in hostile:
+            for function in (ai_tutor.latex_to_plain, ai_tutor.without_math):
+                with self.subTest(function=function.__name__, text=text[:12]):
+                    started = time.perf_counter()
+                    function(text)
+                    self.assertLess(time.perf_counter() - started, 0.2)
+
+    def test_math_spans_match_the_documented_rules(self):
+        self.assertEqual(ai_tutor.without_math("a $$x$$ b \\[y\\] c \\(z\\) d $w$ e").split(), list("abcde"))
+        self.assertEqual(ai_tutor.without_math("unclosed \\[ and $ 5 and $x $"), "unclosed \\[ and $ 5 and $x $")
+        self.assertEqual(ai_tutor.without_math("$x$5"), "$x$5")  # a closing $ before a digit is money, not math
+
+
 if __name__ == "__main__":
     unittest.main()
