@@ -329,6 +329,40 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   gap: var(--space-8);
 }
 
+/* "Take a photo of your notes": secondary on desktop, the main action on phones. */
+.tools__photo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+.tools__photo-intro { display: grid; gap: 2px; min-width: 0; }
+.tools__photo-button { min-height: 44px; }
+.tools__photo-button svg { width: 18px; height: 18px; }
+.tools__photo > .ui-alert,
+.tools__photo-job { grid-column: 1 / -1; }
+.tools__photo-job {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.tools__photo-job img { flex: none; width: 56px; height: 56px; object-fit: cover; border-radius: var(--radius-sm); background: var(--color-surface-sunken); }
+.tools__photo-job.is-preparing img,
+.tools__photo-job.is-uploading img { opacity: .6; }
+.tools__photo-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.tools__photo-text b { overflow: hidden; font-size: var(--text-sm); font-weight: var(--weight-medium); text-overflow: ellipsis; white-space: nowrap; }
+.tools__photo-text span { color: var(--color-text-secondary); font-size: var(--text-xs); }
+.tools__photo-job.is-added .tools__photo-text span { color: var(--color-positive); }
+.tools__photo-job.is-failed { border-color: var(--color-danger); }
+.tools__photo-more { flex: none; min-height: 44px; }
+
 .tools__add-notes {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1380,3 +1414,19 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 
 .tools__quiz.is-focus .tools__answer { align-items: stretch; }
 .tools__quiz.is-focus .tools__answer .ui-button { height: auto; min-height: calc(48px * var(--focus-scale, 1)); font-size: var(--text-md, 16px); }
+
+@media (max-width: 860px) {
+  .tools__photo { grid-template-columns: minmax(0, 1fr); }
+  .tools__photo-button {
+    width: 100%;
+    height: 48px;
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    box-shadow: var(--shadow-primary);
+    font-size: var(--text-md);
+  }
+  .tools__photo-button:hover:not(:disabled) { border-color: var(--color-accent-hover); background: var(--color-accent-hover); }
+  .tools__photo-job { flex-wrap: wrap; }
+  .tools__photo-more { width: 100%; }
+}

@@ -14,12 +14,25 @@ import {
 import type { Course, NoteDeposit } from '../lib/types'
 import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
+import { prepareNotePhoto } from '../lib/notePhoto'
 import { FOCUS_SIZES, INSTRUCTIONS_MAX, instructionsKey, loadFocusSize, loadInstructions, saveFocusSize, saveInstructions } from '../lib/studyPrefs'
 import type { InstructionKind } from '../lib/studyPrefs'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz'
-type NoteSource = 'file' | 'paste'
+type NoteSource = 'file' | 'paste' | 'photo'
+
+/* A camera photo of notes on its way in: prepared once, so Retry resends the same image. */
+type PhotoJob = {
+  file: File
+  preview: string
+  name: string
+  course: string
+  unit: string
+  stage: 'preparing' | 'uploading' | 'reading' | 'added' | 'failed'
+}
+
+const photoDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
 const QUIZ_LEVELS = [
   { id: 1, label: 'Level 1' },
@@ -88,6 +101,15 @@ function UploadIcon() {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5" />
       <path d="M4 14v4.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14" />
+    </svg>
+  )
+}
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 8h3l2-2.5h6L17 8h3v11H4z" />
+      <circle cx="12" cy="13" r="3.5" />
     </svg>
   )
 }
@@ -282,6 +304,11 @@ export function Tools({ accessToken }: { accessToken?: string }) {
   const [lookBusy, setLookBusy] = useState(false)
   const [lookHint, setLookHint] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+  const photoInput = useRef<HTMLInputElement>(null)
+  const [photo, setPhoto] = useState<PhotoJob | null>(null)
+  // Each preview URL is released when the next photo replaces it, or when the page closes.
+  const photoPreview = photo?.preview
+  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview) }, [photoPreview])
   const courseImageInput = useRef<HTMLInputElement>(null)
   const orderDragIndex = useRef(-1)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -987,9 +1014,53 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     if (saved) setPastedNotes('')
   }
 
-  async function ingestNote(candidate: File, source: NoteSource): Promise<boolean> {
+  /* "Take a photo of your notes": the camera opens, and the photo uploads as soon as it is taken. */
+  function openCamera() {
     if (!activeUnit) {
-      setUploadError({ source, message: `Create a unit in ${activeCourse} first, then send your notes there.`, retry: false })
+      setUploadError({ source: 'photo', message: 'Pick or create a unit first.', retry: false })
+      return
+    }
+    photoInput.current?.click()
+  }
+
+  async function onPhotoTaken(event: React.ChangeEvent<HTMLInputElement>) {
+    const taken = event.target.files?.[0]
+    event.target.value = ''
+    if (!taken || uploadBusy) return
+    if (!activeUnit) {
+      setUploadError({ source: 'photo', message: 'Pick or create a unit first.', retry: false })
+      return
+    }
+    const course = activeCourse
+    const unit = activeUnit
+    // Each page is its own note: "Photo notes – Oct 7, page 2".
+    const base = `Photo notes – ${photoDay.format(new Date(data.now()))}`
+    const page = unitNotes.filter((note) => note.fileName.startsWith(base)).length + 1
+    const name = `${base}, page ${page}`
+    setUploadError(null)
+    setPhoto({ file: taken, preview: URL.createObjectURL(taken), name, course, unit, stage: 'preparing' })
+    let prepared: File
+    try {
+      prepared = await prepareNotePhoto(taken, name)
+    } catch (error) {
+      setPhoto((current) => current && { ...current, stage: 'failed' })
+      setUploadError({ source: 'photo', message: error instanceof Error ? error.message : 'That photo could not be prepared.', retry: false })
+      return
+    }
+    const job: PhotoJob = { file: prepared, preview: URL.createObjectURL(prepared), name, course, unit, stage: 'uploading' }
+    setPhoto(job)
+    await sendPhoto(job)
+  }
+
+  async function sendPhoto(job: PhotoJob) {
+    setPhoto((current) => current && { ...current, stage: 'uploading' })
+    const saved = await ingestNote(job.file, 'photo', () => setPhoto((current) => current && current.stage === 'uploading' ? { ...current, stage: 'reading' } : current))
+    setPhoto((current) => current && { ...current, stage: saved ? 'added' : 'failed' })
+  }
+
+  async function ingestNote(candidate: File, source: NoteSource, onSent?: () => void): Promise<boolean> {
+    if (!activeUnit) {
+      setUploadError({ source, message: source === 'photo' ? 'Pick or create a unit first.' : `Create a unit in ${activeCourse} first, then send your notes there.`, retry: false })
       return false
     }
     if (candidate.size > 10 * 1024 * 1024) {
@@ -1003,7 +1074,7 @@ export function Tools({ accessToken }: { accessToken?: string }) {
     setUploadError(null)
     setNotice('')
     try {
-      const uploaded = await data.uploadNote(candidate, course, unit, accessToken)
+      const uploaded = await data.uploadNote(candidate, course, unit, accessToken, onSent ? { onSent } : undefined)
       const deposit: NoteDeposit = {
         id: uploaded.id,
         // The server trims names; keep this page's spelling so the note shows in its unit.
@@ -1015,8 +1086,10 @@ export function Tools({ accessToken }: { accessToken?: string }) {
         textPreview: uploaded.text_preview,
       }
       setNotebook((current) => ({ ...current, deposits: [deposit, ...current.deposits.filter((note) => note.id !== deposit.id)] }))
-      setFile(null)
-      if (fileInput.current) fileInput.current.value = ''
+      if (source === 'file') {
+        setFile(null)
+        if (fileInput.current) fileInput.current.value = ''
+      }
       setNotice(`Added “${deposit.fileName}” to ${course} → ${unit}.`)
       // Flashcards are written in the background; the note's row shows how that is going.
       void makeFlashcards(deposit)
@@ -1532,6 +1605,65 @@ export function Tools({ accessToken }: { accessToken?: string }) {
 
               {panelFn === 'scan' ? (
                 <div className="tools__notes" role="tabpanel" aria-label="Notes">
+                  <section className="tools__photo" aria-labelledby="tools-photo-title">
+                    <input
+                      ref={photoInput}
+                      className="ui-file-input"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      onChange={(event) => void onPhotoTaken(event)}
+                    />
+                    <div className="tools__photo-intro">
+                      <h3 className="tools__label" id="tools-photo-title">Snap your notes</h3>
+                      <p className="tools__hint">Handwritten or printed. Each photo becomes a note in {activeUnit}, then flashcards.</p>
+                    </div>
+                    <button
+                      className="ui-button tools__photo-button"
+                      type="button"
+                      onClick={openCamera}
+                      disabled={uploadBusy}
+                    >
+                      <CameraIcon />
+                      Take a photo of your notes
+                    </button>
+                    {photo && photo.course === activeCourse && photo.unit === activeUnit ? (
+                      <div className={`tools__photo-job is-${photo.stage}`}>
+                        <img src={photo.preview} alt={`Photo: ${photo.name}`} width="56" height="56" decoding="async" />
+                        <div className="tools__photo-text">
+                          <b>{photo.name}</b>
+                          <span>
+                            {photo.stage === 'preparing' ? 'Preparing the photo…'
+                              : photo.stage === 'uploading' ? 'Uploading…'
+                                : photo.stage === 'reading' ? 'Reading your notes…'
+                                  : photo.stage === 'added' ? 'Added. Flashcards are on the way.'
+                                    : 'Not added yet.'}
+                          </span>
+                        </div>
+                        {photo.stage === 'preparing' || photo.stage === 'uploading' || photo.stage === 'reading' ? <span className="ui-spinner" aria-hidden="true" /> : null}
+                        {photo.stage === 'added' ? (
+                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>Add another page</button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {uploadError?.source === 'photo' ? (
+                      <div className="ui-alert" role="alert">
+                        <span>{uploadError.message}</span>
+                        {uploadError.retry && photo?.stage === 'failed' && photo.course === activeCourse && photo.unit === activeUnit ? (
+                          <button className="ui-button ui-button--sm" type="button" onClick={() => void sendPhoto(photo)}>Retry</button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <p className="sr-only" role="status" aria-live="polite">
+                      {photo?.stage === 'uploading' ? `Uploading ${photo.name}.`
+                        : photo?.stage === 'reading' ? 'Reading your notes.'
+                          : photo?.stage === 'added' ? `${photo.name} added. Making flashcards.`
+                            : ''}
+                    </p>
+                  </section>
+
                   <div className="tools__add-notes">
                     <form className="tools__upload" onSubmit={sendUpload} aria-busy={uploading === 'file'}>
                       <h3 className="tools__label" id="tools-upload-title">Upload a file</h3>

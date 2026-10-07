@@ -301,13 +301,51 @@ async function optimizedImage(file: File): Promise<File> {
   }
 }
 
-export async function uploadNote(file: File, course: string, unit: string, accessToken?: string) {
+export type UploadNoteOptions = {
+  /* Called once the file has finished sending, while the server is still reading it. */
+  onSent?: () => void
+}
+
+export async function uploadNote(file: File, course: string, unit: string, accessToken?: string, options?: UploadNoteOptions) {
   const preparedFile = await optimizedImage(file)
   const form = new FormData()
   form.set('file', preparedFile)
   form.set('course', course)
   form.set('unit', unit)
+  if (options?.onSent) return sendWithProgress<UploadedNote>('/api/notes', form, AI_TIMEOUTS.upload, options.onSent, accessToken)
   return request<UploadedNote>('/api/notes', { method: 'POST', body: form, timeoutMs: AI_TIMEOUTS.upload }, accessToken)
+}
+
+/*
+ * A form POST that says when its body has finished uploading (fetch cannot), so a page can
+ * switch from "Uploading…" to "Reading your notes…" at the real moment. Errors match request().
+ */
+async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: number, onSent: () => void, accessToken?: string): Promise<T> {
+  const token = await resolvedToken(accessToken)
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    let sent = false
+    const markSent = () => {
+      if (sent) return
+      sent = true
+      onSent()
+    }
+    xhr.open('POST', `${API_URL}${path}`)
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.timeout = timeoutMs
+    xhr.upload.onload = markSent
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable && event.loaded >= event.total) markSent() }
+    xhr.onload = () => {
+      markSent()
+      let data: unknown = null
+      try { data = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T)
+      else reject(apiError(xhr.status, data, `bindit could not complete that request (${xhr.status}).`))
+    }
+    xhr.ontimeout = () => reject(new RequestTimeoutError())
+    xhr.onerror = () => reject(new TypeError('bindit couldn’t be reached. Check your connection and try again.'))
+    xhr.send(body)
+  })
 }
 
 export function deleteNote(noteId: string, accessToken?: string) {
