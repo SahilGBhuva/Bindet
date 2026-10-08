@@ -493,6 +493,10 @@
     box-shadow: var(--shadow-popover);
     animation: bindit-sheet-up var(--duration-base) var(--ease-out);
   }
+  /* Dark theme: a stronger scrim and the raised surface, so the menu reads as a layer
+     above the page instead of blending into it. */
+  :root[data-theme="dark"] .bindit-sheet { background: rgba(0, 0, 0, .56); }
+  :root[data-theme="dark"] .bindit-sheet__panel { background: var(--color-surface-raised); }
 
   .bindit-sheet__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
   .bindit-sheet__grid a,
