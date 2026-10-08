@@ -3771,7 +3771,7 @@ def require_admin(authorization: str | None) -> dict:
     except HTTPException as error:
         raise not_found from error
     email = str(user.get("email") or "").strip().lower()
-    confirmed = user.get("email_confirmed_at") or user.get("confirmed_at")
+    confirmed = user.get("email_confirmed_at")  # an email confirmation, not a phone one
     if not email or not confirmed or email not in allowed:
         raise not_found
     return user

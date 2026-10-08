@@ -143,6 +143,8 @@ def start_conversation(owner_id: str, first_message: str, course: str = "", unit
                                         .order_by(conversations.c.updated_at.asc()).limit(1)).scalar_one()
             _delete_children(connection, oldest)
             connection.execute(delete(conversations).where(conversations.c.id == oldest))
+            import ai_cache  # local, as in delete_conversation
+            ai_cache.release_conversation(connection, owner_id, oldest)
         connection.execute(conversations.insert().values(**row))
     return _conversation(row)
 
