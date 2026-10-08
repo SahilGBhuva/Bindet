@@ -53,8 +53,11 @@ export function OttoPreferences({ token, defaultName = '', variant = 'full', onS
     setBusy(true)
     setStatus(null)
     try {
-      // The memory switch lives in the memory panel; keep whatever is saved.
-      const next = await saveOttoProfile(token, { ...form, memory_enabled: saved?.memory_enabled ?? true })
+      // The memory switch lives in the memory panel; keep whatever is saved. The panel may have
+      // changed it since this form loaded (both sit in Settings), and it updates the shared
+      // profile cache, so read the switch from there rather than this form's copy.
+      const memoryEnabled = getCachedOttoProfile(token)?.memory_enabled ?? saved?.memory_enabled ?? true
+      const next = await saveOttoProfile(token, { ...form, memory_enabled: memoryEnabled })
       setSaved(next)
       setForm(next)
       setStatus({ kind: 'ok', text: 'Saved. Otto will use this from your next message.' })
