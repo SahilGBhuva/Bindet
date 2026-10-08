@@ -293,7 +293,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     if (!token) return
     let live = true
     void data.getProgress(session?.user.id ?? data.getStudentId(), token).then((value) => { if (live) setStats(value) }).catch(() => undefined)
-    void data.getTasks(token).then((value) => { if (live) setTasks(value) }).catch(() => undefined)
+    void data.getTasks(token, true).then((value) => { if (live) setTasks(value) }).catch(() => undefined)
     return () => { live = false }
   }, [token, data, session])
 
@@ -622,7 +622,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       const result = await generateNoteFlashcards(note.id, undefined, token)
       if (result.status !== 'ready' || !result.cards.length) throw new Error(result.status === 'too_short' ? 'That reply is too short to make flashcards from.' : 'Flashcards couldn’t be made from that reply.')
       setCardState((current) => ({ ...current, [message.key]: 'done' }))
-      setNotice(`${result.cards.length} flashcards saved to ${unit}.`)
+      setNotice(`${result.cards.length} ${result.cards.length === 1 ? 'flashcard' : 'flashcards'} saved to ${unit}.`)
     } catch (error) {
       setCardState((current) => ({ ...current, [message.key]: 'failed' }))
       setNotice(error instanceof Error ? error.message : 'Flashcards couldn’t be made. Try again.')
@@ -787,8 +787,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
             <p>{course ? <>Grounded in your notes for <b>{unit || course}</b></> : 'General help · pick a course to use your notes'}</p>
           </div>
           <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">
-            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'explain'} onClick={() => chooseMode('explain')} title="Otto explains the answer">Explain it</button>
-            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'guide'} onClick={() => chooseMode('guide')} title="Otto gives hints and questions, never just the answer">Guide me</button>
+            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'explain'} onClick={() => chooseMode('explain')}>Explain it</button>
+            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'guide'} onClick={() => chooseMode('guide')}>Guide me</button>
           </div>
           <div className="tutor__context" role="group" aria-label="Notes Otto should use">
             <select className="ui-select" aria-label="Course" value={course} onChange={(event) => { setCourse(event.target.value); setUnit(notebook.courses.find((item) => item.name === event.target.value)?.units[0] ?? '') }}>

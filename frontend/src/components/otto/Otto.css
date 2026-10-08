@@ -60,6 +60,7 @@
 
 /* A one-line notice: "Otto saved a note about you · Manage". */
 .otto-notice { display: inline-flex; align-items: center; gap: var(--space-2); }
+.otto-notice .ui-link { color: inherit; font: inherit; font-weight: var(--weight-semibold); text-decoration: underline; opacity: 1; }
 
 @media (max-width: 560px) {
   .otto-sheet__tabs { padding: 0 var(--space-4); }

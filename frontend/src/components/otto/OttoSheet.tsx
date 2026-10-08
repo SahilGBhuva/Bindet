@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useDrawer } from '../../lib/useDrawer'
 import type { OttoProfile } from '../../lib/api'
 import { OttoMemoryPanel } from './OttoMemoryPanel'
@@ -18,7 +19,8 @@ export function OttoSheet({ token, tab: initialTab = 'talk', defaultName, onClos
   const panel = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<OttoSheetTab>(initialTab)
   useDrawer({ open: true, onClose, panel })
-  return (
+  // A portal, so no stacking context of the page it opens from can cover it.
+  return createPortal(
     <div className="ui-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <div ref={panel} className="ui-dialog otto-sheet" role="dialog" aria-modal="true" aria-labelledby="otto-sheet-title">
         <header className="ui-dialog__header">
@@ -33,6 +35,7 @@ export function OttoSheet({ token, tab: initialTab = 'talk', defaultName, onClos
           {tab === 'talk' ? <OttoPreferencesCompact token={token} defaultName={defaultName} onSaved={onSaved} /> : <OttoMemoryPanel token={token} />}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
