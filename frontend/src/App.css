@@ -31,28 +31,28 @@
   gap: 16px;
   min-width: 0;
   min-height: 48px;
-  padding: 10px clamp(20px, 4vw, 48px) 0;
+  padding: 8px clamp(20px, 4vw, 48px) 0;
 }
 
-.app-bar__pages { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.app-bar__pages { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 .app-bar__page {
   position: relative;
   display: grid;
   flex: none;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-xs);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-tertiary);
   transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
 .app-bar__page:hover { background: var(--color-surface-hover); color: var(--color-text-secondary); }
 .app-bar__page.is-active { color: var(--color-text); }
-.app-bar__page svg,
+.app-bar__page svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .app-bar__expand svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .app-bar__page.is-active svg { stroke-width: 1.9; }
-.app-bar__dot { position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border: 1px solid var(--color-bg); border-radius: 50%; background: var(--color-brand); }
+.app-bar__dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border: 1px solid var(--color-bg); border-radius: 50%; background: var(--color-brand); }
 
 .app-bar__panels { display: flex; align-items: center; gap: 4px; }
 
