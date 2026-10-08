@@ -2,6 +2,7 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useState } fro
 import { AuthGate } from './components/AuthGate'
 import { OfflineNotice, UpdatePrompt } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
+import { HelpBot } from './components/HelpBot'
 import { PROFILE_SETUP_ROUTED_KEY } from './components/ProfileSetupCard'
 import { useAuth } from './lib/AuthContext'
 import { getAccountProfile, getStudyGroups, recordDailyLogin } from './lib/api'
@@ -269,6 +270,7 @@ function AppShell() {
       </main>
       {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       <CommandPalette open={commandOpen} onClose={closeCommand} />
+      {session && !adminRoute ? <HelpBot screen={navScreen} session={session} /> : null}
     </div>
   )
 }
