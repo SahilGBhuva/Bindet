@@ -209,6 +209,35 @@ def _reject(detail: str) -> HTTPException:
     return HTTPException(status_code=401, detail=detail)
 
 
+def owner_emails() -> set[str]:
+    """OWNER_EMAILS: comma-separated. Those accounts (with a confirmed email) have no
+    per-student usage limits. Empty (the default) means nobody is an owner."""
+    return {email.strip().lower() for email in os.getenv('OWNER_EMAILS', '').split(',') if email.strip()}
+
+
+def is_owner_user(user: dict | None) -> bool:
+    if not user:
+        return False
+    email = str(user.get('email') or '').strip().lower()
+    confirmed = user.get('email_confirmed_at') or user.get('confirmed_at')
+    return bool(email and confirmed and email in owner_emails())
+
+
+def _note_owner(user: dict) -> None:
+    if is_owner_user(user):
+        rate_limit.mark_owner(str(user['id']))
+    else:
+        rate_limit.forget_owner(str(user.get('id') or ''))
+
+
+def is_owner_token(authorization: str) -> bool:
+    """The cached, verified account for this token is an owner. Never verifies on its own."""
+    if not authorization:
+        return False
+    cached = _cached(_cache_key(authorization), time.monotonic())
+    return bool(cached and cached[0] is not None and is_owner_user(cached[0]))
+
+
 def authenticated_user(authorization: str | None) -> dict:
     if not authorization or not authorization.lower().startswith('bearer '):
         raise HTTPException(status_code=401, detail='Sign in required')
@@ -219,6 +248,7 @@ def authenticated_user(authorization: str | None) -> dict:
         user, detail = cached
         if user is None:
             raise _reject(detail)
+        _note_owner(user)
         return user
     if rate_limit.limiter.is_limited(f'badauth:{rate_limit.client_address.get()}', FAILED_AUTH_PER_MINUTE):
         # This address keeps sending bad tokens; don't spend a Supabase call on another one.
@@ -239,4 +269,5 @@ def authenticated_user(authorization: str | None) -> dict:
         _remember(key, None, 'Invalid account', now)
         raise _reject('Invalid account')
     _remember(key, user, '', now, _cache_seconds(authorization))
+    _note_owner(user)
     return user

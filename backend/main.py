@@ -406,6 +406,7 @@ TUTOR_STRONG_PER_DAY = 30
 TUTOR_HISTORY_MAX_CHARS = 16_000
 # Tutor replies one account may be streaming at once, per server instance.
 TUTOR_MAX_CONCURRENT_STREAMS = 2
+OWNER_MAX_CONCURRENT_STREAMS = 6  # owner accounts (OWNER_EMAILS) have no per-student limits
 # A stream that never started (the client left before the first byte) frees its slot after this.
 TUTOR_STREAM_SLOT_SECONDS = 300
 # Every paid AI call across all accounts per day; past it AI features pause with a 503.
@@ -1661,7 +1662,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
     image_parts = tutor_image_parts(data.images)
-    slot = tutor_streams.acquire(owner, TUTOR_MAX_CONCURRENT_STREAMS)
+    slot = tutor_streams.acquire(owner, OWNER_MAX_CONCURRENT_STREAMS if rate_limit.is_owner(owner) else TUTOR_MAX_CONCURRENT_STREAMS)
     if slot is None:
         raise HTTPException(status_code=429, detail=TUTOR_TOO_MANY_STREAMS, headers={"Retry-After": "10"})
     try:

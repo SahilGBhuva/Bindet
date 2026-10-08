@@ -10,6 +10,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+import rate_limit
 from sqlalchemy import (
     JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
     UniqueConstraint, and_, create_engine, delete, func, inspect, literal, or_, select, text, union_all, update,
@@ -739,7 +741,11 @@ def _prune_rate_events_if_due(now: float | None = None) -> bool:
 
 
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
-    """Use shared storage so limits still hold across serverless instances."""
+    """Use shared storage so limits still hold across serverless instances.
+
+    Owner accounts (auth.owner_emails) are never limited; nothing is recorded for them."""
+    if rate_limit.is_owner(student_id):
+        return
     init_db()
     _prune_rate_events_if_due()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)

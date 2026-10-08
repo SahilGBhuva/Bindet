@@ -37,6 +37,10 @@ ANONYMOUS_PER_MINUTE = 60       # requests without a sign-in, per address
 UNVERIFIED_TOKENS_PER_MINUTE = 600
 AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation, grading, note uploads, per student
 
+# Owner accounts (OWNER_EMAILS, confirmed email) skip per-student limits; they keep this
+# much higher burst cap so a runaway loop still can't spend without bound.
+OWNER_AI_PER_MINUTE = 120
+
 AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes", "/api/practice-tests")
 # /api/auth/config only returns public values (the Supabase URL and anon key) and every
 # page load asks for it, so it is never limited.
@@ -173,6 +177,39 @@ def token_is_verified(authorization: str) -> bool:
     return auth.is_verified(authorization)
 
 
+# Account ids auth has verified as owners in this process (bounded; refilled on every sign-in check).
+_owner_ids: set[str] = set()
+_owner_lock = threading.Lock()
+MAX_OWNER_IDS = 50
+
+
+def mark_owner(student_id: str) -> None:
+    with _owner_lock:
+        if student_id in _owner_ids:
+            return
+        if len(_owner_ids) >= MAX_OWNER_IDS:
+            _owner_ids.clear()
+        _owner_ids.add(student_id)
+
+
+def forget_owner(student_id: str) -> None:
+    with _owner_lock:
+        _owner_ids.discard(student_id)
+
+
+def is_owner(student_id: str | None) -> bool:
+    if not student_id:
+        return False
+    with _owner_lock:
+        return student_id in _owner_ids
+
+
+def token_is_owner(authorization: str) -> bool:
+    """True when auth has verified this exact token and it belongs to an owner account."""
+    import auth  # auth imports this module, so import it lazily
+    return auth.is_owner_token(authorization)
+
+
 def token_key(authorization: str | None) -> str | None:
     if not authorization or not authorization.lower().startswith("bearer "):
         return None
@@ -193,7 +230,7 @@ def check_request(path: str, method: str, address: str, authorization: str | Non
             checks.append((f"unverified:{address}", UNVERIFIED_TOKENS_PER_MINUTE))
         checks.append((f"user:{token}", SIGNED_IN_PER_MINUTE))
         if method == "POST" and path.startswith(AI_PATHS):
-            checks.append((f"ai:{token}", AI_PER_MINUTE))
+            checks.append((f"ai:{token}", OWNER_AI_PER_MINUTE if token_is_owner(authorization or "") else AI_PER_MINUTE))
     else:
         checks.append((f"anon:{address}", ANONYMOUS_PER_MINUTE))
     for key, limit in checks:
