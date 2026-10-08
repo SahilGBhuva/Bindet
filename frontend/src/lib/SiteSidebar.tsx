@@ -294,10 +294,19 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         setNow(data.now())
       })
     }
+    // Every 30 s while the app is on screen; never in a background tab. Coming back to the
+    // tab refreshes at once, unless that already happened in the last 15 s.
+    let lastRefresh = Date.now()
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      lastRefresh = Date.now()
+      refresh()
+    }
+    const onVisible = () => { if (Date.now() - lastRefresh >= 15_000) tick() }
     refresh()
-    const timer = window.setInterval(refresh, 30_000)
-    document.addEventListener('visibilitychange', refresh)
-    return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
+    const timer = window.setInterval(tick, 30_000)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
   }, [data, session, onUnreadChange])
 
   // Changes made in this tab show at once: a task edit updates the shared cache (read it

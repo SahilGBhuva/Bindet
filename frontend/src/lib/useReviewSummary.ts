@@ -28,7 +28,13 @@ export function useReviewSummary(accessToken: string | undefined) {
         .catch(() => undefined)
     }
     // Coming back to the tab refreshes (a day may have turned, or cards come due).
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    // At most once a minute, so a tab that flickers between hidden and visible doesn't keep asking.
+    let lastVisibleLoad = Date.now()
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastVisibleLoad < 60_000) return
+      lastVisibleLoad = Date.now()
+      load()
+    }
     load()
     window.addEventListener(REVIEW_CHANGED_EVENT, load)
     document.addEventListener('visibilitychange', onVisible)

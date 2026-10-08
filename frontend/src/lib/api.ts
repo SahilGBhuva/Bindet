@@ -282,7 +282,40 @@ export function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
-export async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
+// Identical GET requests already on their way share one network request (pages, the
+// sidebar and the app shell often ask for the same profile, tasks or groups at startup).
+const inFlight = new Map<string, Promise<unknown>>()
+
+export function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
+  const method = (options?.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' || options?.body) return sendRequest<T>(path, options, accessToken)
+  const key = `${accessToken ?? ''}|${path}`
+  let shared = inFlight.get(key) as Promise<T> | undefined
+  if (!shared) {
+    // Not tied to any one caller's cancellation: other callers may still be waiting on it.
+    const { signal: _ignored, ...rest } = options ?? {}
+    void _ignored
+    shared = sendRequest<T>(path, rest, accessToken)
+    inFlight.set(key, shared)
+    const clear = () => { if (inFlight.get(key) === shared) inFlight.delete(key) }
+    shared.then(clear, clear)
+  }
+  const callerSignal = options?.signal
+  // Each caller gets its own copy, so one page changing the result can't affect another.
+  const own = shared.then((value) => (typeof structuredClone === 'function' ? structuredClone(value) : value))
+  if (!callerSignal) return own
+  if (callerSignal.aborted) return Promise.reject(callerSignal.reason ?? new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(callerSignal.reason ?? new DOMException('Aborted', 'AbortError'))
+    callerSignal.addEventListener('abort', onAbort, { once: true })
+    own.then(
+      (value) => { callerSignal.removeEventListener('abort', onAbort); resolve(value) },
+      (error) => { callerSignal.removeEventListener('abort', onAbort); reject(error) },
+    )
+  })
+}
+
+async function sendRequest<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
   const { timeoutMs, signal: callerSignal, ...init } = options ?? {}
   const headers = new Headers(init.headers)
   if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')

@@ -37,7 +37,13 @@ export function GetStarted({ session }: { session: AuthSession }) {
     }
     load()
     // Ticks follow the student's work: check again on return to the tab.
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    // At most every 30 s, so a tab flickering between hidden and visible doesn't keep asking.
+    let lastVisibleLoad = Date.now()
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastVisibleLoad < 30_000) return
+      lastVisibleLoad = Date.now()
+      load()
+    }
     window.addEventListener(ONBOARDING_CHANGED_EVENT, load)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
