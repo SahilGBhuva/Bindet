@@ -294,7 +294,7 @@ function flashcardFailure(error: unknown): NoteCards {
   }
   if (error instanceof RequestTimeoutError) return failed(error.message)
   if (error instanceof OfflineError || isOffline()) return failed(OFFLINE_MESSAGE)
-  return failed('Couldn’t reach bindit. Check your connection and try again.')
+  return failed('Couldn’t reach bindet. Check your connection and try again.')
 }
 
 /* Adds cards that are new and refreshes ones already shown, keeping their order so the open card stays put. */

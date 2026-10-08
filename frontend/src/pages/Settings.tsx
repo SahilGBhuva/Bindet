@@ -457,7 +457,7 @@ export function Settings({ session, onSession }: SettingsProps) {
               <div className="settings__row">
                 <div className="settings__row-text">
                   <span className="settings__label">Privacy and terms</span>
-                  <span className="settings__hint">What bindet stores, who processes it, and the rules for using bindit.</span>
+                  <span className="settings__hint">What bindet stores, who processes it, and the rules for using bindet.</span>
                 </div>
                 <div className="settings__legal-links">
                   <a className="ui-link" href="/privacy">Privacy Policy</a>
