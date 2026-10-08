@@ -718,6 +718,10 @@
   }
   .tasks-panel.is-drawer .task-detail-card,
   .tasks-panel.is-drawer .task-details { background: var(--color-surface-raised); }
+  /* The drawer's close / pin / delete icons are thumb-sized on phones (they are 24px on desktop). */
+  .tasks-panel.is-drawer .task-sheet__icons { gap: 0; margin: -8px 0 4px -10px; }
+  .tasks-panel.is-drawer .task-sheet__icons .tasks-icon-button.is-tiny { width: 44px; height: 44px; }
+  .tasks-panel.is-drawer .task-sheet__icons .tasks-icon-button.is-tiny .tasks-icon { width: 18px; height: 18px; }
 
   .tasks-scrim {
     position: fixed;
