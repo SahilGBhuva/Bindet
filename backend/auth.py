@@ -219,7 +219,9 @@ def is_owner_user(user: dict | None) -> bool:
     if not user:
         return False
     email = str(user.get('email') or '').strip().lower()
-    confirmed = user.get('email_confirmed_at') or user.get('confirmed_at')
+    # Only email_confirmed_at: Supabase also sets confirmed_at for a confirmed phone number,
+    # which says nothing about who owns the email address.
+    confirmed = user.get('email_confirmed_at')
     return bool(email and confirmed and email in owner_emails())
 
 

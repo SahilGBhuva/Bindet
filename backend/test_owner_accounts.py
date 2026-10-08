@@ -49,6 +49,8 @@ class OwnerAccountTests(unittest.TestCase):
         self.assertTrue(auth.is_owner_user(OWNER))
         self.assertFalse(auth.is_owner_user(STUDENT))
         self.assertFalse(auth.is_owner_user({**OWNER, "email_confirmed_at": None}))
+        # confirmed_at is also set by a confirmed phone number: only a confirmed email counts.
+        self.assertFalse(auth.is_owner_user({**OWNER, "email_confirmed_at": None, "confirmed_at": "2026-01-01T00:00:00Z"}))
         with patch.dict(os.environ, {"OWNER_EMAILS": ""}):
             self.assertFalse(auth.is_owner_user(OWNER))
 
