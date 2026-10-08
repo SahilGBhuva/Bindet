@@ -22,9 +22,10 @@ function readMigrated(key: string, legacyKey: string): string | null {
   return legacy
 }
 
+// A new binder is empty: the welcome setup (or Study's first-run form) adds the student's own classes.
 const emptyNotebook: Notebook = {
-  courses: [{ name: 'Biology', units: [], tone: '#0b58f5' }],
-  activeCourse: 'Biology',
+  courses: [],
+  activeCourse: '',
   activeUnit: '',
   deposits: [],
 }

@@ -2,9 +2,11 @@ import { lazy, startTransition, Suspense, useCallback, useEffect, useState } fro
 import { AuthGate } from './components/AuthGate'
 import { OfflineNotice, UpdatePrompt } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
-import { PROFILE_SETUP_ROUTED_KEY } from './components/ProfileSetupCard'
+import { GetStarted } from './components/onboarding/GetStarted'
 import { useAuth } from './lib/AuthContext'
-import { getAccountProfile, getStudyGroups, recordDailyLogin } from './lib/api'
+import { getStudyGroups, recordDailyLogin } from './lib/api'
+import { cachedSetup, getOnboarding, rememberSetupDone, saveOnboarding } from './lib/onboarding'
+import { BrandMark } from './lib/SiteSidebar'
 import { rememberPage, SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
 import { getStudentId } from './lib/session'
 import { NavIcon, SiteSidebar } from './lib/SiteSidebar'
@@ -36,6 +38,9 @@ const Settings = lazy(loaders.settings)
 const Games = lazy(loaders.games)
 const More = lazy(loaders.more)
 const Admin = lazy(loaders.admin)
+// The welcome setup is only downloaded by accounts that still need it.
+const loadOnboarding = () => import('./components/onboarding/Onboarding').then((module) => ({ default: module.Onboarding }))
+const Onboarding = lazy(loadOnboarding)
 
 /* The routes students open most often after Home, fetched while the browser is idle. */
 const PREFETCH: (keyof typeof loaders)[] = ['goals', 'stats', 'tools', 'tutor', 'chat']
@@ -197,27 +202,6 @@ function AppShell() {
     void recordDailyLogin(studentId, session?.access_token).catch(() => undefined)
   }, [session?.user.id, session?.access_token])
 
-  // A new account without a bindet profile (a first Google sign-in) is taken to Settings
-  // once per device to choose a name and username; Home and Friends & groups keep a
-  // reminder card until it's done. The flag is a bindit- key, so signing out clears it.
-  const accessToken = session?.access_token
-  const userId = session?.user.id
-  useEffect(() => {
-    if (!accessToken || !userId) return
-    let live = true
-    void getAccountProfile(accessToken).then((profile) => {
-      if (!live || profile) return
-      try {
-        if (localStorage.getItem(PROFILE_SETUP_ROUTED_KEY) === userId) return
-        localStorage.setItem(PROFILE_SETUP_ROUTED_KEY, userId)
-      } catch {
-        return
-      }
-      if (currentScreen() !== 'settings') window.location.hash = 'settings'
-    }).catch(() => undefined)
-    return () => { live = false }
-  }, [accessToken, userId])
-
   // Warm the next likely screens and the group list after Home has painted.
   useEffect(() => whenIdle(() => {
     for (const key of PREFETCH) void loaders[key]().catch(() => undefined)
@@ -257,7 +241,7 @@ function AppShell() {
         {screen !== 'tools' && !adminRoute ? <OfflineNotice /> : null}
         <Suspense fallback={<PageSkeleton sketch={!adminRoute && (screen === 'goals' || screen === 'stats')} />}>
           {adminRoute ? <Admin session={session} /> : null}
-          {!adminRoute && screen === 'home' ? <Home session={session} /> : null}
+          {!adminRoute && screen === 'home' ? <Home session={session} firstRun={session ? <GetStarted session={session} /> : null} /> : null}
           {screen === 'tools' ? <Tools accessToken={session?.access_token} /> : null}
           {screen === 'tutor' ? <Tutor session={session} /> : null}
           {screen === 'goals' ? <Goals session={session} /> : null}
@@ -289,11 +273,81 @@ function PageSkeleton({ sketch = false }: { sketch?: boolean }) {
   )
 }
 
+/*
+ * A new account (no profile, setup not finished) gets the short welcome setup before
+ * the app. Returning accounts are remembered on this device and never wait for the
+ * check; if the check fails or is slow, the app opens anyway. Never blocks the app.
+ */
+type FirstRunGate = { kind: 'checking' } | { kind: 'setup'; hasProfile: boolean } | { kind: 'app' }
+const SETUP_CHECK_MS = 4000
+
+function SignedInApp() {
+  const { session } = useAuth()
+  const userId = session?.user.id ?? ''
+  const token = session?.access_token ?? ''
+  const [gate, setGate] = useState<FirstRunGate>(() => (!userId || cachedSetup(userId) === 'done' ? { kind: 'app' } : { kind: 'checking' }))
+
+  useEffect(() => {
+    if (!userId || !token) return
+    const cached = cachedSetup(userId)
+    if (cached === 'done') return
+    const controller = new AbortController()
+    // Fetch the setup's code alongside the check, in case it is needed.
+    void loadOnboarding().catch(() => undefined)
+    // Never keep a student waiting on the check.
+    const timer = window.setTimeout(() => setGate((current) => (current.kind === 'checking' ? { kind: 'app' } : current)), SETUP_CHECK_MS)
+    void getOnboarding(token, controller.signal).then((state) => {
+      window.clearTimeout(timer)
+      if (state.setup_done) {
+        rememberSetupDone(userId)
+        setGate({ kind: 'app' })
+      } else if (cached === 'pending') {
+        // Finished here earlier but the save didn't reach the server: send it again.
+        void saveOnboarding(token, { setup_done: true }).then(() => rememberSetupDone(userId), () => undefined)
+        setGate({ kind: 'app' })
+      } else {
+        setGate((current) => (current.kind === 'checking' ? { kind: 'setup', hasProfile: state.has_profile } : current))
+      }
+    }, () => {
+      if (controller.signal.aborted) return
+      window.clearTimeout(timer)
+      setGate({ kind: 'app' })
+    })
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [userId, token])
+
+  if (gate.kind === 'checking') {
+    return (
+      <div className="onb-loading" role="status" aria-label="Opening bindet">
+        <BrandMark size={32} />
+      </div>
+    )
+  }
+  if (gate.kind === 'setup' && session) {
+    return (
+      <Suspense fallback={<div className="onb-loading" role="status" aria-label="Opening bindet"><BrandMark size={32} /></div>}>
+        <Onboarding
+          session={session}
+          hasProfile={gate.hasProfile}
+          onDone={(hash) => {
+            window.location.hash = hash
+            setGate({ kind: 'app' })
+          }}
+        />
+      </Suspense>
+    )
+  }
+  return <AppShell />
+}
+
 function App() {
   return (
     <>
       <AuthGate>
-        <AppShell />
+        <SignedInApp />
       </AuthGate>
       <UpdatePrompt />
     </>

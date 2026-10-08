@@ -1,7 +1,7 @@
 /*
- * Shown to a signed-in account that has no bindet profile yet (a new Google sign-in, for
- * example): until a name and username are saved there is no friend ID and nobody can find
- * them, so point to Settings instead of showing signed-out copy.
+ * Shown to a signed-in account that has no bindet profile yet (the name step of the welcome
+ * setup was skipped, for example): until a name and username are saved there is no friend
+ * ID and nobody can find them, so point to Settings instead of showing signed-out copy.
  */
 export function ProfileSetupCard({ className = '' }: { className?: string }) {
   return (
@@ -13,6 +13,3 @@ export function ProfileSetupCard({ className = '' }: { className?: string }) {
     </div>
   )
 }
-
-/* One automatic trip to Settings per device after a profile-less sign-in (cleared on sign-out with other bindit- keys). */
-export const PROFILE_SETUP_ROUTED_KEY = 'bindit-profile-setup-routed'
