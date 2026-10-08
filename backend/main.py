@@ -89,6 +89,9 @@ social_reads = ThreadPoolExecutor(max_workers=4, thread_name_prefix="bindit-soci
 # Runs the independent database steps that precede an AI call side by side, so a
 # request pays for the slowest of them instead of their sum.
 ai_prep = ThreadPoolExecutor(max_workers=12, thread_name_prefix="bindit-ai-prep")
+# Otto's "make me a study guide" replies: one model call of up to GUIDE_TIMEOUT each. Kept off
+# ai_prep so slow guides can never hold the workers every tutor message's preparation needs.
+guide_jobs = ThreadPoolExecutor(max_workers=6, thread_name_prefix="bindit-guides")
 
 
 def gather(*calls):
@@ -2218,7 +2221,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             if guide_intent is not None:
                 # One model call that can take a while: SSE comments keep the stream (and the
                 # app's idle timer) alive until the guide is saved.
-                making = ai_prep.submit(otto_guide_reply, owner, guide_intent, course, unit)
+                making = guide_jobs.submit(contextvars.copy_context().run, otto_guide_reply, owner, guide_intent, course, unit)
                 while True:
                     try:
                         text, links = making.result(timeout=GUIDE_KEEPALIVE_SECONDS)
