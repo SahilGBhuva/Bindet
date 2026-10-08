@@ -1477,6 +1477,10 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 @media (max-width: 860px) {
   .tools__add-row { width: 44px; height: 44px; }
   .tools__source-kind { font-size: var(--text-xs); }
+  /* The file badge sits beside the file name, not halfway down a three-line row. */
+  .tools__source.ui-row { align-items: flex-start; padding-block: var(--space-3); }
+  .tools__source .tools__source-kind { margin-top: 1px; }
+  .tools__source > .ui-button { align-self: center; }
   .tools__answer .ui-input { font-size: max(16px, var(--text-md)); }
   .tools__answer .ui-input,
   .tools__answer .ui-button { height: 44px; }
@@ -1702,4 +1706,16 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
     clip-path: inset(50%);
     white-space: nowrap;
   }
+}
+
+/*
+ * Phones: Focus mode also folds away the page header and the course row, so the
+ * flashcard or question fills the screen instead of starting below the fold.
+ */
+@media (max-width: 860px) {
+  .tools:has(.tools__cards.is-focus, .tools__quiz.is-focus) > .ui-page-header,
+  .tools:has(.tools__cards.is-focus, .tools__quiz.is-focus) .tools__courses { display: none; }
+  /* A shorter card leaves room for Previous/Next or the grade buttons above the tab bar. */
+  .tools__cards.is-focus .tools__card,
+  .tools__cards.is-focus .tools__review-card { min-height: min(40svh, 400px); }
 }
