@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { GROUPS_CHANGED_EVENT, PROFILE_CHANGED_EVENT, TASKS_CHANGED_EVENT, parseServerTime, type Profile, type StudyGroup, type Task } from './api'
 import { InstallBindit } from '../components/AppPrompts'
 import { accountDisplayName } from './accountName'
@@ -201,6 +201,7 @@ const glyphs = {
   bolt: svg(<path d="M9 1.8 3.8 9h3.6L7 14.2 12.2 7H8.6z" />),
   chat: svg(<path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />),
   help: svg(<><circle cx="8" cy="8" r="5.5" /><path d="M6.4 6.3a1.7 1.7 0 0 1 3.2.6c0 1.2-1.6 1.4-1.6 2.4M8 11.2v.1" /></>),
+  grip: svg(<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" />),
   eyeOff: svg(<><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" /><path d="M3 3l10 10" /></>),
 }
 
@@ -374,6 +375,27 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     ;[order[from], order[to]] = [order[to], order[from]]
     return { ...current, order }
   })
+
+  // Drag a section by its grip to reorder the panel (desktop rail). Arrow buttons in edit mode stay for keyboards.
+  const [drag, setDrag] = useState<{ id: SectionId; over: SectionId | null; after: boolean } | null>(null)
+
+  const dropSection = (id: SectionId, target: SectionId, after: boolean) => updateLayout((current) => {
+    if (id === target) return current
+    const order = current.order.filter((item) => item !== id)
+    const at = order.indexOf(target)
+    if (at < 0) return current
+    order.splice(after ? at + 1 : at, 0, id)
+    return { ...current, order }
+  })
+
+  function dragOver(event: DragEvent<HTMLElement>, target: SectionId) {
+    if (!drag) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const box = event.currentTarget.getBoundingClientRect()
+    const after = event.clientY > box.top + box.height / 2
+    if (drag.over !== target || drag.after !== after) setDrag({ ...drag, over: target, after })
+  }
 
   const toggleHidden = (id: SectionId) => updateLayout((current) => ({
     ...current,
@@ -588,7 +610,33 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
               const headingId = `bindit-rail-${id}`
               const titleNode = <span className="bindit-rail__title">{title}</span>
               return (
-                <section key={id} className={`bindit-rail__block is-${id}${hidden ? ' is-hidden' : ''}`} aria-labelledby={headingId}>
+                <section
+                  key={id}
+                  className={`bindit-rail__block is-${id}${hidden ? ' is-hidden' : ''}${drag?.id === id ? ' is-dragging' : ''}${drag?.over === id && drag.id !== id ? (drag.after ? ' is-drop-after' : ' is-drop-before') : ''}`}
+                  aria-labelledby={headingId}
+                  onDragOver={(event) => dragOver(event, id)}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    if (drag && drag.over) dropSection(drag.id, drag.over, drag.after)
+                    setDrag(null)
+                  }}
+                >
+                  <span
+                    className="bindit-rail__grip"
+                    draggable
+                    title={`Drag to move ${title}`}
+                    aria-hidden="true"
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = 'move'
+                      event.dataTransfer.setData('text/plain', title)
+                      const block = event.currentTarget.parentElement
+                      if (block) event.dataTransfer.setDragImage(block, 12, 12)
+                      setDrag({ id, over: null, after: false })
+                    }}
+                    onDragEnd={() => setDrag(null)}
+                  >
+                    {glyphs.grip}
+                  </span>
                   <h2 className="bindit-rail__heading">
                     {id === 'highlighted' && !editing ? (
                       <button type="button" id={headingId} className="bindit-rail__toggle" aria-expanded={!folded} aria-controls={`${headingId}-body`} onClick={() => toggleCollapsed(id)}>
@@ -612,6 +660,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                 </section>
               )
             })}
+
+            {editing ? <p className="bindit-rail__hint">Drag <span aria-hidden="true">⋮⋮</span> to move a section, or use the arrows. The eye hides one.</p> : null}
 
             <div className="bindit-rail__footer">
               <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} aria-pressed={editing} onClick={() => setEditing((value) => !value)} aria-label={editing ? 'Done editing panel' : 'Edit panel'}>
