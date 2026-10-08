@@ -383,7 +383,7 @@ export function Onboarding({ session, hasProfile, onDone }: { session: AuthSessi
           ) : step === 'classes' ? (
             <ClassesStep {...stepProps} onPicked={setClasses} />
           ) : (
-            <OnboardingOttoStep {...stepProps} />
+            <OnboardingOttoStep {...stepProps} token={session.access_token} defaultName={firstName} />
           )}
         </div>
       </main>

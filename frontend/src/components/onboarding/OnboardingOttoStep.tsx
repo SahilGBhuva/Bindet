@@ -1,33 +1,22 @@
-import { OnboardingActions, type OnboardingStepProps } from './OnboardingParts'
+import { OttoPreferencesCompact } from '../otto/OttoPreferences'
+import type { OnboardingStepProps } from './OnboardingParts'
 
 /*
- * OTTO STEP SLOT. A short "Meet Otto" introduction for now.
- *
- * The Otto preferences form (what Otto should call you, and Otto's personality) is
- * being built separately. After it merges, replace the body of this component with
- * that form and keep the same props: call onNext() once the preferences are saved,
- * onSkip() to move on without saving. The setup shell (Onboarding.tsx) does not need
- * to change; the step stays optional and skippable.
+ * Step 3: meet Otto, and (optionally) tell Otto what to call you and how to talk.
+ * The form saves on its own; saving moves on. Continue moves on without saving, so the
+ * step stays optional. The form is its own <form>, so this step is a plain section.
  */
-export function OnboardingOttoStep({ headingRef, onNext, onSkip }: OnboardingStepProps) {
+export function OnboardingOttoStep({ headingRef, onNext, onSkip, token, defaultName }: OnboardingStepProps & { token: string; defaultName: string }) {
   return (
-    <form
-      className="onb-step onb-otto"
-      aria-labelledby="onb-otto-title"
-      onSubmit={(event) => {
-        event.preventDefault()
-        onNext()
-      }}
-    >
+    <section className="onb-step onb-otto" aria-labelledby="onb-otto-title">
       <img className="onb-otto__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
       <h1 className="onb-title" id="onb-otto-title" ref={headingRef} tabIndex={-1}>Meet Otto, your tutor</h1>
-      <p className="onb-lead">Otto is the bindet otter. Ask about anything you’re studying and Otto walks you through it.</p>
-      <ul className="onb-otto__list">
-        <li>Pick a course and Otto answers from your notes first</li>
-        <li>Stuck on a problem? Send Otto a photo of it</li>
-        <li>Find Otto on the Tutor page any time</li>
-      </ul>
-      <OnboardingActions primary="Continue" onSkip={onSkip} />
-    </form>
+      <p className="onb-lead">Otto is the bindet otter. Ask about anything you’re studying and Otto answers from your notes first. Make Otto yours, or skip this.</p>
+      <OttoPreferencesCompact token={token} defaultName={defaultName} onSaved={() => onNext()} />
+      <div className="onb-actions">
+        <button type="button" className="ui-button ui-button--ghost onb-actions__skip" onClick={onSkip}>Skip</button>
+        <button type="button" className="ui-button onb-actions__next" onClick={onNext}>Continue without saving</button>
+      </div>
+    </section>
   )
 }
