@@ -441,11 +441,22 @@ class TutorMessageRequest(BaseModel):
     course: str = Field(default="", max_length=120)
     unit: str = Field(default="", max_length=160)
     images: list[TutorImage] = Field(default_factory=list, max_length=3)
+    # "explain" (default) or "guide" (Socratic hints, never the final answer); stored on the conversation.
+    study_mode: Literal["explain", "guide"] | None = None
+    # Replace the conversation's last reply with a new one (the student's last turn is answered again).
+    regenerate: bool = False
 
 
-class TutorRename(BaseModel):
+class TutorConversationUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=200)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    pinned: bool | None = None
+    study_mode: Literal["explain", "guide"] | None = None
+
+
+class TutorRating(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rating: Literal[-1, 0, 1]
 
 
 # Otto's housekeeping after a reply (each also spends the global AI budget). Titles: one per
@@ -454,6 +465,7 @@ class TutorRename(BaseModel):
 OTTO_TITLES_PER_DAY = 60
 OTTO_MEMORY_EVERY = 4
 OTTO_MEMORY_PER_DAY = 20
+OTTO_MEMORY_COOLDOWN_MINUTES = 10
 OTTO_PROFILE_SAVES_PER_HOUR = 60
 OTTO_MEMORY_EDITS_PER_HOUR = 120
 TUTOR_RENAMES_PER_HOUR = 60
@@ -1601,16 +1613,63 @@ def delete_tutor_conversation(conversation_id: str, authorization: Annotated[str
 
 
 @app.patch("/api/tutor/conversations/{conversation_id}")
-def rename_tutor_conversation(conversation_id: str, data: TutorRename, authorization: Annotated[str | None, Header()] = None):
-    """A title the student chose. Automatic titles never replace it (tutor.set_auto_title)."""
+def update_tutor_conversation(conversation_id: str, data: TutorConversationUpdate, authorization: Annotated[str | None, Header()] = None):
+    """Rename (a title the student chose; automatic titles never replace it, see
+    tutor.set_auto_title), pin or unpin, or set the study mode."""
     user = auth.authenticated_user(authorization)
     limit_action(user["id"], "tutor_rename", TUTOR_RENAMES_PER_HOUR)
     try:
-        return tutor.rename_conversation(user["id"], conversation_id, data.title)
+        if data.title is not None:
+            tutor.rename_conversation(user["id"], conversation_id, data.title)
+        return tutor.update_settings(user["id"], conversation_id, pinned=data.pinned, study_mode=data.study_mode)
     except ValueError as error:
         if str(error) == "title_required":
             raise HTTPException(status_code=400, detail="Give the conversation a name") from error
         raise HTTPException(status_code=404, detail="Conversation not found") from error
+
+
+class TutorReplyNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(min_length=1, max_length=120)
+    unit: str = Field(min_length=1, max_length=160)
+
+
+@app.post("/api/tutor/messages/{message_id}/note")
+def save_tutor_reply_as_note(message_id: DbId, data: TutorReplyNote, authorization: Annotated[str | None, Header()] = None):
+    """"Make flashcards" from one of Otto's replies: the reply is saved (once) as a text note in the
+    chosen unit, named after the message, and the app then asks for that note's flashcards through
+    the normal path (POST /api/notes/{id}/flashcards). So the usual flashcard limits apply, a note
+    that already has cards returns them, and the same reply text, course, unit and name reuse the
+    shared flashcard cache instead of a new AI call."""
+    owner = auth.authenticated_user(authorization)["id"]
+    course, unit = data.course.strip(), data.unit.strip()
+    if not course or not unit:
+        raise HTTPException(status_code=400, detail="Pick a course and unit first")
+    try:
+        reply = tutor.get_reply(owner, message_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Message not found") from error
+    file_name = f"Otto reply {message_id}.txt"
+    existing = next((note for note in note_store.list_notes(owner, course, unit) if note["file_name"] == file_name), None)
+    if existing is not None:
+        return {"id": existing["id"], "course": course, "unit": unit, "file_name": file_name, "created": False}
+    limit_action(owner, "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
+    text = note_ingestion.clean_text(reply["content"])
+    if not text:
+        raise HTTPException(status_code=400, detail="That reply has nothing to make flashcards from")
+    note = note_store.save_note(owner, course, unit, file_name, "text/plain", text, len(text.encode("utf-8")))
+    return {"id": note["id"], "course": course, "unit": unit, "file_name": file_name, "created": True}
+
+
+@app.put("/api/tutor/messages/{message_id}/rating")
+def rate_tutor_message(message_id: DbId, data: TutorRating, authorization: Annotated[str | None, Header()] = None):
+    """Thumbs up or down on one of Otto's replies (no AI involved), so reply quality can be reviewed."""
+    user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "tutor_rating", 300)
+    try:
+        return tutor.rate_message(user["id"], message_id, data.rating)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Message not found") from error
 
 
 # --- Otto: how Otto talks to you, and what Otto remembers --------------------------------
@@ -1709,33 +1768,61 @@ def otto_context(pending: Future) -> dict:
         return dict(EMPTY_OTTO_CONTEXT)
 
 
-def otto_personal_key(context: dict) -> str:
-    """Identifies the personalization a reply was written with ("" for none), for the reply cache."""
+def otto_personal_key(context: dict, study_mode: str = "explain") -> str:
+    """Identifies the personalization (and study mode) a reply was written with ("" for none), for the reply cache."""
     parts = [context.get("name") or "", context.get("about") or "", *context.get("memory", [])]
     personality = context.get("personality") or ai_tutor.DEFAULT_PERSONALITY
-    if not any(parts) and personality == ai_tutor.DEFAULT_PERSONALITY:
+    if not any(parts) and personality == ai_tutor.DEFAULT_PERSONALITY and study_mode == "explain":
         return ""
-    return ai_cache.make_key(personality, *parts)
+    return ai_cache.make_key(personality, study_mode, *parts)
 
 
-def conversation_title(owner: str, conversation: dict, first_message: str, reply: str) -> str | None:
+def conversation_title(owner: str, conversation: dict, first_message: str, reply: str, allow_ai: bool = True) -> str | None:
     """A short AI title for a new conversation, saved only while the title is still the automatic
-    one. None when the heuristic title stays (cap reached, budget out, AI failed or unusable)."""
+    one. None when the heuristic title stays (cap reached, budget out, AI failed or unusable).
+    A conversation that opened with small talk is still called "New conversation": then the
+    heuristic title of this first real message is the fallback."""
     started = time.perf_counter()
+
+    def fallback() -> str | None:
+        if conversation["title"] != ai_tutor.DEFAULT_TITLE:
+            return None
+        heuristic = ai_tutor.heuristic_title(first_message)
+        return heuristic if tutor.set_auto_title(owner, conversation["id"], conversation["title"], heuristic) else None
+
+    # A short, clear first message is already a good title: no AI call.
+    if ai_tutor.heuristic_title_is_good(first_message):
+        ai_tutor.log_ai_event("title_conversation", outcome="heuristic", student_id=owner)
+        return fallback()
+    # The same opening message got an AI title before (per owner): reuse it for free.
+    cache_key = ai_cache.title_key(owner_id=owner, first_message=first_message)
+    cached = ai_cache.cached_title(cache_key, owner)
+    if cached:
+        ai_tutor.log_ai_event("title_conversation", outcome="cache_hit", student_id=owner)
+        if tutor.set_auto_title(owner, conversation["id"], conversation["title"], cached):
+            ai_cache.add_ref("tutor_reply_cache", cache_key, owner, ai_cache.conversation_source(conversation["id"]))
+            return cached
+        return None
+    if ai_cache.enabled():
+        ai_tutor.log_ai_event("title_conversation", outcome="cache_miss", student_id=owner)
+    if not allow_ai:  # a replayed reply stays free, title included
+        return fallback()
     try:
         database.check_social_rate_limit(owner, "otto_title", OTTO_TITLES_PER_DAY, 1440)
     except ValueError:
         ai_tutor.log_ai_event("title_conversation", outcome="limited", student_id=owner)
-        return None
+        return fallback()
     if not global_ai_available():
         ai_tutor.log_ai_event("title_conversation", outcome="budget", student_id=owner)
-        return None
+        return fallback()
     try:
         title = ai_tutor.generate_title(first_message=first_message, reply=reply,
                                         session_id=ai_session_id(owner, conversation["id"], "title"))
     except ai_tutor.AITutorError as error:
         ai_tutor.log_ai_event("title_conversation", outcome="fallback", student_id=owner, started=started, error=error)
-        return None
+        return fallback()
+    if ai_cache.store_title(cache_key, owner, title):
+        ai_cache.add_ref("tutor_reply_cache", cache_key, owner, ai_cache.conversation_source(conversation["id"]))
     if not tutor.set_auto_title(owner, conversation["id"], conversation["title"], title):
         ai_tutor.log_ai_event("title_conversation", outcome="kept", student_id=owner, started=started)
         return None
@@ -1752,7 +1839,20 @@ def update_memory_after(owner: str, conversation_id: str) -> dict | None:
     items = otto.memory_for_update(owner)
     if items is None:
         return None
+    turns = tutor.recent_turns(owner, conversation_id, limit=8)
+    # Nothing first-person and substantial in the recent turns (only small talk, follow-up
+    # buttons, short replies): nothing new to remember, so no call.
+    if not ai_tutor.memory_worth_checking(turns[-OTTO_MEMORY_EVERY * 2:]):
+        ai_tutor.log_ai_event("update_memory", outcome="skipped", student_id=owner)
+        return None
     started = time.perf_counter()
+    try:
+        # At most one memory update per conversation every OTTO_MEMORY_COOLDOWN_MINUTES.
+        database.check_social_rate_limit(owner, "otto_mem_" + hashlib.blake2s(conversation_id.encode(), digest_size=7).hexdigest(),
+                                         1, OTTO_MEMORY_COOLDOWN_MINUTES)
+    except ValueError:
+        ai_tutor.log_ai_event("update_memory", outcome="cooldown", student_id=owner)
+        return None
     try:
         database.check_social_rate_limit(owner, "otto_memory", OTTO_MEMORY_PER_DAY, 1440)
     except ValueError:
@@ -1762,7 +1862,7 @@ def update_memory_after(owner: str, conversation_id: str) -> dict | None:
         ai_tutor.log_ai_event("update_memory", outcome="budget", student_id=owner)
         return None
     try:
-        ops = ai_tutor.memory_update_ops(items=items, turns=tutor.recent_turns(owner, conversation_id, limit=8),
+        ops = ai_tutor.memory_update_ops(items=items, turns=turns,
                                          today=datetime.now(timezone.utc).date().isoformat(),
                                          session_id=ai_session_id(owner, conversation_id, "memory"))
     except ai_tutor.AITutorError as error:
@@ -1773,13 +1873,14 @@ def update_memory_after(owner: str, conversation_id: str) -> dict | None:
     return result
 
 
-def otto_after_reply(owner: str, conversation: dict, *, first_reply: bool, first_message: str, reply: str, memory_enabled: bool):
+def otto_after_reply(owner: str, conversation: dict, *, first_reply: bool, first_message: str, reply: str, memory_enabled: bool,
+                     allow_ai_title: bool = True):
     """SSE events sent after "done": a new title, and a note that Otto saved something. Runs
     once the reply is complete, so it never delays it; any failure just ends the stream."""
     log = logging.getLogger("bindit.otto")
     if first_reply:
         try:
-            title = conversation_title(owner, conversation, first_message, reply)
+            title = conversation_title(owner, conversation, first_message, reply, allow_ai=allow_ai_title)
         except Exception as error:  # noqa: BLE001 - a title is never worth an error
             log.warning("otto_title_failed %s", type(error).__name__)
             title = None
@@ -1907,7 +2008,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     requested_course, requested_unit = data.course.strip(), data.unit.strip()
     limit = ai_prep.submit(tutor_limits, owner)
     otto_pending = ai_prep.submit(otto.tutor_context, owner)
-    existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id) if data.conversation_id else None
+    regenerate = bool(data.regenerate and data.conversation_id)
+    # Regenerate drops the last reply only after the limits pass, so the history is read after that.
+    existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id) if data.conversation_id and not regenerate else None
     # Only this student's own notes are ever used for grounding.
     early_context = ai_prep.submit(note_store.context_for, owner, requested_course, requested_unit, 12_000) if requested_course and requested_unit else None
     try:
@@ -1916,12 +2019,25 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if str(error) == "day":
             raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED, headers={"Retry-After": "3600"}) from error
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
+    if regenerate:
+        try:
+            last_turn = tutor.drop_last_reply(owner, data.conversation_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Conversation not found") from error
+        if last_turn is None:
+            raise HTTPException(status_code=409, detail="There is no reply to regenerate")
+        content = last_turn["content"]  # answered again exactly as it was asked
+        existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id)
     # Obvious attempts to extract or override the tutor's instructions get the fixed
     # refusal without a model call (a cheap filter, not a guarantee).
     prefiltered = ai_tutor.is_prompt_extraction(content)
+    # Small talk on its own ("hi", "thanks", "what time is it") gets a fixed friendly reply from
+    # Otto: no model call, no cache lookup, no global AI budget (the tutor limits above still count).
+    small_talk = None if prefiltered or image_parts else ai_tutor.small_talk_reply(content, seed=random.randrange(1 << 16))
+    fixed_reply = ai_tutor.TUTOR_REFUSAL if prefiltered else small_talk
     # Otto's personalization for this student (name, personality, about text, memory).
     otto_ctx = otto_context(otto_pending)
-    personal = otto_personal_key(otto_ctx)
+    personal = otto_personal_key(otto_ctx, data.study_mode or "explain")
     # The first message of a new conversation (no images) may have been answered for
     # this same student, with the same grounding, in the last week: replay that reply.
     # It still counts toward the tutor limits above, but not the global AI budget or the
@@ -1929,7 +2045,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     grounding = None
     tutor_cache_key = None
     cached_reply = None
-    if not prefiltered and not data.conversation_id and not image_parts and ai_cache.enabled():
+    if fixed_reply is None and not data.conversation_id and not image_parts and ai_cache.enabled():
         if early_context:
             grounding = early_context.result()
         elif requested_course or requested_unit:
@@ -1947,7 +2063,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
-    if not prefiltered and cached_reply is None:
+    if fixed_reply is None and cached_reply is None:
         spend_global_ai_call()
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
@@ -1955,7 +2071,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         raise HTTPException(status_code=404, detail="Conversation not found") from error
     # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
     retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
-    first_reply = not any(item["role"] == "assistant" for item in recent)
+    # The first real reply names the conversation; Otto's small-talk replies don't count.
+    first_reply = not any(item["role"] == "assistant" and item.get("model_tier") != "small_talk" for item in recent)
+    study_mode = data.study_mode or conversation.get("study_mode") or "explain"
+    if data.study_mode and data.study_mode != conversation.get("study_mode"):
+        conversation = tutor.update_settings(owner, conversation["id"], study_mode=data.study_mode)
     history = trim_history([{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)])
     course = requested_course or conversation["course"]
     unit = requested_unit or conversation["unit"]
@@ -1972,7 +2092,12 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         saving.set_result(retry_of)
     else:
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
-    route = ai_tutor.tutor_route(content, bool(image_parts)) if prefiltered or cached_reply is not None else capped_tutor_route(owner, content, bool(image_parts))
+    if small_talk is not None:
+        route = {**ai_tutor.tutor_route(content, False), "tier": "small_talk"}
+    elif prefiltered or cached_reply is not None:
+        route = ai_tutor.tutor_route(content, bool(image_parts))
+    else:
+        route = capped_tutor_route(owner, content, bool(image_parts))
     if tutor_cache_key and cached_reply is None and route["model"] != expected["model"]:
         # The strong model's quota is used up: the reply comes from (and is cached for) the
         # model that actually answers, and an earlier reply from that model may be reused.
@@ -1983,7 +2108,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     turn_text = ai_tutor.tutor_user_text(content, course, unit, labels, source_text,
                                          profile={"name": otto_ctx["name"], "about": otto_ctx["about"]}, memory=otto_ctx["memory"])
     model_messages = [
-        {"role": "system", "content": ai_tutor.tutor_system_prompt(otto_ctx["personality"])},
+        {"role": "system", "content": ai_tutor.tutor_system_prompt(otto_ctx["personality"], study_mode)},
         *history,
         {"role": "user", "content": [{"type": "text", "text": turn_text}, *image_parts] if image_parts else turn_text},
     ]
@@ -1991,6 +2116,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
 
     def reply_chunks():
         """The model's reply, minus the off-topic sentinel: an off-topic reply becomes the fixed refusal."""
+        if small_talk is not None:
+            ai_tutor.log_ai_event("explain_material", outcome="small_talk", student_id=owner, tier=route["tier"], started=started)
+            yield small_talk
+            return
         if prefiltered:
             ai_tutor.log_ai_event("explain_material", outcome="prefiltered", student_id=owner, tier=route["tier"], started=started)
             yield ai_tutor.TUTOR_REFUSAL
@@ -2071,11 +2200,13 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # The reply is complete: free the stream slot, then do Otto's housekeeping (a title
             # for a new conversation, a memory update now and then) on the same open stream.
             tutor_streams.release(owner, slot)
-            refused = prefiltered or reply["content"].strip() == ai_tutor.TUTOR_REFUSAL
+            refused = fixed_reply is not None or reply["content"].strip() == ai_tutor.TUTOR_REFUSAL
             if not refused:
-                # A replayed (cached) first reply costs no AI call, and neither does its title.
-                yield from otto_after_reply(owner, conversation, first_reply=first_reply and cached_reply is None, first_message=content,
-                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"])
+                # A replayed (cached) first reply costs no AI call, and neither does its title
+                # (a cached or heuristic title only).
+                yield from otto_after_reply(owner, conversation, first_reply=first_reply, first_message=content,
+                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"],
+                                            allow_ai_title=cached_reply is None)
         except ai_tutor.AITutorError:
             if not user_sent:
                 user_sent = True

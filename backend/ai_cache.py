@@ -407,6 +407,23 @@ def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: li
     return make_key(*parts)
 
 
+def title_key(*, owner_id: str, first_message: str) -> str:
+    """Otto's AI title for a conversation that opens with this message (per owner). Stored in
+    tutor_reply_cache, so it is private to the owner, tied to the conversation and expires with it."""
+    version = "title-v1:" + fingerprint(ai_tutor.TITLE_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.TITLE_MAX_WORDS, ai_tutor.TITLE_MAX_CHARS)
+    return make_key("title", version, owner_id, normalize_message(first_message).casefold())
+
+
+def cached_title(key: str, owner_id: str) -> str | None:
+    row = lookup("tutor_reply_cache", key, owner_id=owner_id)
+    title = ai_tutor.clean_title(row["reply"]) if row is not None else None
+    return title or None
+
+
+def store_title(key: str, owner_id: str, title: str) -> bool:
+    return bool(title) and store("tutor_reply_cache", key, owner_id=owner_id, reply=title)
+
+
 def cached_tutor_reply(key: str, owner_id: str) -> str | None:
     row = lookup("tutor_reply_cache", key, owner_id=owner_id)
     reply = row["reply"] if row is not None else None

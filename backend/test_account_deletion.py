@@ -209,6 +209,9 @@ class AccountDeletionTests(unittest.TestCase):
         ai_cache.add_ref("grading_cache", "d" * 64, ALEX)
         conversation = tutor.start_conversation(ALEX, "What is ATP?")
         tutor.add_message(ALEX, conversation["id"], "user", "What is ATP?")
+        reply = tutor.add_message(ALEX, conversation["id"], "assistant", "Energy currency")
+        tutor.rate_message(ALEX, reply["id"], 1)
+        tutor.update_settings(ALEX, conversation["id"], pinned=True, study_mode="guide")
         ai_cache.store_tutor_reply("c" * 64, ALEX, "Energy currency")
         ai_cache.add_ref("tutor_reply_cache", "c" * 64, ALEX, ai_cache.conversation_source(conversation["id"]))
         questions.save_question(ALEX, "1+1?", "2", "addition", 1)
@@ -282,7 +285,7 @@ class AccountDeletionTests(unittest.TestCase):
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
                      "practice_tests", "practice_test_cache",
                      "practice_rounds", "practice_bests", "practice_challenges", "feedback",
-                     "otto_profiles", "otto_memories"):
+                     "otto_profiles", "otto_memories", "tutor_conversation_settings", "tutor_message_ratings"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
@@ -460,6 +463,19 @@ class AccountDeletionTests(unittest.TestCase):
 
 
 class OttoLockdownTests(unittest.TestCase):
+    def test_tutor_extra_tables_are_locked_down_and_migrated(self):
+        extra = ("tutor_conversation_settings", "tutor_message_ratings")
+        for table in extra:
+            self.assertIn(table, tutor.TUTOR_TABLES)
+            self.assertIn(table, database.RLS_TABLES)
+            self.assertIn(table, database.CLIENT_REVOKED_TABLES)
+        path = os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", "20261014_tutor_conversation_extras.sql")
+        with open(path, encoding="utf-8") as handle:
+            sql = handle.read()
+        for table in extra:
+            self.assertIn(f"'{table}'", sql)
+        self.assertNotIn("drop ", sql.lower())
+
     def test_otto_tables_are_locked_down_and_migrated(self):
         for table in otto.OTTO_TABLES:
             self.assertIn(table, database.RLS_TABLES)

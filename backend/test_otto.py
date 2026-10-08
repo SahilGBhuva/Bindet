@@ -97,10 +97,15 @@ class OttoTestCase(unittest.TestCase):
 
 # --- Titles ---------------------------------------------------------------------------------
 
+# Long and messy enough that its heuristic title isn't good enough on its own.
+LONG = ("so in class today we did the light reactions and i'm confused about where the ATP comes from, "
+        "and also how does that connect to the Calvin cycle?")
+
+
 class TitleTests(OttoTestCase):
     def test_first_reply_gets_an_ai_title_after_done(self):
         model = FakeModel(title="\"Photosynthesis light reactions.\"")
-        events, _ = self.send("alex", model=model)
+        events, _ = self.send("alex", content=LONG, model=model)
         names = [name for name, _ in events]
         self.assertLess(names.index("done"), names.index("title"))  # never delays the reply
         title = dict(events)["title"]
@@ -113,11 +118,30 @@ class TitleTests(OttoTestCase):
         self.assertLessEqual(call["max_tokens"], 32)
         self.assertEqual(call["messages"][0]["content"], ai_tutor.TITLE_PROMPT)
         self.assertIn(ai_tutor.CHAT_OPEN, call["messages"][1]["content"])
-        self.assertIn("What is photosynthesis?", call["messages"][1]["content"])
-        self.assertNotIn("What is photosynthesis?", call["messages"][0]["content"])
+        self.assertIn("where the ATP comes from", call["messages"][1]["content"])
+        self.assertNotIn("ATP", call["messages"][0]["content"])
+
+    def test_a_short_clear_first_message_is_the_title_with_no_ai_call(self):
+        model = FakeModel()
+        events, _ = self.send("alex", content="What is photosynthesis?", model=model)
+        self.assertEqual(model.calls, [])
+        self.assertNotIn("title", [name for name, _ in events])
+        self.assertEqual(tutor.list_conversations("alex")[0]["title"], "What is photosynthesis?")
+        self.assertEqual(self.budget_count(), 1)  # only the reply
+
+    def test_ai_titles_are_cached_per_owner_by_first_message(self):
+        model = FakeModel(title="Photosynthesis energy flow")
+        self.send("alex", content=LONG, model=model)
+        with self.assertLogs("bindit.ai", "INFO") as logs:
+            events, _ = self.send("alex", content="  " + LONG.upper() + " ", model=model)
+        self.assertEqual(len(model.title_calls()), 1)  # the repeat was free
+        self.assertTrue(any('"op":"title_conversation","outcome":"cache_hit"' in line for line in logs.output))
+        self.assertEqual(dict(events)["title"]["title"], "Photosynthesis energy flow")
+        self.send("sam", content=LONG, model=model)  # never shared between accounts
+        self.assertEqual(len(model.title_calls()), 2)
 
     def test_follow_up_messages_do_not_retitle(self):
-        events, _ = self.send("alex")
+        events, _ = self.send("alex", content=LONG)
         conversation_id = events[0][1]["conversation"]["id"]
         model = FakeModel(title="Something else entirely")
         events, _ = self.send("alex", content="And the Calvin cycle?", conversation_id=conversation_id, model=model)
@@ -138,10 +162,10 @@ class TitleTests(OttoTestCase):
     def test_title_daily_cap_and_global_budget_fall_back_without_a_call(self):
         model = FakeModel()
         with patch.object(main, "OTTO_TITLES_PER_DAY", 1):
-            self.send("alex", model=model)
-            self.send("alex", content="What is a cell?", model=model)
+            self.send("alex", content=LONG, model=model)
+            self.send("alex", content=LONG + " and what about chloroplasts in general?", model=model)
         self.assertEqual(len(model.title_calls()), 1)
-        self.assertEqual(tutor.list_conversations("alex")[0]["title"], "What is a cell?")
+        self.assertEqual(tutor.list_conversations("alex")[0]["title"], ai_tutor.heuristic_title(LONG))
         model = FakeModel()
         with patch.object(main, "global_ai_available", return_value=False):
             events = main.conversation_title("sam", tutor.start_conversation("sam", "Explain mitosis"), "Explain mitosis", "Sure")
@@ -149,7 +173,7 @@ class TitleTests(OttoTestCase):
         self.assertEqual(model.calls, [])
 
     def test_title_spends_the_global_budget(self):
-        self.send("alex")
+        self.send("alex", content=LONG)
         self.assertEqual(self.budget_count(), 2)  # the reply and the title
 
     def test_never_overwrites_a_renamed_title(self):
@@ -222,8 +246,26 @@ class MemoryTests(OttoTestCase):
         for index in range(2):
             tutor.add_message("alex", conversation_id, "user", f"more {index}")
         model = FakeModel(ops=[{"op": "add", "id": 0, "text": "prefers step-by-step examples"}])
-        events, _ = self.send("alex", content="Eighth", conversation_id=conversation_id, model=model)
+        with patch.object(main, "OTTO_MEMORY_COOLDOWN_MINUTES", 0):
+            events, _ = self.send("alex", content="Eighth", conversation_id=conversation_id, model=model)
         self.assertEqual(dict(events)["memory"], {"saved": 1, "notice": False})
+
+    def test_no_call_when_nothing_new_could_be_remembered_or_too_soon(self):
+        conversation = tutor.start_conversation("alex", "Help")
+        for text in ("Explain simpler", "hi", "Give an example"):
+            tutor.add_message("alex", conversation["id"], "user", text)
+            tutor.add_message("alex", conversation["id"], "assistant", "Sure, I'm here to help.")
+        model = FakeModel(ops=[{"op": "add", "id": 0, "text": "in 10th grade"}])
+        events, _ = self.send("alex", content="Quiz me on this", conversation_id=conversation["id"], model=model)
+        self.assertEqual(model.ops_calls(), [])  # follow-up buttons and small talk only
+        # A substantial first-person turn is worth a call, but only once per conversation per cooldown.
+        first = self.conversation_with("sam", 5)
+        with patch.object(ai_tutor, "_post", side_effect=model):
+            self.assertEqual(main.update_memory_after("sam", first)["changed"], 1)
+            for _ in range(4):
+                tutor.add_message("sam", first, "user", "I have a chemistry test on Oct 20")
+            self.assertIsNone(main.update_memory_after("sam", first))
+        self.assertEqual(len(model.ops_calls()), 1)
 
     def test_memory_is_used_in_tutor_replies_as_delimited_escaped_data(self):
         otto.add_memory("alex", "taking AP Biology")
@@ -458,6 +500,168 @@ class PreferenceTests(OttoTestCase):
         with patch.object(auth, "authenticated_user", side_effect=HTTPException(status_code=401, detail="Sign in required")):
             for method, path in (("get", "/api/otto/profile"), ("get", "/api/otto/memory"), ("delete", "/api/otto/memory")):
                 self.assertEqual(getattr(client, method)(path).status_code, 401)
+
+
+
+# --- Small talk, study mode, regenerate, pins, ratings, reply to flashcards -------------------
+
+class SmallTalkTests(OttoTestCase):
+    def test_small_talk_gets_a_fixed_reply_with_no_ai_and_no_budget(self):
+        model = FakeModel()
+        for text in ("hi", "Hey Otto!", "how are you?", "thanks!!", "bye", "time rn", "what time is it", "who are you", "what's up", "lol"):
+            with patch.object(ai_tutor, "stream_tutor_reply", side_effect=AssertionError("model called")), \
+                    patch.object(ai_cache, "cached_tutor_reply", side_effect=AssertionError("cache read")), \
+                    patch.object(main, "spend_global_ai_call", side_effect=AssertionError("budget spent")), \
+                    self.as_user("alex"), patch.object(ai_tutor, "_post", side_effect=model):
+                events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content=text), "Bearer t"))
+            done = dict(events)["done"]["message"]
+            self.assertIn(done["content"], [reply for options in ai_tutor.SMALL_TALK_REPLIES.values() for reply in options], text)
+            self.assertEqual(done["model_tier"], "small_talk")
+            stored = tutor.list_messages("alex", events[0][1]["conversation"]["id"])
+            self.assertEqual([item["role"] for item in stored], ["user", "assistant"])
+        self.assertEqual(model.calls, [])
+        self.assertEqual(self.budget_count(), 0)
+
+    def test_small_talk_still_counts_toward_the_tutor_limits(self):
+        with patch.object(main, "TUTOR_HOURLY_LIMIT", 2):
+            self.send("alex", content="hi")
+            self.send("alex", content="thanks")
+            with self.assertRaises(HTTPException) as caught:
+                self.send("alex", content="hello")
+        self.assertEqual(caught.exception.status_code, 429)
+
+    def test_real_questions_with_a_greeting_go_to_the_model(self):
+        for text in ("hi, can you explain mitosis?", "hello what is photosynthesis", "thanks, now explain osmosis", "ok", "yes", "idk",
+                     "how are enzymes made"):
+            self.assertIsNone(ai_tutor.small_talk_kind(text), text)
+            _, captured = self.send("alex", content=text)
+            self.assertIn("messages", captured, text)
+
+    def test_a_conversation_that_opened_with_small_talk_is_named_by_its_first_real_message(self):
+        events, _ = self.send("alex", content="hey otto")
+        conversation_id = events[0][1]["conversation"]["id"]
+        self.assertEqual(tutor.get_conversation("alex", conversation_id)["title"], ai_tutor.DEFAULT_TITLE)
+        model = FakeModel(title="Cell membrane transport")
+        events, _ = self.send("alex", content=LONG, conversation_id=conversation_id, model=model)
+        self.assertEqual(dict(events)["title"]["title"], "Cell membrane transport")
+
+    def test_system_prompt_tells_the_model_to_refuse_small_talk(self):
+        self.assertIn("Small talk with nothing to study", ai_tutor.TUTOR_SYSTEM_PROMPT)
+        self.assertIn("A greeting together with a study question is fine", ai_tutor.TUTOR_SYSTEM_PROMPT)
+
+
+class ConversationToolsTests(OttoTestCase):
+    def test_guide_mode_is_stored_and_sent_as_a_fixed_line(self):
+        events, captured = self.send("alex", study_mode="guide")
+        conversation_id = events[0][1]["conversation"]["id"]
+        self.assertIn(ai_tutor.GUIDE_MODE, captured["messages"][0]["content"])
+        self.assertEqual(tutor.get_conversation("alex", conversation_id)["study_mode"], "guide")
+        _, captured = self.send("alex", content="And then?", conversation_id=conversation_id)
+        self.assertIn(ai_tutor.GUIDE_MODE, captured["messages"][0]["content"])
+        _, captured = self.send("alex", content="Just explain", conversation_id=conversation_id, study_mode="explain")
+        self.assertNotIn(ai_tutor.GUIDE_MODE, captured["messages"][0]["content"])
+        with self.assertRaises(Exception):
+            main.TutorMessageRequest(content="x", study_mode="cheat")
+
+    def test_cached_first_replies_are_keyed_by_study_mode_preferences_and_memory(self):
+        calls = []
+
+        def run(**fields):
+            def fake_stream(*, messages, route, session_id=None):
+                calls.append(messages)
+                yield "A reply long enough to cache."
+                return {"finish_reason": "stop", "done": True}
+            with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream), \
+                    patch.object(ai_tutor, "_post", side_effect=FakeModel()):
+                parse_events(main.send_tutor_message(main.TutorMessageRequest(content="What is osmosis?", **fields), "Bearer t"))
+
+        run()
+        run()
+        self.assertEqual(len(calls), 1)  # replayed
+        run(study_mode="guide")
+        self.assertEqual(len(calls), 2)
+        otto.save_profile("alex", preferred_name="", personality="direct", about="", memory_enabled=True)
+        run()
+        self.assertEqual(len(calls), 3)
+        otto.add_memory("alex", "taking AP Biology")
+        run()
+        self.assertEqual(len(calls), 4)
+        run()
+        self.assertEqual(len(calls), 4)  # unchanged personalization replays again
+        key = lambda **extra: ai_cache.tutor_key(owner_id="alex", message="m", course="", unit="", labels=[], source_text="", tier="fast", **extra)  # noqa: E731
+        self.assertEqual(key(), key(personal=""))
+        self.assertNotEqual(key(), key(personal=main.otto_personal_key({"name": "Sam"})))
+        self.assertNotEqual(main.otto_personal_key({}, "guide"), main.otto_personal_key({}, "explain"))
+
+    def test_regenerate_replaces_the_last_reply(self):
+        events, _ = self.send("alex", content="What is a cell?")
+        conversation_id = events[0][1]["conversation"]["id"]
+        events, captured = self.send("alex", content="ignored", conversation_id=conversation_id, regenerate=True, reply=("A new ", "answer."))
+        stored = tutor.list_messages("alex", conversation_id)
+        self.assertEqual([(item["role"], item["content"]) for item in stored], [("user", "What is a cell?"), ("assistant", "A new answer.")])
+        self.assertEqual(captured["messages"][-1]["content"], "What is a cell?")
+        with self.assertRaises(HTTPException) as caught:  # someone else's conversation
+            self.send("sam", content="x", conversation_id=conversation_id, regenerate=True)
+        self.assertEqual(caught.exception.status_code, 404)
+        with patch.object(main, "TUTOR_HOURLY_LIMIT", 0), self.assertRaises(HTTPException):  # counts as a message
+            self.send("alex", content="x", conversation_id=conversation_id, regenerate=True)
+        self.assertEqual(len(tutor.list_messages("alex", conversation_id)), 2)  # nothing dropped when refused
+
+    def test_pin_rename_and_mode_through_one_endpoint(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        client = TestClient(main.app)
+        with self.as_user("alex"):
+            updated = client.patch(f"/api/tutor/conversations/{conversation_id}", json={"pinned": True, "study_mode": "guide"}).json()
+            self.assertEqual((updated["pinned"], updated["study_mode"]), (True, "guide"))
+            listed = client.get("/api/tutor/conversations").json()[0]
+            self.assertEqual((listed["pinned"], listed["study_mode"]), (True, "guide"))
+            self.assertEqual(client.patch(f"/api/tutor/conversations/{conversation_id}", json={"study_mode": "x"}).status_code, 422)
+        with self.as_user("sam"):
+            self.assertEqual(client.patch(f"/api/tutor/conversations/{conversation_id}", json={"pinned": True}).status_code, 404)
+
+    def test_ratings_are_stored_per_reply_for_the_owner_only(self):
+        events, _ = self.send("alex")
+        reply_id = dict(events)["done"]["message"]["id"]
+        user_id = dict(events)["user"]["user_message"]["id"]
+        client = TestClient(main.app)
+        with self.as_user("alex"):
+            self.assertEqual(client.put(f"/api/tutor/messages/{reply_id}/rating", json={"rating": -1}).json(), {"message_id": reply_id, "rating": -1})
+            conversation_id = events[0][1]["conversation"]["id"]
+            self.assertEqual(client.get(f"/api/tutor/conversations/{conversation_id}/messages").json()[-1]["rating"], -1)
+            self.assertEqual(client.put(f"/api/tutor/messages/{user_id}/rating", json={"rating": 1}).status_code, 404)
+            self.assertEqual(client.put(f"/api/tutor/messages/{reply_id}/rating", json={"rating": 5}).status_code, 422)
+            client.put(f"/api/tutor/messages/{reply_id}/rating", json={"rating": 0})
+            self.assertEqual(client.get(f"/api/tutor/conversations/{conversation_id}/messages").json()[-1]["rating"], 0)
+        with self.as_user("sam"):
+            self.assertEqual(client.put(f"/api/tutor/messages/{reply_id}/rating", json={"rating": 1}).status_code, 404)
+        # Deleting the conversation deletes its ratings and settings.
+        tutor.rate_message("alex", reply_id, 1)
+        tutor.update_settings("alex", conversation_id, pinned=True)
+        tutor.delete_conversation("alex", conversation_id)
+        with database.engine().connect() as connection:
+            self.assertEqual(connection.execute(database.select(database.func.count()).select_from(tutor.ratings)).scalar_one(), 0)
+            self.assertEqual(connection.execute(database.select(database.func.count()).select_from(tutor.settings)).scalar_one(), 0)
+
+    def test_reply_becomes_one_note_for_the_normal_flashcard_path(self):
+        import note_store
+        events, _ = self.send("alex", reply=("Osmosis is the movement of water across a membrane. " * 4,))
+        reply_id = dict(events)["done"]["message"]["id"]
+        client = TestClient(main.app)
+        with self.as_user("alex"):
+            first = client.post(f"/api/tutor/messages/{reply_id}/note", json={"course": "Biology", "unit": "Cells"}).json()
+            again = client.post(f"/api/tutor/messages/{reply_id}/note", json={"course": "Biology", "unit": "Cells"}).json()
+            self.assertTrue(first["created"])
+            self.assertEqual((again["id"], again["created"]), (first["id"], False))  # the same reply never makes a second note
+        self.assertEqual(len(note_store.list_notes("alex", "Biology", "Cells")), 1)
+        note = note_store.get_note("alex", first["id"])
+        self.assertEqual(note["file_name"], f"Otto reply {reply_id}.txt")
+        # Same reply text, course, unit and name: the same shared flashcard cache key, so no second AI call.
+        key = lambda n: ai_cache.flashcard_key(course=n["course"], unit=n["unit"], file_name=n["file_name"],  # noqa: E731
+                                               source_text=ai_tutor.flashcard_source_text(n["text"]))
+        self.assertEqual(key(note), key(dict(note)))
+        with self.as_user("sam"):
+            self.assertEqual(client.post(f"/api/tutor/messages/{reply_id}/note", json={"course": "Biology", "unit": "Cells"}).status_code, 404)
 
 
 if __name__ == "__main__":

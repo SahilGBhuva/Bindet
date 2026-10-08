@@ -122,7 +122,7 @@ class TutorTests(unittest.TestCase):
             yield ""  # pragma: no cover
 
         with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=failing):
-            events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="hello"), "Bearer t"))
+            events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="What is a cell?"), "Bearer t"))
         self.assertEqual(events[-1][0], "error")
         stored = tutor.list_messages("alex", events[0][1]["conversation"]["id"])
         self.assertEqual([item["role"] for item in stored], ["user"])
@@ -133,7 +133,7 @@ class TutorTests(unittest.TestCase):
             raise ai_tutor.AITutorError("lost")
 
         with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=breaking):
-            events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="hello"), "Bearer t"))
+            events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="What is a cell?"), "Bearer t"))
         self.assertTrue(events[-1][1]["partial"])
         self.assertIn("Half an", tutor.list_messages("alex", events[0][1]["conversation"]["id"])[-1]["content"])
 
@@ -150,10 +150,10 @@ class TutorTests(unittest.TestCase):
             yield ""  # pragma: no cover
 
         with self.as_user("alex"), patch.object(ai_tutor, "stream_tutor_reply", side_effect=failing):
-            first = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="hello"), "Bearer t"))
+            first = parse_events(main.send_tutor_message(main.TutorMessageRequest(content="What is a cell?"), "Bearer t"))
         conversation_id = first[0][1]["conversation"]["id"]
         self.assertEqual(first[-1][0], "error")
-        events, captured = self.send("alex", content="hello", conversation_id=conversation_id)
+        events, captured = self.send("alex", content="What is a cell?", conversation_id=conversation_id)
         stored = tutor.list_messages("alex", conversation_id)
         self.assertEqual([item["role"] for item in stored], ["user", "assistant"])
         self.assertEqual([message["role"] for message in captured["messages"]], ["system", "user"])

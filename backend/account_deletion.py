@@ -193,7 +193,9 @@ def _delete_study_material(connection, student_id: str) -> int:
     connection.execute(delete(notes).where(notes.c.student_id == student_id))
     practice_tests.delete_for_owner(connection, student_id)
     conversation_ids = select(tutor.conversations.c.id).where(tutor.conversations.c.owner_id == student_id)
-    connection.execute(delete(tutor.messages).where(tutor.messages.c.conversation_id.in_(conversation_ids)))
+    tutor._delete_children(connection, conversation_ids)
+    connection.execute(delete(tutor.ratings).where(tutor.ratings.c.owner_id == student_id))
+    connection.execute(delete(tutor.settings).where(tutor.settings.c.owner_id == student_id))
     connection.execute(delete(tutor.conversations).where(tutor.conversations.c.owner_id == student_id))
     # Cache references, entries nobody else references, tutor replies, private question
     # banks and served questions (generated_questions).
