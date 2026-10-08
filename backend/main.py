@@ -73,7 +73,7 @@ def docs_settings() -> dict:
 
 
 app = FastAPI(
-    title="Bindit API",
+    title="bindet API",
     version="1.2.0",
     description="Practice, accounts, profiles, secure progress tracking, personalized quizzes, AI flashcards, and AI tutoring.",
     **docs_settings(),
@@ -1083,7 +1083,7 @@ FIRST_TRY_XP = 10
 RETRY_XP = 5
 
 
-AI_PAUSED = "bindit’s AI features have reached today’s limit. Please try again later."
+AI_PAUSED = "bindet’s AI features have reached today’s limit. Please try again later."
 
 
 def ai_daily_global_limit() -> int:
@@ -1624,8 +1624,8 @@ def sse(event: str, payload: dict) -> str:
 
 OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable. Try again in a moment, or upload a text PDF, DOCX or TXT instead."
 TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
-TUTOR_DAILY_LIMITED = "You’ve reached today’s tutor limit. It resets within a day."
-TUTOR_TOO_MANY_STREAMS = "The tutor is still answering your other messages. Wait for one to finish, then try again."
+TUTOR_DAILY_LIMITED = "You’ve reached today’s limit with Otto. It resets within a day."
+TUTOR_TOO_MANY_STREAMS = "Otto is still answering your other messages. Wait for one to finish, then try again."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
 

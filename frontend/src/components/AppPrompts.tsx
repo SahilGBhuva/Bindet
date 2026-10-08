@@ -8,7 +8,7 @@ export function UpdatePrompt() {
   if (!ready) return null
   return (
     <div className="app-update" role="status">
-      <span>A new version of bindit is ready.</span>
+      <span>A new version of bindet is ready.</span>
       <button type="button" className="ui-button ui-button--primary ui-button--sm" onClick={applyUpdate}>Reload</button>
       <button type="button" className="app-update__close" aria-label="Later" title="Later" onClick={dismissUpdate}>×</button>
     </div>
@@ -22,14 +22,14 @@ export function OfflineNotice() {
   return (
     <div className="app-offline">
       <p className="ui-alert ui-alert--info" role="status">
-        <span><strong>You’re offline.</strong> Saved flashcards still work in Study. Messages, the tutor and anything new will be back when you reconnect.</span>
+        <span><strong>You’re offline.</strong> Saved flashcards still work in Study. Messages, Otto and anything new will be back when you reconnect.</span>
       </p>
     </div>
   )
 }
 
 /*
- * "Install bindit": Chromium's install prompt, or the Add to Home Screen hint on iOS Safari.
+ * "Install bindet": Chromium's install prompt, or the Add to Home Screen hint on iOS Safari.
  * In the phone menu it can be dismissed for good (remembered on this device); Settings
  * always offers it while installing is possible. Never shown in the landing demo.
  */
@@ -42,11 +42,11 @@ export function InstallBindit({ place }: { place: 'menu' | 'settings' }) {
     return (
       <div className="settings__row">
         <div className="settings__row-text">
-          <span className="settings__label">Install bindit</span>
+          <span className="settings__label">Install bindet</span>
           <span className="settings__hint">
             {offer === 'ios'
               ? 'In Safari, tap Share, then Add to Home Screen.'
-              : 'Open bindit from your home screen or dock, like any other app. Saved flashcards work offline.'}
+              : 'Open bindet from your home screen or dock, like any other app. Saved flashcards work offline.'}
           </span>
         </div>
         {offer === 'prompt' ? <button type="button" className="ui-button ui-button--primary ui-button--sm" onClick={() => void promptInstall()}>Install</button> : null}
@@ -56,7 +56,7 @@ export function InstallBindit({ place }: { place: 'menu' | 'settings' }) {
   return (
     <div className="app-install">
       {offer === 'prompt'
-        ? <button type="button" className="app-install__action" onClick={() => void promptInstall()}><InstallIcon />Install bindit</button>
+        ? <button type="button" className="app-install__action" onClick={() => void promptInstall()}><InstallIcon />Install bindet</button>
         : <p className="app-install__hint"><InstallIcon />Install bindit: tap Share, then Add to Home Screen.</p>}
       <button type="button" className="app-install__close" aria-label="Don’t show again" title="Don’t show again" onClick={dismissInstall}>×</button>
     </div>

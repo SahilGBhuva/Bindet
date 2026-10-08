@@ -4,7 +4,9 @@ Standing rules for this repository. These apply to every session unless Sahil ov
 
 ## Brand
 
-- The consumer-facing brand is always lowercase **`bindit`** in UI text. Never "Bindit", "BindIt", or "Bindet".
+- The consumer-facing brand is always lowercase **`bindet`** in UI text, even at the start of a sentence. Never "Bindet", "bindit" or "Bindit" (Sahil renamed it from "bindit" on 2026-10-07).
+- The AI tutor is **Otto**, the bindet otter ("Ask Otto", "Otto, your tutor").
+- Older technical names that still say `bindit` (storage keys such as `bindit:` and `bindit-`, CSS classes such as `bindit-rail`, logger names, image files such as `bindit-mascot-cutout.webp`, events) stay as they are: renaming them would sign people out or lose their saved settings.
 - The GitHub repo is named `Bindet`. **Do not rename the repo.**
 - Clean up stale **"Numi"** branding in user-facing text and in the Vercel project link where it is safe to do so.
 - Do **not** rename technical identifiers, environment variables, database columns, table names, or URLs if renaming risks breaking something. Cosmetic branding fixes must never become a migration.

@@ -4,7 +4,7 @@ import { getAdminFeedback, type FeedbackEntry } from '../lib/practiceLab'
 import './Admin.css'
 
 /*
- * #admin: the latest feedback, for the bindit team only. Not linked from anywhere. The
+ * #admin: the latest feedback, for the bindet team only. Not linked from anywhere. The
  * server decides who may read it (ADMIN_EMAILS); for everyone else it answers 404 and
  * this page says only that there is nothing here.
  */

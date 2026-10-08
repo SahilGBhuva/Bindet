@@ -114,7 +114,7 @@ function sortTasks(list: Task[]) {
 
 function errorText(error: unknown) {
   // fetch rejects with a TypeError when the network or server can't be reached.
-  if (error instanceof TypeError) return 'bindit couldn’t be reached, so that change was undone. Check your connection and try again.'
+  if (error instanceof TypeError) return 'bindet couldn’t be reached, so that change was undone. Check your connection and try again.'
   return error instanceof Error && error.message ? error.message : 'Something went wrong. Try again.'
 }
 

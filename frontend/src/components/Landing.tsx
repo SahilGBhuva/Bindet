@@ -79,7 +79,7 @@ function HeroProduct({ onLocked }: { onLocked: (action: string) => void }) {
       <img className="lp-product__otter" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
       <figure
         className={`lp-product__surface${phone ? '' : ' is-live'}`}
-        aria-label={phone ? 'The bindit dashboard with a demo student’s data' : 'Interactive bindit demo with a demo student’s data. Nothing you do here is saved.'}
+        aria-label={phone ? 'The bindet dashboard with a demo student’s data' : 'Interactive bindet demo with a demo student’s data. Nothing you do here is saved.'}
       >
         <figcaption className="lp-product__strip">
           <span className="lp-product__live"><i aria-hidden="true" />{phone ? 'A live render of the app' : 'Live demo'}</span>
@@ -124,7 +124,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
       <header className={`lp-nav${scrolled ? ' is-scrolled' : ''}`}>
         <a className="lp-nav__brand" href="#top" onClick={(event) => { event.preventDefault(); window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' }) }}>
           <BrandMark size={24} />
-          bindit
+          bindet
         </a>
         <nav className="lp-nav__links" aria-label="Page sections">
           <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
@@ -146,7 +146,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
               Everything you’re learning, <em>bound together.</em>
             </h1>
             <p className="lp-hero__lead">
-              Upload your notes and bindit organizes them into courses and units, writes flashcards and quizzes from your own material, keeps your assignments in order, and shows what you have actually mastered.
+              Upload your notes and bindet organizes them into courses and units, writes flashcards and quizzes from your own material, keeps your assignments in order, and shows what you have actually mastered.
             </p>
             <div className="lp-hero__cta">
               <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Create an account</button>
@@ -189,7 +189,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
           <div className="lp-preview__head">
             <p className="lp-eyebrow">The app</p>
             <h2 className="lp-serif lp-preview__title" id="lp-preview-title">Not a mockup. <em>The real thing.</em></h2>
-            <p className="lp-fineprint">The workspace below is bindit itself, running on a demo student’s courses. Every number is computed by the product. Nothing you do here is saved.</p>
+            <p className="lp-fineprint">The workspace below is bindet itself, running on a demo student’s courses. Every number is computed by the product. Nothing you do here is saved.</p>
           </div>
           <HeroProduct onLocked={(action) => onSignUp(action)} />
         </section>
@@ -203,7 +203,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
         <div id="together"><Together /></div>
 
         <section className="lp-final" aria-labelledby="lp-final-title">
-          <img className="lp-final__otter" data-reveal src="/bindit-mascot-cutout.webp" alt="The bindit otter carrying a purple binder" width="240" height="288" loading="lazy" decoding="async" />
+          <img className="lp-final__otter" data-reveal src="/bindit-mascot-cutout.webp" alt="The bindet otter carrying a purple binder" width="240" height="288" loading="lazy" decoding="async" />
           <h2 className="lp-serif lp-final__title" id="lp-final-title" data-reveal>
             Your notes are already<br /><em>a study plan.</em>
           </h2>
@@ -215,7 +215,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
       </main>
 
       <footer className="lp-footer">
-        <div className="lp-footer__brand"><BrandMark size={20} /> bindit</div>
+        <div className="lp-footer__brand"><BrandMark size={20} /> bindet</div>
         <nav aria-label="Footer">
           <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
           <button type="button" onClick={() => scrollTo('product')}>The app</button>

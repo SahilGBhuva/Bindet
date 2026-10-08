@@ -1,7 +1,7 @@
 """In-app feedback: a category, a message and, only when the student ticks the box,
 their browser, OS, screen size and the page they were on. Nothing else is collected.
 
-Messages are read by the bindit team through GET /api/admin/feedback, which only
+Messages are read by the bindet team through GET /api/admin/feedback, which only
 answers for the emails listed in ADMIN_EMAILS (see main.py).
 """
 from __future__ import annotations

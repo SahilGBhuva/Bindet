@@ -138,7 +138,7 @@ export function Settings({ session, onSession }: SettingsProps) {
       } else {
         const result = await signUp(email.trim(), password)
         if (!result.session) {
-          setMessage('Check your inbox and press “Confirm your email.” We’ll bring you straight back to bindit and sign you in.')
+          setMessage('Check your inbox and press “Confirm your email.” We’ll bring you straight back to bindet and sign you in.')
         } else {
           onSession(result.session)
           setMessage('Your account is ready.')
@@ -223,7 +223,7 @@ export function Settings({ session, onSession }: SettingsProps) {
 
   const appearance = (
     <>
-    <Section id="settings-appearance" title="Appearance" copy="Choose how bindit looks on this device. System follows your device setting.">
+    <Section id="settings-appearance" title="Appearance" copy="Choose how bindet looks on this device. System follows your device setting.">
       <div className="ui-panel">
         <div className="settings__row">
           <div className="settings__row-text">
@@ -239,7 +239,7 @@ export function Settings({ session, onSession }: SettingsProps) {
       </div>
     </Section>
     {installOffer ? (
-      <Section id="settings-app" title="App" copy="Use bindit as an app on this device. Flashcards you have opened stay available offline.">
+      <Section id="settings-app" title="App" copy="Use bindet as an app on this device. Flashcards you have opened stay available offline.">
         <div className="ui-panel">
           <InstallBindit place="settings" />
         </div>
@@ -256,7 +256,7 @@ export function Settings({ session, onSession }: SettingsProps) {
           <h1 className="ui-page-title">Settings</h1>
           <p className="ui-page-subtitle">
             {session
-              ? `Signed in as ${session.user.email ?? 'your bindit account'}.`
+              ? `Signed in as ${session.user.email ?? 'your bindet account'}.`
               : 'Create an account to keep XP, streaks, and notes across devices.'}
           </p>
         </div>
@@ -417,14 +417,14 @@ export function Settings({ session, onSession }: SettingsProps) {
               <div className="settings__row">
                 <div className="settings__row-text">
                   <span className="settings__label">Sign out</span>
-                  <span className="settings__hint">You’ll need to log in again to use bindit on this device.</span>
+                  <span className="settings__hint">You’ll need to log in again to use bindet on this device.</span>
                 </div>
                 <button className="ui-button" type="button" onClick={logout}>Sign out</button>
               </div>
               <div className="settings__row">
                 <div className="settings__row-text">
                   <span className="settings__label">Privacy and terms</span>
-                  <span className="settings__hint">What bindit stores, who processes it, and the rules for using bindit.</span>
+                  <span className="settings__hint">What bindet stores, who processes it, and the rules for using bindit.</span>
                 </div>
                 <div className="settings__legal-links">
                   <a className="ui-link" href="/privacy">Privacy Policy</a>
@@ -434,7 +434,7 @@ export function Settings({ session, onSession }: SettingsProps) {
             </div>
           </Section>
 
-          <Section id="settings-delete" title="Delete account" copy="Permanently delete your bindit account and everything in it.">
+          <Section id="settings-delete" title="Delete account" copy="Permanently delete your bindet account and everything in it.">
             <div className="ui-panel settings__danger">
               <div className="settings__row settings__row--stack">
                 <p className="settings__danger-lead">Deleting your account removes, right away:</p>
@@ -517,7 +517,7 @@ function DeleteAccountDialog({ session, onCancel }: { session: AuthSession; onCa
           </header>
           <div className="settings__dialog-body">
             <p id="delete-account-copy">
-              Everything in your bindit account is deleted at once and can’t be recovered. Groups you own pass to the member who joined earliest;
+              Everything in your bindet account is deleted at once and can’t be recovered. Groups you own pass to the member who joined earliest;
               a group where you’re the only member is deleted.
             </p>
             <label className="ui-field">

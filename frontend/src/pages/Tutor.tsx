@@ -231,7 +231,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const list = Array.from(files).filter((file) => file.type.startsWith('image/'))
-    if (!list.length) { setNotice('Only images can be attached to the tutor.'); return }
+    if (!list.length) { setNotice('Only images can be sent to Otto.'); return }
     setAttachments((current) => {
       const room = MAX_IMAGES - current.length
       if (room <= 0) { setNotice(`You can attach up to ${MAX_IMAGES} images.`); return current }
@@ -396,7 +396,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     <div className={`tutor${listOpen ? ' is-list-open' : ''}`}>
       <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
-          <span className="ui-eyebrow">Tutor</span>
+          <span className="ui-eyebrow">Otto · your tutor</span>
           <button type="button" className="ui-button ui-button--sm" onClick={newConversation}>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>New
           </button>
@@ -436,7 +436,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
             <h1>{active?.title ?? 'New conversation'}</h1>
             <p>{course ? <>Grounded in your notes for <b>{unit || course}</b></> : 'General help · pick a course to use your notes'}</p>
           </div>
-          <div className="tutor__context" role="group" aria-label="Notes the tutor should use">
+          <div className="tutor__context" role="group" aria-label="Notes Otto should use">
             <select className="ui-select" aria-label="Course" value={course} onChange={(event) => { setCourse(event.target.value); setUnit(notebook.courses.find((item) => item.name === event.target.value)?.units[0] ?? '') }}>
               <option value="">No course</option>
               {notebook.courses.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
@@ -474,7 +474,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                   ) : null}
                   {message.role === 'assistant' ? (
                     message.content ? <div className="tutor-rich"><Rich text={message.content} />{message.status === 'streaming' ? <span className="tutor-caret" aria-hidden="true" /> : null}</div>
-                      : <div className="tutor-thinking" role="status"><span /><span /><span /><span className="sr-only">The tutor is thinking</span></div>
+                      : <div className="tutor-thinking" role="status"><span /><span /><span /><span className="sr-only">Otto is thinking</span></div>
                   ) : <p className="tutor-message__text">{message.content}</p>}
                   {message.status === 'sending' && message.progress !== undefined && message.progress < 1 ? (
                     <div className="tutor-message__progress" role="progressbar" aria-label="Uploading images" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(message.progress * 100)}><i style={{ width: `${Math.round(message.progress * 100)}%` }} /></div>
@@ -513,8 +513,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               onFocus={warmAI}
-              placeholder={course ? `Ask about ${unit || course}…` : 'Ask the tutor anything…'}
-              aria-label="Message the tutor"
+              placeholder={course ? `Ask about ${unit || course}…` : 'Ask Otto anything…'}
+              aria-label="Message Otto"
               enterKeyHint="send"
               autoCapitalize="sentences"
               rows={1}

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 /*
- * bindit's brand illustrations: simple ink line drawings with at most one accent.
+ * bindet's brand illustrations: simple ink line drawings with at most one accent.
  * These are for the landing page's compositions. Interface icons stay in Icons.tsx.
  * Ink follows currentColor; the accent follows --accent.
  */

@@ -1,4 +1,4 @@
-"""Caches that let bindit skip OpenRouter calls whose answer it already has.
+"""Caches that let bindet skip OpenRouter calls whose answer it already has.
 
 Privacy rule: a cache hit only ever returns output derived purely from input the
 requester already supplied. Shared (cross-user) caches are keyed on a sha256 of the

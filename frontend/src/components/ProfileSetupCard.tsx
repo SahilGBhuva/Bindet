@@ -1,5 +1,5 @@
 /*
- * Shown to a signed-in account that has no bindit profile yet (a new Google sign-in, for
+ * Shown to a signed-in account that has no bindet profile yet (a new Google sign-in, for
  * example): until a name and username are saved there is no friend ID and nobody can find
  * them, so point to Settings instead of showing signed-out copy.
  */

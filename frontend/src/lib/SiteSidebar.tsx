@@ -25,7 +25,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
       { id: 'tools', label: 'Study', short: 'Study' },
       { id: 'goals', label: 'Tasks', short: 'Tasks' },
       { id: 'stats', label: 'Project stats' },
-      { id: 'tutor', label: 'Tutor' },
+      { id: 'tutor', label: 'Otto, your tutor', short: 'Otto' },
       { id: 'progress', label: 'Progress' },
       { id: 'games', label: 'Practice lab' },
     ],
@@ -62,7 +62,7 @@ export function NavIcon({ kind }: { kind: Screen }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[kind]}</svg>
 }
 
-/* The bindit mark: a sheet bound by two violet rings. */
+/* The bindet mark: a sheet bound by two violet rings. */
 export function BrandMark({ size = 22 }: { size?: number }) {
   return (
     <svg className="bindit-mark" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
@@ -470,7 +470,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
             { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
             { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
-            { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask the tutor', current: active === 'tutor' },
+            { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask Otto', current: active === 'tutor' },
             { key: 'help', tone: 'green', glyph: glyphs.help, href: '#more', label: 'Help & feedback', current: active === 'more' },
           ] as const).map((item) => (
             <li key={item.key}>
@@ -687,7 +687,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       </nav>
 
       <header className="bindit-topbar">
-        <a className="bindit-rail__brand" href="#home" aria-label="bindit home"><BrandMark /><span>bindit</span></a>
+        <a className="bindit-rail__brand" href="#home" aria-label="bindet home"><BrandMark /><span>bindet</span></a>
         <div className="bindit-topbar__actions">
           {onOpenCommand ? <button type="button" className="bindit-topbar__button" onClick={onOpenCommand} aria-label="Search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg></button> : null}
           <a className="bindit-topbar__avatar" href="#settings" aria-label="Account settings">{initials}</a>

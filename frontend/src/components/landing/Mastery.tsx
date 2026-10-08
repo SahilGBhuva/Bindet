@@ -87,7 +87,7 @@ export function Mastery() {
         <p className="lp-kicker" data-reveal>Practice and track mastery</p>
         <h2 className="lp-serif lp-mastery__title" id="lp-mastery-title" data-reveal>Watch it<br /><em>stick.</em></h2>
         <p className="lp-mastery__lead" data-reveal>
-          Every unit earns a mastery score from your quiz history. bindit shows what is sharp, what is stuck, and what to study next.
+          Every unit earns a mastery score from your quiz history. bindet shows what is sharp, what is stuck, and what to study next.
         </p>
         <dl className="lp-mastery__legend" data-reveal>
           {LEGEND.map((item) => (
@@ -105,7 +105,7 @@ export function Mastery() {
   )
 }
 
-/* Together: the social side of bindit, set as type and real rows instead of cards. */
+/* Together: the social side of bindet, set as type and real rows instead of cards. */
 export function Together() {
   const social = useMemo(() => demoSocial(), [])
   const top = Math.max(1, ...social.leaderboard.map((friend) => friend.weekly_xp))

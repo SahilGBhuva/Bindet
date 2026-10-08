@@ -9,12 +9,12 @@
     <!-- First script on the page: applies the saved theme and moves a sign-in return's ?code= out of the URL before anything else loads. Synchronous (no async/defer) so there is no theme flash; external because the CSP blocks inline scripts. -->
     <script src="/theme-init.js"></script>
     <link rel="icon" type="image/webp" href="/bindit-mascot-cutout.webp" />
-    <!-- Installable app (PWA): the manifest names bindit and its icons; public/sw.js keeps the app shell for offline use. -->
+    <!-- Installable app (PWA): the manifest names bindet and its icons; public/sw.js keeps the app shell for offline use. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="bindit" />
+    <meta name="apple-mobile-web-app-title" content="bindet" />
     <!-- "default" keeps the iOS status bar opaque above the page, so content never slides under it in either theme. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -27,8 +27,8 @@
     <noscript><link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
     <!-- viewport-fit=cover lets the phone bars reach under the notch and home bar (they pad themselves with env(safe-area-inset-*)); resizes-content shrinks the layout above the on-screen keyboard so message boxes stay in view. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="description" content="bindit turns your class notes into flashcards, quizzes, and a mastery map for every course, then lets you study with friends." />
-    <title>bindit — Keep your learning together</title>
+    <meta name="description" content="bindet turns your class notes into flashcards, quizzes, and a mastery map for every course, then lets you study with friends." />
+    <title>bindet — Keep your learning together</title>
   </head>
   <body>
     <div id="root"></div>

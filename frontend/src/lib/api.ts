@@ -196,7 +196,7 @@ export class RequestTimeoutError extends Error {
 
 export const OFFLINE_MESSAGE = 'You’re offline. This needs an internet connection — try again when you’re back online.'
 
-/** The device is offline, so the request was not sent (or could not reach bindit). */
+/** The device is offline, so the request was not sent (or could not reach bindet). */
 export class OfflineError extends Error {
   constructor() {
     super(OFFLINE_MESSAGE)
@@ -220,7 +220,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   tutor_busy: 'Finish your other tutor reply first.',
 }
 
-/** An error response from the bindit API, with its HTTP status and machine code (when it sent one). */
+/** An error response from the bindet API, with its HTTP status and machine code (when it sent one). */
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -293,7 +293,7 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null)
-    throw apiError(response.status, data, `bindit could not complete that request (${response.status}).`)
+    throw apiError(response.status, data, `bindet could not complete that request (${response.status}).`)
   }
   return response.json() as Promise<T>
 }
@@ -370,10 +370,10 @@ async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: numb
       let data: unknown = null
       try { data = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data as T)
-      else reject(apiError(xhr.status, data, `bindit could not complete that request (${xhr.status}).`))
+      else reject(apiError(xhr.status, data, `bindet could not complete that request (${xhr.status}).`))
     }
     xhr.ontimeout = () => reject(new RequestTimeoutError())
-    xhr.onerror = () => reject(deviceOffline() ? new OfflineError() : new TypeError('bindit couldn’t be reached. Check your connection and try again.'))
+    xhr.onerror = () => reject(deviceOffline() ? new OfflineError() : new TypeError('bindet couldn’t be reached. Check your connection and try again.'))
     xhr.send(body)
   })
 }
@@ -624,7 +624,7 @@ export async function getProgress(studentId: string, accessToken?: string, force
   if (response.status === 404) return null
   if (!response.ok) {
     const data = await response.json().catch(() => null)
-    throw apiError(response.status, data, `bindit could not load progress (${response.status}).`)
+    throw apiError(response.status, data, `bindet could not load progress (${response.status}).`)
   }
   const data = await response.json() as Progress
   progressCache.set(studentId, { savedAt: Date.now(), data })
@@ -640,7 +640,7 @@ export async function getAccountProfile(accessToken: string, force = false): Pro
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if (response.status === 404) return null
-  if (!response.ok) throw new Error('Could not load your bindit profile.')
+  if (!response.ok) throw new Error('Could not load your bindet profile.')
   const data = await response.json() as Profile
   profileCache.set(identity, { savedAt: Date.now(), data })
   writeSessionCache(`bindit:profile:${identity}`, data)
@@ -893,7 +893,7 @@ export function streamTutorMessage(
   }
   const resetIdle = () => {
     window.clearTimeout(idleTimer)
-    if (!finished) idleTimer = window.setTimeout(() => { xhr.abort(); fail('The tutor stopped responding. Try again.') }, TUTOR_IDLE_TIMEOUT_MS)
+    if (!finished) idleTimer = window.setTimeout(() => { xhr.abort(); fail('Otto stopped responding. Try again.') }, TUTOR_IDLE_TIMEOUT_MS)
   }
   const handleBlock = (block: string) => {
     const name = /^event: (.+)$/m.exec(block)?.[1]
@@ -914,7 +914,7 @@ export function streamTutorMessage(
       finished = true
       window.clearTimeout(idleTimer)
       handlers.onDone?.(payload)
-    } else if (name === 'error') fail(apiError(0, payload, 'The tutor could not answer. Try again.').message)
+    } else if (name === 'error') fail(apiError(0, payload, 'Otto couldn’t answer. Try again.').message)
   }
   const drain = () => {
     const text = xhr.responseText
@@ -940,13 +940,13 @@ export function streamTutorMessage(
     if (xhr.status !== 200) {
       let data: unknown = null
       try { data = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
-      fail(apiError(xhr.status, data, `The tutor could not answer (${xhr.status}).`).message)
+      fail(apiError(xhr.status, data, `Otto couldn’t answer (${xhr.status}).`).message)
       return
     }
     drain()
     fail('The reply ended unexpectedly. Try again.')
   }
-  xhr.onerror = () => fail('bindit couldn’t be reached. Check your connection and try again.')
+  xhr.onerror = () => fail('bindet couldn’t be reached. Check your connection and try again.')
   xhr.send(JSON.stringify(body))
   resetIdle()
   return () => {

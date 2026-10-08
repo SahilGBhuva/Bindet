@@ -1,7 +1,7 @@
 /*
  * Practice test answers in progress, kept in this tab's sessionStorage under the test's ID,
  * so a refresh doesn't lose them. Cleared when the test is submitted, and with every other
- * bindit key on sign-out (auth.ts clears sessionStorage). Every read and write is guarded:
+ * bindet key on sign-out (auth.ts clears sessionStorage). Every read and write is guarded:
  * storage can be unavailable, and the test still works without it.
  */
 export type PracticeDraft = { answers: Record<number, string>; flags: number[]; current: number }

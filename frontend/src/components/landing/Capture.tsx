@@ -5,14 +5,14 @@ import { prefersReducedMotion, useInView } from './motion'
 import { storyUnit } from './story'
 
 /*
- * Captured: a note goes in, bindit reads it, and the lines that matter come back
+ * Captured: a note goes in, bindet reads it, and the lines that matter come back
  * out as a flashcard and a quiz question. The transformation happens in the UI;
  * the four steps on the left only name what is on screen.
  */
 
 const STEPS = [
   { title: 'Notes in', copy: 'A PDF, a Word doc, a text file, or a photo of your handwriting.' },
-  { title: 'Read', copy: 'bindit pulls the text out and files it under the course and unit.' },
+  { title: 'Read', copy: 'bindet pulls the text out and files it under the course and unit.' },
   { title: 'Flashcards', copy: 'Each unit builds a deck from its own notes.' },
   { title: 'Questions', copy: 'The same notes become quiz questions, graded with an explanation.' },
 ]
@@ -42,7 +42,7 @@ export function Capture() {
       <div className="lp-capture__copy">
         <p className="lp-kicker" data-reveal>Add notes and materials</p>
         <h2 className="lp-serif lp-capture__title" id="lp-capture-title" data-reveal>
-          Drop in the notes.<br /><em>bindit reads them.</em>
+          Drop in the notes.<br /><em>bindet reads them.</em>
         </h2>
         <ol className="lp-capture__steps" data-reveal>
           {STEPS.map((item, index) => (

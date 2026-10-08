@@ -367,7 +367,7 @@ def _names(connection, ids: set[str]) -> dict[str, dict]:
 def _challenge_view(row, viewer: str, people: dict[str, dict], include_cards: bool = False) -> dict:
     mine, theirs = ("from", "to") if row["from_id"] == viewer else ("to", "from")
     opponent_id = row[f"{theirs}_id"]
-    person = people.get(opponent_id) or {"student_id": opponent_id, "username": "", "display_name": "A bindit student", "avatar_path": ""}
+    person = people.get(opponent_id) or {"student_id": opponent_id, "username": "", "display_name": "A bindet student", "avatar_path": ""}
     my_score, their_score = row[f"{mine}_score"], row[f"{theirs}_score"]
     winner = None
     if row["status"] == "completed":

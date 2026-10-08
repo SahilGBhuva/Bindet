@@ -6,7 +6,7 @@ import { pageBeforeHelp } from '../lib/screens'
 import { toneClass, type Tone } from '../lib/tones'
 import './More.css'
 
-/* Help: short guides written from what bindit actually does, and a way to send feedback. */
+/* Help: short guides written from what bindet actually does, and a way to send feedback. */
 
 type Guide = { id: string; title: string; summary: string; tone: Tone; icon: ReactNode; body: ReactNode }
 
@@ -23,7 +23,7 @@ const GUIDES: Guide[] = [
         <li><b>Upload a file:</b> PDF, DOCX, TXT, Markdown, CSV or JSON, or a photo of handwritten notes, up to 4 MB.</li>
         <li><b>Paste or type notes:</b> paste your text, then choose <b>Add typed notes</b>. Typed text isn’t saved until you do.</li>
         <li><b>Take a photo of your notes:</b> handwritten or printed. Each photo becomes its own note, and <b>Add another page</b> adds the next one.</li>
-        <li>bindit reads the text out of each note, then makes its flashcards for you. You can remove a note from the unit’s note list at any time.</li>
+        <li>bindet reads the text out of each note, then makes its flashcards for you. You can remove a note from the unit’s note list at any time.</li>
       </ol>
     ),
   },
@@ -54,24 +54,24 @@ const GUIDES: Guide[] = [
       <ol className="help__steps">
         <li>Switch the unit to <b>Quiz</b>. Questions come from the notes in that unit; with no notes yet, they’re based on the unit’s name.</li>
         <li>Pick <b>Level 1</b>, <b>2</b> or <b>3</b>, then <b>New question</b>. While a question is open the same button says <b>Skip</b>.</li>
-        <li>Answer by picking a choice or typing. bindit checks it, explains the answer, and gives a hint when you’re not there yet, so you can try again.</li>
+        <li>Answer by picking a choice or typing. bindet checks it, explains the answer, and gives a hint when you’re not there yet, so you can try again.</li>
         <li>A right answer on the first try earns 10 XP, and 5 XP after a retry.</li>
         <li><b>Instructions (optional)</b> shape your next questions in this unit, for example “only ask about dates”.</li>
-        <li>Stuck? <b>Ask the tutor about this</b> opens the question in Tutor.</li>
+        <li>Stuck? <b>Ask Otto about this</b> opens the question with Otto.</li>
         <li><b>Practice test:</b> choose <b>Take a practice test</b> on the Quiz panel, or <b>Test the whole course</b>. Pick 5, 10 or 15 questions, timed or untimed. After you submit you see your score, which topics need work, and every answer explained.</li>
       </ol>
     ),
   },
   {
     id: 'tutor',
-    title: 'The tutor',
+    title: 'Otto, the tutor',
     summary: 'What it will and won’t help with.',
     tone: 'teal',
     icon: Icons.message,
     body: (
       <>
         <ol className="help__steps">
-          <li>In <a href="#tutor">Tutor</a>, pick a course and unit so answers use your notes first. When it relies on a note, it names the file.</li>
+          <li>In <a href="#tutor">Otto</a>, the tutor, pick a course and unit so answers use your notes first. When it relies on a note, it names the file.</li>
           <li>You can attach up to 3 images (JPG, PNG, WebP or GIF), like a photo of a problem.</li>
         </ol>
         <div className="help__columns">
@@ -93,7 +93,7 @@ const GUIDES: Guide[] = [
             </ul>
           </div>
         </div>
-        <p className="help__note">The tutor can make mistakes, so check anything important. It has hourly and daily message limits.</p>
+        <p className="help__note">Otto can make mistakes, so check anything important. It has hourly and daily message limits.</p>
       </>
     ),
   },
@@ -161,8 +161,8 @@ export function More({ session }: { session?: AuthSession | null }) {
       <header className="ui-page-header">
         <div>
           <span className="ui-eyebrow">Help</span>
-          <h1 className="ui-page-title">How bindit works</h1>
-          <p className="ui-page-subtitle">bindit keeps your schoolwork in one binder: notes sorted by course and unit, practice made from those notes, and the people you study with.</p>
+          <h1 className="ui-page-title">How bindet works</h1>
+          <p className="ui-page-subtitle">bindet keeps your schoolwork in one binder: notes sorted by course and unit, practice made from those notes, and the people you study with.</p>
         </div>
       </header>
 
@@ -211,7 +211,7 @@ function FeedbackForm({ session }: { session: AuthSession | null }) {
       <div className="ui-panel ui-panel--padded help__feedback help__thanks ui-tone--green" role="status">
         <span className="ui-icon" aria-hidden="true">{Icons.check}</span>
         <div>
-          <p className="help__thanks-title">Thanks — the bindit team reads every message.</p>
+          <p className="help__thanks-title">Thanks — the bindet team reads every message.</p>
           <p className="help__note">You can also email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
           <button type="button" className="ui-button ui-button--sm" onClick={() => { setSent(false); setMessage('') }}>Send another</button>
         </div>
@@ -258,7 +258,7 @@ function FeedbackForm({ session }: { session: AuthSession | null }) {
           maxLength={MESSAGE_MAX}
           rows={5}
           required
-          placeholder={category === 'bug' ? 'What happened, and what did you expect?' : category === 'idea' ? 'What would make bindit better for you?' : 'What’s on your mind?'}
+          placeholder={category === 'bug' ? 'What happened, and what did you expect?' : category === 'idea' ? 'What would make bindet better for you?' : 'What’s on your mind?'}
           onChange={(event) => setMessage(event.target.value)}
         />
         <span className={`help__count${message.length >= MESSAGE_MAX ? ' is-full' : ''}`}>{message.length}/{MESSAGE_MAX}</span>

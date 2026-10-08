@@ -20,7 +20,7 @@ export function TutorStory() {
   return (
     <section className="lp-tutor" id="tutor-story" aria-labelledby="lp-tutor-title">
       <div className="lp-tutor__copy">
-        <p className="lp-eyebrow" data-reveal>Tutor</p>
+        <p className="lp-eyebrow" data-reveal>Otto, the tutor</p>
         <h2 className="lp-serif lp-tutor__title" id="lp-tutor-title" data-reveal>A tutor that has read <em>your notes.</em></h2>
         <p className="lp-tutor__lead" data-reveal>
           Ask anything. Answers start streaming in a moment, use your own notes first and say which file they came from.

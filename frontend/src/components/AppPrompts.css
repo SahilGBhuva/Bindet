@@ -36,7 +36,7 @@
 .app-update__close:hover,
 .app-install__close:hover { background: var(--color-surface-hover); color: var(--color-text); }
 
-/* "Install bindit" in the phone menu sheet. */
+/* "Install bindet" in the phone menu sheet. */
 .app-install {
   display: flex;
   align-items: center;

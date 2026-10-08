@@ -19,11 +19,11 @@ const SESSION_KEY = AUTH_SESSION_KEY
 const LEGACY_SESSION_KEY = 'numi-auth-session'
 // The account whose study data is currently kept in this browser's storage.
 const DATA_OWNER_KEY = 'bindit-data-owner'
-// Every key bindit (and its earlier names) has written to localStorage.
+// Every key bindet (and its earlier names) has written to localStorage.
 const LOCAL_DATA_PREFIXES = ['bindit-', 'bindit:', 'bindet-', 'numi-', 'cac-']
 // Purely cosmetic preferences that are safe to keep across accounts. Anything
 // that reflects account data (important items, task tabs/notices) is cleared.
-// bindit:install-dismissed hides the "Install bindit" offer in the phone menu (lib/pwa.ts).
+// bindit:install-dismissed hides the "Install bindet" offer in the phone menu (lib/pwa.ts).
 const COSMETIC_KEYS = new Set<string>(['bindit:theme', 'bindit:sidebar:collapsed', 'bindit:sidebar:layout:v2', 'bindit:focus-text-size', 'bindit:install-dismissed'])
 // Device-level flags that aren't account data and must outlive a sign-out.
 const DEVICE_KEYS = new Set<string>(['bindit-reset-requested'])
@@ -87,7 +87,7 @@ export function loadAuthSession(): AuthSession | null {
 }
 
 /**
- * Removes everything bindit keeps in this browser for an account: the auth
+ * Removes everything bindet keeps in this browser for an account: the auth
  * session, notebook, avatar, study session, attempt history, student id and
  * the per-tab caches and the offline flashcards. In-memory caches listen for
  * ACCOUNT_DATA_CLEARED_EVENT.

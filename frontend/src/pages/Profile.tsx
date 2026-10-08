@@ -75,7 +75,7 @@ export function Profile({ session, onError }: ProfileProps) {
   const [peopleQuery, setPeopleQuery] = useState('')
   const [peopleResults, setPeopleResults] = useState<PersonSuggestion[]>([])
   const [searched, setSearched] = useState('')
-  // Signed in, but no bindit profile yet (a new Google account): no friend ID until it is set up.
+  // Signed in, but no bindet profile yet (a new Google account): no friend ID until it is set up.
   const [profileMissing, setProfileMissing] = useState(false)
   const [groupDialog, setGroupDialog] = useState<{ kind: GroupDialogKind; groupId: string } | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
@@ -213,7 +213,7 @@ export function Profile({ session, onError }: ProfileProps) {
 
   async function shareFriendId() {
     if (!profile?.friend_code) return
-    const share = { title: 'Add me on bindit', text: `Add me on bindit with friend ID ${profile.friend_code}`, url: window.location.origin }
+    const share = { title: 'Add me on bindet', text: `Add me on bindet with friend ID ${profile.friend_code}`, url: window.location.origin }
     try {
       if (navigator.share) await navigator.share(share)
       else {
@@ -282,7 +282,7 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session || !data.confirm('Send a safety report about this person?')) return
     try {
       await data.reportSocialUser(friendId, session.access_token)
-      say('Report sent. Thank you for helping keep bindit safe.')
+      say('Report sent. Thank you for helping keep bindet safe.')
     } catch {
       say('Could not send that report. Try again.', true)
     }

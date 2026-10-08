@@ -406,7 +406,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
             <fieldset className="practice__field">
               <legend className="practice__label">Time limit</legend>
               {data.sandboxed ? (
-                <p className="practice__hint">Untimed in this demo. In bindit, a test is timed (about 1.5 minutes a question) unless you choose untimed.</p>
+                <p className="practice__hint">Untimed in this demo. In bindet, a test is timed (about 1.5 minutes a question) unless you choose untimed.</p>
               ) : (
                 <div className="practice__time">
                   <div className="ui-segmented practice__segmented">

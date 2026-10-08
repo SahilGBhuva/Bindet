@@ -231,7 +231,7 @@ export function Home({ session }: { session: AuthSession | null }) {
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [profile, setProfile] = useState<Profile | null>(() => token ? data.getCachedProfile(token) : null)
-  // Signed in, but the server has no bindit profile for this account yet.
+  // Signed in, but the server has no bindet profile for this account yet.
   const [profileMissing, setProfileMissing] = useState(false)
   const [social, setSocial] = useState<FriendsHub | null>(() => token ? data.getCachedFriends(token) : null)
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? data.getCachedStudyGroups(token) : [])
@@ -471,7 +471,7 @@ export function Home({ session }: { session: AuthSession | null }) {
     },
     { key: 'test', tone: 'blue', icon: 'test', href: '#tools', title: 'Take a practice test', copy: 'A timed test from your notes' },
     { key: 'round', tone: 'orange', icon: 'bolt', href: '#games', title: 'Play a quick round', copy: 'Beat your best in 1, 2 or 5 minutes' },
-    { key: 'tutor', tone: 'teal', icon: 'chat', href: '#tutor', title: 'Ask the tutor', copy: 'Get unstuck on a problem' },
+    { key: 'tutor', tone: 'teal', icon: 'chat', href: '#tutor', title: 'Ask Otto', copy: 'Get unstuck on a problem' },
   ]
 
   function currentlyOn(studentId: string) {

@@ -90,7 +90,7 @@ function AuthBrand() {
   return (
     <span className="auth-brand">
       <BrandMark size={24} />
-      bindit
+      bindet
     </span>
   )
 }
@@ -547,7 +547,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       try {
         if (mode === 'reset') {
           await requestPasswordReset(trimmed)
-          setMessage(`If ${trimmed} has a bindit account, we sent it a link to set a new password.`)
+          setMessage(`If ${trimmed} has a bindet account, we sent it a link to set a new password.`)
         } else if (mode === 'login') {
           try {
             setSession(await signIn(trimmed, password))
@@ -737,7 +737,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               </p>
             ) : (
               <p className="auth-switch">
-                {mode === 'login' ? 'New to bindit?' : 'Already have an account?'}{' '}
+                {mode === 'login' ? 'New to bindet?' : 'Already have an account?'}{' '}
                 <button className="auth-text-btn" type="button" disabled={busy} onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}>{mode === 'login' ? 'Create an account' : 'Log in'}</button>
               </p>
             )}

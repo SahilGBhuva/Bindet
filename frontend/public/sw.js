@@ -1,5 +1,5 @@
 /*
- * bindit service worker: keeps the static app shell so the installed app opens offline.
+ * bindet service worker: keeps the static app shell so the installed app opens offline.
  *
  * What it caches: only files that are the same for every visitor — the page shell
  * (index.html, the legal pages), the hashed build files under /assets/, and the

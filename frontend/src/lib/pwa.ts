@@ -163,7 +163,7 @@ function subscribeInstall(listener: Listener) {
   return () => stops.forEach((stop) => stop())
 }
 
-/* How bindit can be installed here, if at all. */
+/* How bindet can be installed here, if at all. */
 export function useInstallOffer(): InstallOffer {
   return useSyncExternalStore(subscribeInstall, currentOffer, () => null)
 }

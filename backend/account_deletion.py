@@ -1,4 +1,4 @@
-"""Permanently delete a bindit account and everything that belongs to it.
+"""Permanently delete a bindet account and everything that belongs to it.
 
 delete_account_data() removes every row tied to the student in one database
 transaction (under a per-account advisory lock on Postgres), in an order that is

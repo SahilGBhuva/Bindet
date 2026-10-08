@@ -1,6 +1,6 @@
 /*
  * The organized "knowledge constellation": what a student's material looks like
- * once bindit has bound it together. Shared by the WebGL scene and its static
+ * once bindet has bound it together. Shared by the WebGL scene and its static
  * SVG fallback so both draw the same picture.
  *
  * Composition, left to right: a binder spine holding three courses (rings),

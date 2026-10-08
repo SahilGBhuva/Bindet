@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "bindit",
-  "short_name": "bindit",
+  "name": "bindet",
+  "short_name": "bindet",
   "description": "Turn your class notes into flashcards, quizzes, and a mastery map for every course.",
   "start_url": "/",
   "scope": "/",

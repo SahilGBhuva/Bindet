@@ -74,7 +74,7 @@ const PAGE_ICONS: { id: Screen; label: string }[] = [
   { id: 'goals', label: 'Tasks' },
   { id: 'stats', label: 'Project statistics' },
   { id: 'tools', label: 'Study' },
-  { id: 'tutor', label: 'Tutor' },
+  { id: 'tutor', label: 'Otto, your tutor' },
   { id: 'chat', label: 'Messages' },
   { id: 'profile', label: 'Friends & groups' },
 ]
@@ -197,7 +197,7 @@ function AppShell() {
     void recordDailyLogin(studentId, session?.access_token).catch(() => undefined)
   }, [session?.user.id, session?.access_token])
 
-  // A new account without a bindit profile (a first Google sign-in) is taken to Settings
+  // A new account without a bindet profile (a first Google sign-in) is taken to Settings
   // once per device to choose a name and username; Home and Friends & groups keep a
   // reminder card until it's done. The flag is a bindit- key, so signing out clears it.
   const accessToken = session?.access_token

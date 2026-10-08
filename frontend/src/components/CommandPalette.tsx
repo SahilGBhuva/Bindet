@@ -7,11 +7,11 @@ type Command = { id: string; screen: Screen; href: string; label: string; detail
 
 const COMMANDS: Command[] = [
   { id: 'new-task', screen: 'goals', href: '#goals?new', label: 'New task', detail: 'Add something with a due date', keywords: 'task todo homework assignment create add', group: 'Do' },
-  { id: 'ask-tutor', screen: 'tutor', href: '#tutor', label: 'Ask the tutor', detail: 'Get an explanation grounded in your notes', keywords: 'ai help explain question chat', group: 'Do' },
+  { id: 'ask-tutor', screen: 'tutor', href: '#tutor', label: 'Ask Otto', detail: 'Get an explanation grounded in your notes', keywords: 'ai tutor otto help explain question chat', group: 'Do' },
   { id: 'upload', screen: 'tools', href: '#tools', label: 'Add notes', detail: 'Upload a PDF, photo, or document to a unit', keywords: 'upload notes pdf photo image file', group: 'Do' },
   { id: 'home', screen: 'home', href: '#home', label: 'Home', detail: 'Your next step and what is due', keywords: 'dashboard overview today', group: 'Go to' },
   { id: 'tools', screen: 'tools', href: '#tools', label: 'Study', detail: 'Courses, units, notes, flashcards, and quizzes', keywords: 'courses units flashcards quiz practice tools', group: 'Go to' },
-  { id: 'tutor', screen: 'tutor', href: '#tutor', label: 'Tutor', detail: 'Conversations with your AI tutor', keywords: 'ai chat', group: 'Go to' },
+  { id: 'tutor', screen: 'tutor', href: '#tutor', label: 'Otto', detail: 'Conversations with Otto, your AI tutor', keywords: 'ai tutor otto chat', group: 'Go to' },
   { id: 'goals', screen: 'goals', href: '#goals', label: 'Tasks', detail: 'Everything due, by status', keywords: 'tasks assignments homework board todo due', group: 'Go to' },
   { id: 'progress', screen: 'progress', href: '#progress', label: 'Progress', detail: 'Mastery, XP, and streaks', keywords: 'stats xp streak mastery', group: 'Go to' },
   { id: 'chat', screen: 'chat', href: '#chat', label: 'Messages', detail: 'Study group conversations', keywords: 'groups friends messages chat', group: 'Go to' },
@@ -58,7 +58,7 @@ function Palette({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="command-backdrop" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose() }}>
-      <section className="command-menu" role="dialog" aria-modal="true" aria-label="Search bindit">
+      <section className="command-menu" role="dialog" aria-modal="true" aria-label="Search bindet">
         <div className="command-search">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
           <input

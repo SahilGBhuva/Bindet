@@ -675,7 +675,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       const reason = cardsResult.status === 'rejected' ? cardsResult.reason : null
       // Online: keep a copy of the unit's flashcards for offline study.
       if (result) void data.saveOfflineCards({ course, unit }, result)
-      // Offline (or bindit can't be reached at all): show the copy from the last time this unit was opened, if there is one.
+      // Offline (or bindet can't be reached at all): show the copy from the last time this unit was opened, if there is one.
       if (!result && !isAbortError(reason) && (reason instanceof OfflineError || reason instanceof TypeError || isOffline())) {
         const saved = await data.loadOfflineCards({ course, unit })
         if (signal.aborted) return
@@ -2574,7 +2574,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                           {quizResult.total_xp.toLocaleString()} XP total · answer streak {quizResult.streak}
                         </p>
                         <div className="tools__quiz-controls tools__result-actions">
-                          {quizResult.correct ? null : <a className="tools__tutor-link" href="#tutor">Ask the tutor about this</a>}
+                          {quizResult.correct ? null : <a className="tools__tutor-link" href="#tutor">Ask Otto about this</a>}
                           <button className="ui-button" type="button" onClick={() => void loadQuizQuestion()} disabled={quizBusy}>
                             Next question<ArrowIcon direction="right" />
                           </button>

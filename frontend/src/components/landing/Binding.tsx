@@ -4,7 +4,7 @@ import { useScrollProgress } from './motion'
 import { COURSE_TONE } from './story'
 
 /*
- * Connected: bindit's signature image. Loose pieces of four courses straighten
+ * Connected: bindet's signature image. Loose pieces of four courses straighten
  * out and violet threads bind each one to its unit, each unit to its course, and
  * every course into the binder. The threads only show relationships the product
  * really keeps: cards and questions come from a unit's notes, and units belong
