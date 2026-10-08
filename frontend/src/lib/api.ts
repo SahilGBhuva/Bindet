@@ -89,7 +89,8 @@ export type Profile = {
   login_streak: number
   best_login_streak: number
 }
-export type Friend = {
+/* A row of the weekly league (you and your friends). */
+export type LeaguePerson = {
   student_id: string
   username: string
   display_name: string
@@ -98,14 +99,30 @@ export type Friend = {
   streak: number
   active_today: boolean
   weekly_xp: number
+}
+/*
+ * Friend streak with one friend: consecutive days you both studied, counted from today (or
+ * from yesterday while today isn't shared yet), on your own calendar day.
+ * done: you both studied today. at_risk: a live streak today hasn't extended yet.
+ * broken: you had shared days, but the streak ended. none: never on the same day.
+ */
+export type FriendStreakStatus = 'done' | 'at_risk' | 'broken' | 'none'
+export type FriendStreakDay = { day: string; me: boolean; friend: boolean }
+export type Friend = LeaguePerson & {
   friend_streak: number
+  best_friend_streak: number
+  streak_status: FriendStreakStatus
+  me_today: boolean
+  friend_today: boolean
+  /* The last 14 days, oldest first, ending today. */
+  streak_days: FriendStreakDay[]
 }
 export type FriendRequest = { request_id: number; username: string; display_name: string; created_at: string }
 export type FriendQuest = { id: number; friend_id: string; friend_name: string; target_xp: number; progress_xp: number; status: string; expires_at: string }
 export type PersonSuggestion = { student_id: string; username: string; display_name: string; avatar_path: string; friend_code: string }
 export type SocialActivity = { id: number; student_id: string; username: string; display_name: string; xp: number; created_at: string; reaction_count: number; reacted: boolean }
 export type SocialNotification = { id: number; kind: string; message: string; is_read: boolean; created_at: string }
-export type FriendsHub = { friends: Friend[]; requests: FriendRequest[]; leaderboard: Friend[]; quests: FriendQuest[]; suggestions: PersonSuggestion[]; activity: SocialActivity[]; notifications: SocialNotification[] }
+export type FriendsHub = { friends: Friend[]; requests: FriendRequest[]; leaderboard: LeaguePerson[]; quests: FriendQuest[]; suggestions: PersonSuggestion[]; activity: SocialActivity[]; notifications: SocialNotification[] }
 export type StudyGroupMember = { student_id: string; username: string; display_name: string; avatar_path: string; role: 'owner' | 'member'; weekly_xp: number; joined_at: string }
 export type StudyGroupActivity = { id: number; student_id: string; display_name: string; xp: number; created_at: string }
 export type StudyGroup = {
@@ -755,6 +772,11 @@ export function answerFriendRequest(requestId: number, accept: boolean, accessTo
 
 export function removeFriend(friendId: string, accessToken: string) {
   return request(`/api/friends/${encodeURIComponent(friendId)}`, { method: 'DELETE' }, accessToken)
+}
+
+/* An in-app reminder to a friend who hasn't studied today (never email or push). Limited per friend per day. */
+export function nudgeFriend(friendId: string, accessToken: string) {
+  return request<{ nudged: boolean }>(`/api/friend-streaks/${encodeURIComponent(friendId)}/nudge`, { method: 'POST' }, accessToken)
 }
 
 export function startFriendQuest(friendId: string, accessToken: string) {

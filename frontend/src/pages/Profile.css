@@ -455,6 +455,99 @@
   min-width: 160px;
 }
 
+/* Friend streaks: a flame count on each friend, and a 14-day dot grid when it's opened. */
+
+.profile__friends-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-2) var(--space-5);
+}
+.profile__friends-head .profile__label { margin: 0; padding: 0; }
+.profile__friend-sort .ui-segmented__item { height: 26px; padding: 0 10px; font-size: var(--text-xs); }
+
+.profile__row-meta.is-your-turn { color: var(--color-orange-text); font-weight: var(--weight-medium); }
+
+.profile__streak-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  border: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.profile__streak-toggle svg,
+.profile__streak-number svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.profile__streak-toggle.is-zero { border-color: var(--color-border); background: var(--color-surface-sunken); color: var(--color-text-secondary); }
+.profile__streak-toggle:hover { border-color: var(--tone); }
+.profile__streak-toggle:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.profile__friend.is-open .profile__streak-toggle { border-color: var(--tone); }
+
+.profile__streak-detail {
+  margin: 0 var(--space-3) var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--tone-tint) 55%, var(--color-surface));
+}
+.profile__streak-summary { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px var(--space-3); margin: 0 0 var(--space-2); color: var(--color-text-secondary); font-size: var(--text-xs); }
+.profile__streak-number { display: inline-flex; align-items: center; gap: 4px; color: var(--tone-text); font-size: var(--text-md); font-weight: var(--weight-bold); }
+
+.profile__streak-grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.profile__streak-grid th,
+.profile__streak-grid td { padding: 3px 0; text-align: center; }
+.profile__streak-grid thead th { color: var(--color-text-tertiary); font-size: 10px; font-weight: var(--weight-medium); }
+.profile__streak-grid thead th.is-today { color: var(--tone-text); font-weight: var(--weight-bold); }
+.profile__streak-grid abbr { text-decoration: none; }
+.profile__streak-grid tbody th {
+  width: 52px;
+  overflow: hidden;
+  padding-right: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile__streak-grid thead td { width: 52px; }
+.profile__streak-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+/* You in the streak's orange, your friend in their own color (their row carries their tone). */
+.profile__streak-dot.is-on { border-color: var(--color-orange); background: var(--color-orange); }
+.profile__streak-dot.is-friend.is-on { border-color: var(--tone); background: var(--tone); }
+/* A day you both studied: the two dots share a band. */
+.profile__streak-grid td.is-shared { background: color-mix(in srgb, var(--color-orange) 14%, transparent); }
+.profile__streak-grid tbody tr:first-child td.is-shared { border-radius: 8px 8px 0 0; }
+.profile__streak-grid tbody tr:last-child td.is-shared { border-radius: 0 0 8px 8px; }
+
+.profile__streak-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin-top: var(--space-2); }
+.profile__streak-status { color: var(--color-text-secondary); font-size: var(--text-xs); }
+
 .profile__friends-empty {
   padding-top: var(--space-6);
   border-top: 1px solid var(--color-border);
@@ -623,6 +716,10 @@
 
   .profile__block .profile__label { padding: 0 var(--space-4); }
   .profile__block .ui-row { padding-inline: var(--space-4) var(--space-2); }
+  .profile__friends-head { padding-inline: var(--space-4) var(--space-2); }
+  .profile__streak-detail { margin-inline: var(--space-3) var(--space-2); padding-inline: var(--space-3); }
+  .profile__streak-grid tbody th, .profile__streak-grid thead td { width: 44px; }
+  .profile__streak-dot { width: 10px; height: 10px; }
   .profile__friend-forms { padding: var(--space-4); }
   .profile__record,
   .profile__quest,
@@ -635,3 +732,6 @@
 @container (max-width: 560px) {
   .profile__group-columns { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Friend rows: the streak line wraps rather than cutting off in the narrow column. */
+.profile__friend .profile__row-meta { white-space: normal; }

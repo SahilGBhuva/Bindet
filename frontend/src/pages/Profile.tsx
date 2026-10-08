@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import { parseServerTime, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type StudyGroup } from '../lib/api'
+import { parseServerTime, type Friend, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type StudyGroup } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
 import type { Course } from '../lib/types'
@@ -8,6 +8,8 @@ import { withCourseTones } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
+import { Icons } from '../components/Icons'
+import { canNudge, firstName, rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
 import './Profile.css'
 
 /*
@@ -80,6 +82,10 @@ export function Profile({ session, onError }: ProfileProps) {
   const [groupDialog, setGroupDialog] = useState<{ kind: GroupDialogKind; groupId: string } | null>(null)
   const [dialogBusy, setDialogBusy] = useState(false)
   const [dialogError, setDialogError] = useState('')
+  // Friends list order, the friend whose streak detail is open, and reminders sent this visit.
+  const [friendSort, setFriendSort] = useState<'streak' | 'name'>('streak')
+  const [openFriend, setOpenFriend] = useState<string | null>(null)
+  const [nudged, setNudged] = useState<Set<string>>(() => new Set())
 
   // A different account (or signing out) swaps to that account's cached data during render.
   if (seenToken !== token) {
@@ -316,6 +322,21 @@ export function Profile({ session, onError }: ProfileProps) {
     }
   }
 
+  async function nudge(friend: Friend) {
+    if (!session) return
+    const name = firstName(friend.display_name)
+    setSocialBusy(true)
+    try {
+      await data.nudgeFriend(friend.student_id, session.access_token)
+      setNudged((current) => new Set(current).add(friend.student_id))
+      say(`Reminder sent. ${name} will see it in their notifications.`)
+    } catch (error) {
+      say(error instanceof Error ? error.message : `Could not remind ${name}. Try again later.`, true)
+    } finally {
+      setSocialBusy(false)
+    }
+  }
+
   async function unfriend(friendId: string) {
     if (!session || !data.confirm('Remove this friend?')) return
     setSocialBusy(true)
@@ -455,6 +476,7 @@ export function Profile({ session, onError }: ProfileProps) {
   const groupsLoading = Boolean(session) && groups === null && !socialFailed
   const people = peopleResults.length ? peopleResults : social?.suggestions ?? []
   const unread = social?.notifications.filter((item) => !item.is_read).length ?? 0
+  const friendList = social ? (friendSort === 'streak' ? rankFriendStreaks(social.friends) : social.friends.toSorted((a, b) => a.display_name.localeCompare(b.display_name))) : []
   const failedAlert = socialFailed && !social ? (
     <div className="ui-alert" role="alert">
       <span>Friends and groups could not be loaded.</span>
@@ -847,28 +869,61 @@ export function Profile({ session, onError }: ProfileProps) {
                 <div className="profile__block"><SkeletonRows rows={3} /></div>
               ) : social?.friends.length ? (
                 <div className="profile__block">
-                  <h3 className="profile__label">Your friends</h3>
-                  <ul className="ui-list">
-                    {social.friends.map((friend) => (
-                      <PersonRow
-                        key={friend.student_id}
-                        name={friend.display_name}
-                        label={friend.display_name}
-                        meta={`${friend.friend_streak} day friend streak · ${friend.weekly_xp} XP this week`}
-                      >
-                        <button className="ui-button ui-button--sm" type="button" onClick={() => void beginQuest(friend.student_id)} disabled={socialBusy} aria-label={`Start a quest with ${friend.display_name}`}>Quest</button>
-                        <details className="profile__menu">
-                          <summary aria-label={`Options for ${friend.display_name}`}>
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
-                          </summary>
-                          <div className="ui-menu profile__menu-list">
-                            <button className="ui-menu__item" type="button" onClick={(event) => { closeMenu(event); void unfriend(friend.student_id) }}>Remove friend</button>
-                            <button className="ui-menu__item" type="button" onClick={(event) => { closeMenu(event); void reportFriend(friend.student_id) }}>Report</button>
-                            <button className="ui-menu__item ui-menu__item--danger" type="button" onClick={(event) => { closeMenu(event); void blockFriend(friend.student_id) }}>Block</button>
+                  <div className="profile__friends-head">
+                    <h3 className="profile__label" id="your-friends-title">Your friends</h3>
+                    <div className="ui-segmented profile__friend-sort" role="group" aria-label="Sort friends">
+                      <button type="button" className="ui-segmented__item" aria-pressed={friendSort === 'streak'} onClick={() => setFriendSort('streak')}>Streak</button>
+                      <button type="button" className="ui-segmented__item" aria-pressed={friendSort === 'name'} onClick={() => setFriendSort('name')}>Name</button>
+                    </div>
+                  </div>
+                  <ul className="ui-list" aria-labelledby="your-friends-title">
+                    {friendList.map((friend) => {
+                      const open = openFriend === friend.student_id
+                      const detailId = `friend-streak-${friend.student_id}`
+                      const alive = friend.friend_streak > 0
+                      return (
+                        <li key={friend.student_id} className={`profile__friend${open ? ' is-open' : ''}`}>
+                          <div className="ui-row profile__person">
+                            <span className={`ui-avatar ${toneClass(toneForName(friend.display_name))}`} aria-hidden="true">{initials(friend.display_name)}</span>
+                            <span className="ui-row__main">
+                              <span className="ui-row__title">{friend.display_name}</span>
+                              <span className={`profile__row-meta${friend.friend_today && !friend.me_today ? ' is-your-turn' : ''}`}>{streakStatusLine(friend)}</span>
+                            </span>
+                            <button
+                              type="button"
+                              className={`profile__streak-toggle ui-tone--orange${alive ? '' : ' is-zero'}`}
+                              aria-expanded={open}
+                              aria-controls={detailId}
+                              aria-label={`Friend streak with ${friend.display_name}: ${streakDays(friend.friend_streak)}. ${open ? 'Hide' : 'Show'} the last 14 days`}
+                              title="Friend streak"
+                              onClick={() => setOpenFriend(open ? null : friend.student_id)}
+                            >
+                              {Icons.flame}<span>{friend.friend_streak}</span>
+                            </button>
+                            <button className="ui-button ui-button--sm" type="button" onClick={() => void beginQuest(friend.student_id)} disabled={socialBusy} aria-label={`Start a quest with ${friend.display_name}`}>Quest</button>
+                            <details className="profile__menu">
+                              <summary aria-label={`Options for ${friend.display_name}`}>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+                              </summary>
+                              <div className="ui-menu profile__menu-list">
+                                <button className="ui-menu__item" type="button" onClick={(event) => { closeMenu(event); void unfriend(friend.student_id) }}>Remove friend</button>
+                                <button className="ui-menu__item" type="button" onClick={(event) => { closeMenu(event); void reportFriend(friend.student_id) }}>Report</button>
+                                <button className="ui-menu__item ui-menu__item--danger" type="button" onClick={(event) => { closeMenu(event); void blockFriend(friend.student_id) }}>Block</button>
+                              </div>
+                            </details>
                           </div>
-                        </details>
-                      </PersonRow>
-                    ))}
+                          {open ? (
+                            <FriendStreakDetail
+                              id={detailId}
+                              friend={friend}
+                              nudged={nudged.has(friend.student_id)}
+                              busy={socialBusy}
+                              onNudge={() => void nudge(friend)}
+                            />
+                          ) : null}
+                        </li>
+                      )
+                    })}
                   </ul>
                 </div>
               ) : null}
@@ -1116,6 +1171,71 @@ function PersonRow({
       </span>
       {children}
     </li>
+  )
+}
+
+const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'narrow', timeZone: 'UTC' })
+const longDay = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
+
+/* The last 14 days as two rows of dots, you over your friend; a day both studied is joined by a thread. */
+function FriendStreakDetail({ id, friend, nudged, busy, onNudge }: {
+  id: string
+  friend: Friend
+  nudged: boolean
+  busy: boolean
+  onNudge: () => void
+}) {
+  const name = firstName(friend.display_name)
+  const tone = toneClass(toneForName(friend.display_name))
+  const days = friend.streak_days.map((item) => ({ ...item, date: new Date(`${item.day}T00:00:00Z`) }))
+  return (
+    <div className="profile__streak-detail ui-tone--orange" id={id}>
+      <p className="profile__streak-summary">
+        <span className="profile__streak-number">{Icons.flame}{streakDays(friend.friend_streak)}</span>
+        <span>{friend.best_friend_streak > friend.friend_streak ? `Best: ${streakDays(friend.best_friend_streak)}` : friend.friend_streak ? 'Your best yet' : 'No streak yet'}</span>
+      </p>
+      <table className="profile__streak-grid">
+        <caption className="sr-only">Who studied on each of the last 14 days</caption>
+        <thead>
+          <tr>
+            <td />
+            {days.map((item, index) => (
+              <th key={item.day} scope="col" className={index === days.length - 1 ? 'is-today' : undefined}>
+                <abbr title={index === days.length - 1 ? `Today, ${longDay.format(item.date)}` : longDay.format(item.date)}>{weekday.format(item.date)}</abbr>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row">You</th>
+            {days.map((item) => (
+              <td key={item.day} className={item.me && item.friend ? 'is-shared' : undefined}>
+                <span className={`profile__streak-dot${item.me ? ' is-on' : ''}`} />
+                <span className="sr-only">{item.me ? 'studied' : 'no study'}</span>
+              </td>
+            ))}
+          </tr>
+          <tr className={tone}>
+            <th scope="row">{name}</th>
+            {days.map((item) => (
+              <td key={item.day} className={item.me && item.friend ? 'is-shared' : undefined}>
+                <span className={`profile__streak-dot is-friend${item.friend ? ' is-on' : ''}`} />
+                <span className="sr-only">{item.friend ? 'studied' : 'no study'}</span>
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+      <div className="profile__streak-foot">
+        <span className="profile__streak-status">{streakStatusLine(friend)}</span>
+        {canNudge(friend) ? (
+          <button className="ui-button ui-button--sm profile__nudge" type="button" disabled={busy || nudged} onClick={onNudge}>
+            {nudged ? 'Reminder sent' : `Remind ${name} to study`}
+          </button>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

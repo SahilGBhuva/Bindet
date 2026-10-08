@@ -398,6 +398,57 @@
 .home-rows__skeleton { height: 22px; margin: 6px 0; }
 .home-rows__empty { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
 
+/* ---------- Friend streaks: orange with a flame, friends in their own colors ---------- */
+
+.home-streaks {
+  margin-top: 18px;
+  padding: 14px 18px 12px;
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--color-border));
+  border-radius: 14px;
+  background: var(--color-surface);
+}
+.home-streaks__head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.home-streaks__icon { width: 30px; height: 30px; border-radius: var(--radius-sm); }
+.home-streaks__icon .home-icon { width: 16px; height: 16px; }
+.home-streaks__title { margin: 0; font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.home-streaks__all { margin-left: auto; font-size: var(--text-sm); white-space: nowrap; }
+
+.home-streaks__list { display: grid; margin: 0; padding: 0; list-style: none; }
+.home-streak {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-md);
+}
+.home-streak + .home-streak { border-top: 1px solid var(--color-border); }
+/* A friend studied and it's your turn: the one row that asks for action gets the tint. */
+.home-streak.is-your-turn { background: var(--tone-tint); border-top-color: transparent; }
+.home-streak.is-your-turn + .home-streak { border-top-color: transparent; }
+.home-streak__text { display: grid; gap: 1px; min-width: 0; }
+.home-streak__title { overflow: hidden; color: var(--color-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.home-streak__status { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
+.home-streak__status .home-icon { flex: none; }
+.home-streak.is-your-turn .home-streak__status { color: var(--tone-text); font-weight: var(--weight-medium); }
+.home-streak.is-done .home-streak__status { color: var(--color-green-text); }
+.home-streak__status .home-icon { width: 13px; height: 13px; }
+.home-streak__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 44px;
+  justify-content: flex-end;
+  color: var(--tone-text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+.home-streak__count .home-icon { width: 16px; height: 16px; stroke-width: 1.6; }
+.home-streak__count.is-zero { color: var(--color-text-tertiary); font-weight: var(--weight-medium); }
+
 /* ---------- Right column: team ---------- */
 
 .home-team { min-width: 0; padding-left: 22px; border-left: 1px solid var(--ink-soft); }
@@ -600,6 +651,7 @@
   .home-fold__skeleton { flex: 0 0 min(220px, 78%); height: 150px; }
 
   .home-deadlines { padding: 12px 14px; }
+  .home-streaks { padding: 12px 14px; }
   .home-row { grid-template-columns: 70px minmax(0, 1fr) auto; gap: 10px; }
   .home-row .home-badge { width: 70px; }
   .home-row__leader { display: none; }

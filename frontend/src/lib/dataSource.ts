@@ -82,6 +82,8 @@ export type DataSource = {
   getPracticeTest: typeof api.getPracticeTest
   submitPracticeTest: typeof api.submitPracticeTest
   listPracticeTests: typeof api.listPracticeTests
+  // Friend streak reminder (in-app only). Locked in the demo.
+  nudgeFriend: typeof api.nudgeFriend
 }
 
 export const realData: DataSource = {
@@ -142,6 +144,7 @@ export const realData: DataSource = {
   getPracticeTest: api.getPracticeTest,
   submitPracticeTest: api.submitPracticeTest,
   listPracticeTests: api.listPracticeTests,
+  nudgeFriend: api.nudgeFriend,
 }
 
 const DataContext = createContext<DataSource>(realData)
