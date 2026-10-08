@@ -37,6 +37,7 @@ import auth
 import database
 import feedback
 import flashcards
+import help_bot
 import questions
 import note_ingestion
 import note_store
@@ -3312,6 +3313,30 @@ def send_feedback(data: FeedbackCreate, authorization: Annotated[str | None, Hea
     practice_limit(owner, "feedback_day", FEEDBACK_PER_DAY, 1440, "Thanks — you’ve sent a lot of feedback today. Try again tomorrow.")
     device = data.device.model_dump() if data.device else None
     return feedback.save(owner, data.category, data.message, device, data.page)
+
+
+class HelpBotQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=help_bot.QUESTION_MAX)
+
+
+@app.get("/api/help-bot")
+def help_bot_usage(authorization: Annotated[str | None, Header()] = None):
+    """How many AI help answers the student has left (the app shows it in the help panel)."""
+    return help_bot.usage(auth.authenticated_user(authorization)["id"])
+
+
+@app.post("/api/help-bot")
+def ask_help_bot(data: HelpBotQuestion, authorization: Annotated[str | None, Header()] = None):
+    """"How do I…" questions the app's local FAQ couldn't answer. Signed-in only; see help_bot.py for the limits."""
+    student_id = auth.authenticated_user(authorization)["id"]
+    try:
+        question = checked_instructions(data.question, student_id, help_bot.OP)
+    except HTTPException:
+        return help_bot.blocked(student_id, data.question)
+    if not question:
+        raise HTTPException(status_code=400, detail={"code": "empty_question", "message": "Type a question first."})
+    return help_bot.answer(student_id, question, spend_global_ai_call)
 
 
 def admin_emails() -> set[str]:

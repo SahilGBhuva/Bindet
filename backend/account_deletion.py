@@ -38,6 +38,7 @@ import ai_cache
 import database
 import feedback
 import flashcards
+import help_bot
 import note_store
 import practice
 import practice_tests
@@ -61,6 +62,7 @@ def init_all() -> None:
     practice_tests.init_practice()
     practice.init_practice()
     feedback.init_feedback()
+    help_bot.init_help_bot()
 
 
 def _now() -> datetime:

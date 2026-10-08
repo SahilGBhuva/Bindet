@@ -67,6 +67,8 @@ OPERATIONS: dict[str, dict[str, Any]] = {
     "extract_notes": {"models": ("vision",), "max_tokens": 2000, "timeout": max(OPENROUTER_VISION_TIMEOUT, 12.0), "temperature": 0},
     "generate_test": {"models": ("text",), "max_tokens": 4200, "timeout": PRACTICE_TEST_TIMEOUT, "temperature": 0.3},
     "grade_test": {"models": ("text",), "max_tokens": 1600, "timeout": PRACTICE_GRADE_TIMEOUT, "temperature": 0.05},
+    # "How to use bindet" help bot (help_bot.py): single turn, three short sentences, fixed knowledge.
+    "help_bot": {"models": ("text",), "max_tokens": 200, "timeout": min(OPENROUTER_TIMEOUT, 8.0), "temperature": 0.1},
 }
 
 
