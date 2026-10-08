@@ -1,0 +1,184 @@
+/*
+ * The help bot: a small corner button and a compact floating panel. Floating layers
+ * cast --shadow-popover; everything else uses the shared tokens, so both themes work.
+ * Stacking: under the phone tab bar and menu sheet (29–30), drawers (39+) and dialogs (50).
+ */
+
+.helpbot__fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 27;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 14px 0 11px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-popover);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-instant) var(--ease-standard);
+}
+.helpbot__fab:hover { background: var(--color-surface-hover); }
+.helpbot__fab:active { transform: translateY(1px); }
+.helpbot__fab:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.helpbot__fab.is-open { border-color: var(--color-brand); }
+.helpbot__fab svg { width: 20px; height: 20px; fill: none; stroke: var(--color-brand-text); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.helpbot__panel {
+  position: fixed;
+  right: 20px;
+  bottom: 72px;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(600px, calc(100vh - 104px));
+  max-height: min(600px, calc(100dvh - 104px));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  box-shadow: var(--shadow-popover);
+  outline: none;
+  overflow: hidden;
+  animation: ui-pop var(--duration-base) var(--ease-out);
+}
+.helpbot__panel--loading { gap: var(--space-3); padding: var(--space-5); }
+.helpbot__panel--loading .ui-skeleton { height: 18px; border-radius: var(--radius-sm); }
+.helpbot__panel--loading .ui-skeleton:last-child { height: 120px; }
+
+.helpbot__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+.helpbot__title { margin: 0; font-family: var(--font-serif); font-size: var(--text-xl); font-weight: var(--weight-regular); line-height: var(--leading-tight); }
+.helpbot__intro { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.helpbot__close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin: -2px -4px 0 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.helpbot__close:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.helpbot__close:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.helpbot__close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+.helpbot__body {
+  position: relative;
+  display: grid;
+  gap: var(--space-4);
+  min-height: 0;
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.helpbot__log { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
+.helpbot__turn { display: grid; gap: var(--space-2); min-width: 0; }
+.helpbot__question {
+  justify-self: end;
+  max-width: 88%;
+  margin: 0;
+  padding: 7px 11px;
+  border-radius: var(--radius-md);
+  background: var(--color-brand-tint);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.helpbot__answer { display: grid; gap: var(--space-2); min-width: 0; }
+.helpbot__answer-text { margin: 0; color: var(--color-text); font-size: var(--text-base); line-height: var(--leading-normal); overflow-wrap: anywhere; }
+.helpbot__links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; }
+.helpbot__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-brand-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.helpbot__link:hover { background: var(--color-surface-hover); }
+.helpbot__link:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.helpbot__link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.helpbot__badge { color: var(--color-text-tertiary); font-size: var(--text-xs); }
+
+.helpbot__thinking { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+.helpbot__suggest { display: grid; gap: var(--space-2); }
+.helpbot__label { margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.helpbot__chips { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.helpbot__chip {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
+}
+.helpbot__chip:hover:not(:disabled) { border-color: var(--color-border-strong); background: var(--color-surface-hover); }
+.helpbot__chip:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
+.helpbot__chip:disabled { opacity: .5; cursor: not-allowed; }
+
+.helpbot__form { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-4); border-top: 1px solid var(--color-border); }
+.helpbot__row { display: flex; gap: var(--space-2); min-width: 0; }
+.helpbot__input { flex: 1; min-width: 0; }
+.helpbot__send { flex: none; }
+.helpbot__usage { display: flex; justify-content: space-between; gap: var(--space-2); margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); }
+.helpbot__count { flex: none; font-variant-numeric: tabular-nums; }
+.helpbot__error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); }
+
+/* Phones: icon-only button above the tab bar; the panel is a sheet just above it (or the keyboard). */
+@media (max-width: 860px) {
+  .helpbot__fab {
+    right: calc(16px + env(safe-area-inset-right));
+    bottom: calc(var(--phone-tabbar) + 12px);
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  .helpbot__fab-label { display: none; }
+  /* The on-screen keyboard is open for some other field: keep the corner clear. */
+  :root.is-typing .helpbot__fab { display: none; }
+  .helpbot__panel {
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(var(--phone-tabbar) + 8px + var(--keyboard-inset, 0px));
+    left: calc(12px + env(safe-area-inset-left));
+    width: auto;
+    max-height: calc(100dvh - var(--phone-topbar) - var(--phone-tabbar) - var(--keyboard-inset, 0px) - 20px);
+  }
+  .helpbot__head { padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); }
+  .helpbot__body { padding: var(--space-3) var(--space-4); }
+  .helpbot__form { padding: var(--space-3) var(--space-4); }
+  .helpbot__close { width: 44px; height: 44px; margin: -6px -6px 0 0; }
+  .helpbot__chip { min-height: 44px; }
+}

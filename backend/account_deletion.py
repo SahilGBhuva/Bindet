@@ -39,6 +39,7 @@ import ai_cache
 import database
 import feedback
 import flashcards
+import help_bot
 import note_store
 import onboarding
 import practice
@@ -64,6 +65,7 @@ def init_all() -> None:
     practice.init_practice()
     feedback.init_feedback()
     onboarding.init_onboarding()
+    help_bot.init_help_bot()
 
 
 def _now() -> datetime:

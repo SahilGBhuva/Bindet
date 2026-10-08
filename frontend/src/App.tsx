@@ -3,6 +3,7 @@ import { AuthGate } from './components/AuthGate'
 import { OfflineNotice, UpdatePrompt } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
 import { GetStarted } from './components/onboarding/GetStarted'
+import { HelpBot } from './components/HelpBot'
 import { useAuth } from './lib/AuthContext'
 import { getStudyGroups, recordDailyLogin } from './lib/api'
 import { cachedSetup, getOnboarding, rememberSetupDone, saveOnboarding } from './lib/onboarding'
@@ -253,6 +254,7 @@ function AppShell() {
       </main>
       {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       <CommandPalette open={commandOpen} onClose={closeCommand} />
+      {session && !adminRoute ? <HelpBot screen={navScreen} session={session} /> : null}
     </div>
   )
 }

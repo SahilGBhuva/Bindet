@@ -41,7 +41,7 @@ AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation,
 # much higher burst cap so a runaway loop still can't spend without bound.
 OWNER_AI_PER_MINUTE = 120
 
-AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes", "/api/practice-tests")
+AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes", "/api/practice-tests", "/api/help-bot")
 # /api/auth/config only returns public values (the Supabase URL and anon key) and every
 # page load asks for it, so it is never limited.
 EXEMPT_PATHS = ("/api/health", "/api/auth/config")

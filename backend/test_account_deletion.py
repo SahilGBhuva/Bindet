@@ -21,6 +21,7 @@ import auth
 import database
 import feedback
 import flashcards
+import help_bot
 import main
 import note_store
 import onboarding
@@ -47,7 +48,7 @@ CONFIRM = {"confirm": "DELETE MY ACCOUNT"}
 ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
-    practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata,
+    practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
 )
 
 
