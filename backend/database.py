@@ -275,6 +275,7 @@ study_tasks = Table(
 # Policies live in supabase/migrations; with RLS on and no policy, access is
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
+    "account_onboarding",
     "cache_refs",
     "extraction_cache",
     "flashcard_cache",
@@ -325,6 +326,7 @@ RLS_TABLES = (
 # client-facing RLS policies (study_group_members) or read by the browser
 # (study_notes) must not be listed here.
 CLIENT_REVOKED_TABLES = (
+    "account_onboarding",
     "cache_refs",
     "extraction_cache",
     "feedback",

@@ -40,6 +40,7 @@ import flashcards
 import questions
 import note_ingestion
 import note_store
+import onboarding
 import practice
 import practice_tests
 import rate_limit
@@ -1985,6 +1986,42 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
     return profile
 
+
+
+class OnboardingSteps(BaseModel):
+    notes: bool = False
+    flashcards: bool = False
+    quiz: bool = False
+    tutor: bool = False
+
+
+class OnboardingResponse(BaseModel):
+    setup_done: bool
+    checklist_dismissed: bool
+    tracked: bool
+    has_profile: bool
+    steps: OnboardingSteps
+
+
+class OnboardingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    setup_done: bool | None = None
+    checklist_dismissed: bool | None = None
+
+
+@app.get("/api/account/onboarding", response_model=OnboardingResponse)
+def get_onboarding(authorization: Annotated[str | None, Header()] = None):
+    """The first-run setup state and which "Get started" steps the account's data shows as done."""
+    user = auth.authenticated_user(authorization)
+    return onboarding.get_state(user["id"])
+
+
+@app.put("/api/account/onboarding", response_model=OnboardingResponse)
+def update_onboarding(data: OnboardingUpdate, authorization: Annotated[str | None, Header()] = None):
+    """Marks the welcome setup finished or skipped, or hides the "Get started" checklist."""
+    user = auth.authenticated_user(authorization)
+    limit_action(user["id"], "onboarding_update", 30)
+    return onboarding.update_state(user["id"], data.setup_done, data.checklist_dismissed)
 
 ACCOUNT_DELETE_PHRASE = "DELETE MY ACCOUNT"
 ACCOUNT_DELETE_PER_HOUR = 5

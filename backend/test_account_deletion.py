@@ -23,6 +23,7 @@ import feedback
 import flashcards
 import main
 import note_store
+import onboarding
 import practice
 import practice_tests
 import questions
@@ -46,7 +47,7 @@ CONFIRM = {"confirm": "DELETE MY ACCOUNT"}
 ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
-    practice.practice_metadata, feedback.feedback_metadata,
+    practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata,
 )
 
 
@@ -122,6 +123,7 @@ class AccountDeletionTests(unittest.TestCase):
         practice_tests.reset_practice()
         practice.reset_practice()
         feedback.reset_feedback()
+        onboarding.reset_onboarding()
         with database.engine().begin() as connection:
             connection.execute(delete(note_store.notes))
         rate_limit.limiter.reset()
@@ -231,6 +233,8 @@ class AccountDeletionTests(unittest.TestCase):
         self.received = practice.create_challenge(SAM, to_id=ALEX, course="Bio", unit="Cells", length_s=60, mode="self",
                                                   card_ids=[f"card-{SAM[:8]}"])
         feedback.save(ALEX, "bug", "The timer froze", {"browser": "Safari 18", "os": "iOS"}, "games")
+        onboarding.update_state(ALEX, setup_done=True)
+        onboarding.update_state(SAM, setup_done=True, checklist_dismissed=True)
 
     # --- helpers --------------------------------------------------------------------
 
@@ -273,7 +277,7 @@ class AccountDeletionTests(unittest.TestCase):
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
                      "practice_tests", "practice_test_cache",
-                     "practice_rounds", "practice_bests", "practice_challenges", "feedback"):
+                     "practice_rounds", "practice_bests", "practice_challenges", "feedback", "account_onboarding"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
