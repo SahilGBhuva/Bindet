@@ -88,18 +88,24 @@ export function GetStarted({ session }: { session: AuthSession }) {
         <ol className="get-started__list">
           {ITEMS.map((item, index) => {
             const done = state.steps[item.key]
+            const next = item.key === nextKey
             return (
-              <li key={item.key} className={`get-started__item${done ? ' is-done' : ''}${item.key === nextKey ? ' is-next' : ''}`}>
+              <li key={item.key} className={`get-started__item${done ? ' is-done' : ''}${next ? ' is-next' : ''}`}>
                 <span className="get-started__mark" aria-hidden="true">{done ? <CheckIcon /> : index + 1}</span>
-                <span className="get-started__text">
-                  <strong>{item.title}{done ? <span className="sr-only">, done</span> : null}</strong>
-                  {done ? null : <span>{item.copy}</span>}
-                </span>
-                {done ? null : (
-                  <a className={`ui-button ui-button--sm get-started__go${item.key === nextKey ? ' ui-button--primary' : ''}`} href={item.href}>
-                    {item.action}
+                {done ? (
+                  <span className="get-started__text"><strong>{item.title}<span className="sr-only">, done</span></strong></span>
+                ) : (
+                  // The whole row opens the step; the next step also gets the one ink button.
+                  <a className="get-started__text get-started__link" href={item.href}>
+                    <strong>{item.title}</strong>
+                    <span>{item.copy}</span>
                   </a>
                 )}
+                {next ? (
+                  <a className="ui-button ui-button--sm ui-button--primary get-started__go" href={item.href} aria-hidden="true" tabIndex={-1}>
+                    {item.action}
+                  </a>
+                ) : done ? null : <span className="get-started__chevron" aria-hidden="true">›</span>}
               </li>
             )
           })}

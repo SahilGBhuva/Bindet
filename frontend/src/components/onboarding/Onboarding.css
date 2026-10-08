@@ -97,8 +97,7 @@
   line-height: 1.05;
   letter-spacing: -.01em;
 }
-.onb-title:focus { outline: none; }
-.onb-title:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 4px; border-radius: var(--radius-xs); }
+.onb-title:focus { outline: none; } /* focused only to announce the new step; it is not a control */
 
 .onb-lead { margin: 0 0 6px; color: var(--color-text-secondary); font-size: var(--text-md); line-height: 1.5; }
 

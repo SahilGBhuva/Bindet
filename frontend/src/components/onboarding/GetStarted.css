@@ -43,13 +43,19 @@
 .get-started__text span { color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.4; }
 .get-started__item.is-done .get-started__text strong { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
 
-.get-started__go { flex: none; }
+.get-started__link { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
+.get-started__link:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+/* The row is the target: its link stretches over the whole row. */
+.get-started__item { position: relative; }
+.get-started__link::after { content: ""; position: absolute; inset: 0; }
+.get-started__go { position: relative; z-index: 1; flex: none; }
+.get-started__chevron { flex: none; color: var(--color-text-tertiary); font-size: 20px; line-height: 1; }
 .get-started__error { margin: 8px 0; color: var(--color-danger); font-size: var(--text-sm); }
 
 /* Narrow: the button drops under the text, full width, thumb-sized. */
 @container get-started (max-width: 480px) {
   .get-started__item { flex-wrap: wrap; }
-  .get-started__text { flex-basis: calc(100% - 40px); }
   .get-started__go { flex-basis: calc(100% - 40px); height: 44px; margin-left: 40px; font-size: var(--text-sm); }
+  .get-started__item { min-height: 64px; }
   .get-started__hide { height: 44px; padding: 0 14px; }
 }
