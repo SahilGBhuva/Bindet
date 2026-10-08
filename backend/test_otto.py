@@ -185,6 +185,34 @@ class TitleTests(OttoTestCase):
         # Compare-and-set on the automatic title, also for any other caller.
         self.assertFalse(tutor.set_auto_title("alex", conversation["id"], conversation["title"], "Other"))
 
+    def test_a_rename_before_the_first_real_reply_is_kept(self):
+        # Opened with small talk, renamed, then the first real question: the student's name stays.
+        events, _ = self.send("alex", content="hey otto")
+        conversation_id = events[0][1]["conversation"]["id"]
+        tutor.rename_conversation("alex", conversation_id, "My bio cram")
+        model = FakeModel(title="Cell membrane transport")
+        events, _ = self.send("alex", content=LONG, conversation_id=conversation_id, model=model)
+        self.assertNotIn("title", [name for name, _ in events])
+        self.assertEqual(model.title_calls(), [])
+        self.assertEqual(tutor.get_conversation("alex", conversation_id)["title"], "My bio cram")
+
+    def test_regenerating_the_first_reply_keeps_a_renamed_or_ai_title(self):
+        events, _ = self.send("alex", content=LONG, model=FakeModel(title="Photosynthesis energy flow"))
+        conversation_id = events[0][1]["conversation"]["id"]
+        tutor.rename_conversation("alex", conversation_id, "My bio cram")
+        model = FakeModel(title="Something else entirely")
+        events, _ = self.send("alex", content="x", conversation_id=conversation_id, regenerate=True, model=model)
+        self.assertNotIn("title", [name for name, _ in events])
+        self.assertEqual(model.title_calls(), [])
+        self.assertEqual(tutor.get_conversation("alex", conversation_id)["title"], "My bio cram")
+        # Not renamed: the AI title from the first reply stays too, with no new title call.
+        events, _ = self.send("sam", content=LONG, model=FakeModel(title="Photosynthesis energy flow"))
+        conversation_id = events[0][1]["conversation"]["id"]
+        model = FakeModel(title="Something else entirely")
+        self.send("sam", content="x", conversation_id=conversation_id, regenerate=True, model=model)
+        self.assertEqual(model.title_calls(), [])
+        self.assertEqual(tutor.get_conversation("sam", conversation_id)["title"], "Photosynthesis energy flow")
+
     def test_rename_endpoint(self):
         events, _ = self.send("alex")
         conversation_id = events[0][1]["conversation"]["id"]

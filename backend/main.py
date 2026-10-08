@@ -2074,7 +2074,13 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
     retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
     # The first real reply names the conversation; Otto's small-talk replies don't count.
-    first_reply = not any(item["role"] == "assistant" and item.get("model_tier") != "small_talk" for item in recent)
+    # Only while the title is still an automatic one (the default, or the heuristic title of one of the
+    # student's turns): a title the student chose, or the AI title a regenerated first reply already
+    # has, is never replaced, and costs no title call.
+    automatic_titles = {ai_tutor.DEFAULT_TITLE, ai_tutor.heuristic_title(content)[:80],
+                        *(ai_tutor.heuristic_title(item["content"])[:80] for item in recent if item["role"] == "user")}
+    first_reply = conversation["title"] in automatic_titles and not any(
+        item["role"] == "assistant" and item.get("model_tier") != "small_talk" for item in recent)
     study_mode = data.study_mode or conversation.get("study_mode") or "explain"
     if data.study_mode and data.study_mode != conversation.get("study_mode"):
         conversation = tutor.update_settings(owner, conversation["id"], study_mode=data.study_mode)
