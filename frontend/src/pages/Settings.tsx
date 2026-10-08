@@ -5,6 +5,8 @@ import { accountDeletionEnabled, requestPasswordReset, signIn, signOutAndReload,
 import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
 import { InstallBindit } from '../components/AppPrompts'
+import { OttoMemoryPanel } from '../components/otto/OttoMemoryPanel'
+import { OttoPreferences } from '../components/otto/OttoPreferences'
 import { useInstallOffer } from '../lib/pwa'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import './Settings.css'
@@ -364,6 +366,17 @@ export function Settings({ session, onSession }: SettingsProps) {
             </div>
           </Section>
 
+          <Section id="settings-otto" title="Otto" copy="How Otto, your tutor, talks to you, and the short notes Otto keeps about you. Changes apply from your next message.">
+            <div className="settings__otto">
+              <div className="ui-panel settings__otto-panel">
+                <OttoPreferences token={session.access_token} defaultName={profile?.display_name || displayName} />
+              </div>
+              <div className="ui-panel settings__otto-panel">
+                <OttoMemoryPanel token={session.access_token} />
+              </div>
+            </div>
+          </Section>
+
           {appearance}
 
           <Section id="settings-privacy" title="Privacy" copy="Control who can find you. Study group messages and images are only visible to that group's members.">
@@ -440,7 +453,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                 <p className="settings__danger-lead">Deleting your account removes, right away:</p>
                 <ul className="settings__danger-list">
                   <li>Your profile, XP, streaks, progress and friend code</li>
-                  <li>Your notes, flashcards, quiz questions and tutor conversations</li>
+                  <li>Your notes, flashcards, quiz questions, tutor conversations and what Otto remembers about you</li>
                   <li>Your personal tasks, plus your comments, attachments and assignments on group tasks</li>
                   <li>Your friends, friend quests and notifications, and the messages and images you sent in group chats</li>
                 </ul>
