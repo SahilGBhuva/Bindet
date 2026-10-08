@@ -53,8 +53,8 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'courses',
     question: 'How do I add a course or a unit?',
-    answer: 'Open Study (#tools) and choose Add course, then + Add unit for each topic or chapter. Manage courses lets you rename, recolor or reorder them.',
-    terms: ['course', 'unit', 'add course', 'add unit', 'new course', 'chapter', 'subject', 'class', 'rename', 'manage courses'],
+    answer: 'Open Study (#tools) and choose Add course, then + Add unit for each topic or chapter. Manage courses lets you reorder them, rename one (double-click its name) or give it a cover image; each course gets its own color automatically.',
+    terms: ['course', 'unit', 'add course', 'add unit', 'new course', 'chapter', 'subject', 'class', 'rename', 'manage courses', 'cover', 'color', 'reorder'],
   },
   {
     id: 'flashcards',
@@ -102,7 +102,7 @@ export const HELP_FAQ: HelpEntry[] = [
     id: 'start-group',
     question: 'How do I start a study group?',
     answer: 'In Friends & groups (#profile), use Start a group and give it a name. Then share its invite code (shown on the group, tap to copy) so others can join.',
-    terms: ['start group', 'create group', 'new group', 'make group', 'start a group', 'share code'],
+    terms: ['start group', 'create group', 'new group', 'make group', 'start a group', 'share code', 'invite to group'],
   },
   {
     id: 'leave-group',
@@ -119,7 +119,7 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'friends',
     question: 'How do I add a friend?',
-    answer: 'Your friend code is in Settings (#settings) under Account. In Friends & groups (#profile), enter a friend’s code or search by name to send a request; they accept it from their notifications.',
+    answer: 'Your friend code is in Settings (#settings) under Account. In Friends & groups (#profile), enter a friend’s code or search by name to send a request. They accept it in their own Friends & groups.',
     terms: ['friend', 'add friend', 'friend code', 'friend request', 'search people', 'find people', 'follow'],
   },
   {
@@ -204,7 +204,7 @@ export const HELP_FAQ: HelpEntry[] = [
 
 export const SUGGESTED_HELP = ['photo-notes', 'flashcards', 'review', 'join-group', 'delete-account']
 
-const STOP = new Set('a an the i me my we our you your it its is are was be do does did can could how what whats where when why who which to of in on at for with and or from this that there here please get got use using bindet bindit app'.split(' '))
+const STOP = new Set('a an the i me my we our you your it its is are was be do does did can could how what whats where when why who which to of in on at for with and or from this that there here please get got use using bindet bindit app someone'.split(' '))
 
 /* Word endings folded so "uploading", "uploads" and "uploaded" all read as "upload". */
 function stem(word: string) {
@@ -252,31 +252,42 @@ const INDEX = HELP_FAQ.map((entry) => {
 
 export type HelpMatch = { entry: HelpEntry; score: number }
 
+/* Everyday words that don't say what the question is about (left out of coverage below). */
+const GENERIC = new Set('change make add see find open set turn put show work want need like way more many much new go able also just really thing stuff mean it some any im there into one'.split(' '))
+
 /*
  * Scores every entry: a term whose words all appear in the question counts 1 per word
  * (so phrases count more), and the entry's own question counts too. A match is
- * confident only when it is at least a full point ahead of the next best; a tie goes
- * to the server (or nowhere) rather than to a guess.
+ * confident only when it is at least a full point ahead of the next best AND its terms
+ * cover most of what the question is about, so "Can I print my flashcards?" is not
+ * answered with the flashcards entry. Anything else goes to the server (or nowhere)
+ * rather than to a guess.
  */
 export function matchHelp(question: string): HelpMatch | null {
   const words = new Set(normalizeWords(question).filter((word) => !STOP.has(word)))
+  const topic = [...words].filter((word) => !GENERIC.has(word))
   if (!words.size) return null
-  let best: HelpMatch | null = null
+  let best: (HelpMatch & { covered: Set<string> }) | null = null
   let second = 0
   for (const { entry, terms } of INDEX) {
     let score = 0
+    const covered = new Set<string>()
     for (const term of terms) {
-      if (term.every((word) => words.has(word))) score += term.length === 1 ? 1 : term.length * 1.5
+      if (!term.every((word) => words.has(word))) continue
+      score += term.length === 1 ? 1 : term.length * 1.5
+      term.forEach((word) => covered.add(word))
     }
     if (!best || score > best.score) {
       second = best?.score ?? 0
-      best = { entry, score }
+      best = { entry, score, covered }
     } else if (score > second) {
       second = score
     }
   }
   if (!best || best.score < 1 || best.score - second < 1) return null
-  return best
+  const coverage = topic.length ? topic.filter((word) => best.covered.has(word)).length / topic.length : 1
+  if (coverage < 0.6) return null
+  return { entry: best.entry, score: best.score }
 }
 
 export function helpEntry(id: string) {

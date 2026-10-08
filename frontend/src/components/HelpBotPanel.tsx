@@ -10,6 +10,7 @@ type Turn = { id: number; question: string; answer: string; source: Source }
 
 const GREETING = 'Hi! Ask me how to do something in bindet, like adding notes or joining a study group.'
 const OUT_OF_QUESTIONS = 'You’ve used today’s AI help questions. The suggested questions still work, and the guides in Settings → Help & feedback (#settings?help) cover every part of bindet.'
+const HOUR_USED = 'You’ve asked 3 AI help questions this hour, so try again later. The suggested questions still work, and so do the guides in Settings → Help & feedback (#settings?help).'
 const NOT_SURE = 'I’m not sure about that one. The guides in Settings → Help & feedback (#settings?help) cover every part of bindet.'
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
 const MAX_TURNS = 6
@@ -45,7 +46,8 @@ function usageLine(usage: HelpUsage | null) {
   if (!usage) return 'Suggested questions are always free.'
   if (usage.remaining_today === null) return 'Suggested questions are free. No daily AI limit on this account.'
   const left = usage.remaining_today
-  return `Suggested questions are free. ${left} of ${usage.daily_limit || HELP_DAILY_LIMIT} AI questions left today.`
+  const hour = left > 0 && usage.remaining_this_hour === 0 ? ' None left this hour.' : ''
+  return `Suggested questions are free. ${left} of ${usage.daily_limit || HELP_DAILY_LIMIT} AI questions left today.${hour}`
 }
 
 export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClose: (restoreFocus?: boolean) => void }) {
@@ -56,7 +58,7 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
   const [usage, setUsage] = useState<HelpUsage | null>(null)
   const panel = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
-  const log = useRef<HTMLOListElement>(null)
+  const body = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const introId = useId()
   const token = session.access_token
@@ -77,10 +79,12 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
     else panel.current?.focus()
   }, [])
 
+  // Each new answer scrolls into view from its question.
   useEffect(() => {
-    const list = log.current
-    if (list) list.scrollTop = list.scrollHeight
-  }, [turns, busy])
+    const scroller = body.current
+    const last = scroller?.querySelector<HTMLElement>('.helpbot__turn:last-child')
+    if (scroller && last) scroller.scrollTop = Math.max(0, last.offsetTop - 8)
+  }, [turns])
 
   // A click outside the panel (except on its own corner button) closes it.
   useEffect(() => {
@@ -145,6 +149,10 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
       add(text, OUT_OF_QUESTIONS, 'local')
       return
     }
+    if (usage && usage.remaining_this_hour === 0) {
+      add(text, HOUR_USED, 'local')
+      return
+    }
     setBusy(true)
     try {
       const reply = await askHelpBot(text, token)
@@ -183,9 +191,9 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
         </button>
       </header>
 
-      <div className="helpbot__body">
+      <div className="helpbot__body" ref={body}>
         {turns.length ? (
-          <ol className="helpbot__log" ref={log} aria-label="Answers">
+          <ol className="helpbot__log" aria-label="Answers">
             {turns.map((turn) => (
               <li key={turn.id} className="helpbot__turn">
                 <p className="helpbot__question"><span className="sr-only">You asked: </span>{turn.question}</p>
