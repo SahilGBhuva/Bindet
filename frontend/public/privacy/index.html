@@ -32,7 +32,7 @@
     <div class="legal-head">
       <p class="kicker">Legal</p>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: October 7, 2026</p>
+      <p class="updated">Last updated: October 8, 2026</p>
       <p class="lead">bindet is a study app that turns your class notes into flashcards, quizzes and a tutor you can ask questions. This policy explains, in plain language, what information bindet handles, why, who helps us process it, how long we keep it and what you can do about it.</p>
       <p class="lead">bindet is a free student project created for the Congressional App Challenge.</p>
     </div>
@@ -89,6 +89,7 @@
         <ul>
           <li><strong>Notes.</strong> When you upload a note (a PDF, Word document, text file or photo), we read the text out of it and store that text, along with the course and unit you filed it under, the file name, the file type and its size. <strong>We don't keep the original file or photo</strong>; only the extracted text is saved.</li>
           <li><strong>Flashcards and quiz questions</strong> made from your notes, and any study instructions you give the AI (for example "focus on dates").</li>
+          <li><strong>Study guides.</strong> Study guides, summaries, cheat sheets, vocabulary lists, practice problems and timelines that Otto makes from your notes are saved with their course and unit, title, any focus you typed, and which notes they were made from, until you delete them or your account. Making one sends the text of those notes to the AI provider (<a href="#ai">section 3</a>); a copy of the result is cached for up to 30 days and is deleted sooner if you delete one of those notes (<a href="#retention">section 8</a>). "Make flashcards from this" saves the guide as a note in its unit.</li>
           <li><strong>Quiz answers.</strong> Your answers are checked, and in some cases sent to an AI to be graded. We save whether you were right and your progress, not the text of your answers. A short-lived cache of grading results is described in <a href="#retention">section 8</a>.</li>
           <li><strong>Tutor conversations.</strong> Your messages to Otto, the tutor, and its replies are saved so you can come back to them, along with each conversation's title (written by Otto from your first message, or one you choose), whether you pinned it, its study mode ("Explain it" or "Guide me"), and any thumbs up or down you give a reply (used to check reply quality). If you attach a photo, it is sent to the AI for that reply and is not stored; we only save its file name. If you tap "Make flashcards" on a reply, that reply is saved as a note in the unit you picked.</li>
           <li><strong>How Otto talks to you.</strong> If you fill them in (Settings → Otto, or "Personalize" on the Otto page): the name you want Otto to call you, the personality you pick for Otto, and an optional short note about yourself (up to 300 characters).</li>
@@ -124,7 +125,7 @@
         <h2 id="ai-h">3. How AI is used</h2>
         <p>bindet's study features are powered by large language models. To use them, we send the relevant content to an AI provider:</p>
         <ul>
-          <li>the text of your notes, to make flashcards and quiz questions;</li>
+          <li>the text of your notes, to make flashcards, quiz questions, practice tests and study guides;</li>
           <li>photos of notes and scanned PDFs, to read the text in them;</li>
           <li>quiz questions, the correct answer and your answer, to grade an answer;</li>
           <li>your tutor messages, attached photos, earlier messages in the conversation and the relevant notes, to write a tutor reply, together with your Otto settings (the name you chose, Otto's personality and your note about yourself) and the notes in "What Otto remembers" if memory is on;</li>
@@ -175,7 +176,7 @@
             <tbody>
               <tr><td>Supabase</td><td>Sign-in, database and file storage</td><td>Account details and everything you save in bindet, including group chat images</td></tr>
               <tr><td>Vercel</td><td>Hosts the website and the app's server</td><td>Requests to the app, including IP address and browser details in request logs</td></tr>
-              <tr><td>OpenRouter, and the AI providers it routes to (Google for Gemini models, Mistral for reading scanned PDFs, or another provider if one is unavailable)</td><td>Generates flashcards, quizzes, grading, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
+              <tr><td>OpenRouter, and the AI providers it routes to (Google for Gemini models, Mistral for reading scanned PDFs, or another provider if one is unavailable)</td><td>Generates flashcards, quizzes, grading, study guides, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
               <tr><td>Google</td><td>"Continue with Google" sign-in, only if you choose it</td><td>Your Google name, email and profile picture link</td></tr>
               <tr><td>Our email provider</td><td>Sends sign-up codes and password reset emails</td><td>Your email address and the email content</td></tr>
               <tr><td>Google Fonts</td><td>Serves the fonts used on the site</td><td>Your browser downloads fonts from Google's servers, so Google can see your IP address</td></tr>
@@ -203,14 +204,14 @@
           <li><strong>Account and study data</strong> stays until you delete it or delete your account.</li>
           <li><strong>Notes and tutor conversations</strong> can be deleted by you at any time in the app. Deleting a note also deletes the flashcards made from it. Deleting a conversation also deletes its pin, study mode and ratings.</li>
           <li><strong>Otto's memory and settings</strong> stay until you delete them (Settings → Otto) or delete your account. Turning memory off keeps existing notes until you delete them, but Otto stops reading and saving them.</li>
-          <li><strong>AI results cache.</strong> To avoid paying for the same AI request twice, we keep some AI results for a short time: flashcards and text read from photos or scans for up to 90 days, grading results for up to 60 days, practice tests for up to 30 days, and tutor replies and Otto's conversation titles for up to 14 days. Results are looked up by a scrambled fingerprint (a hash) of the input, but a stored result can contain your content, such as the text read from your photo. When you delete a note, the cached flashcards and text made from it are deleted too, unless another note still uses the same entry (yours, or another user's upload of identical content). Deleting a tutor conversation deletes its cached reply. Deleting your account deletes every cached result tied to your account, except shared entries that another user's identical upload still uses. A few results cached before we began linking them to accounts aren't linked to anyone and simply expire on the schedule above.</li>
+          <li><strong>AI results cache.</strong> To avoid paying for the same AI request twice, we keep some AI results for a short time: flashcards and text read from photos or scans for up to 90 days, grading results for up to 60 days, practice tests and study guides for up to 30 days, and tutor replies and Otto's conversation titles for up to 14 days. Results are looked up by a scrambled fingerprint (a hash) of the input, but a stored result can contain your content, such as the text read from your photo. When you delete a note, the cached flashcards and text made from it are deleted too, unless another note still uses the same entry (yours, or another user's upload of identical content). Deleting a tutor conversation deletes its cached reply. Deleting your account deletes every cached result tied to your account, except shared entries that another user's identical upload still uses. A few results cached before we began linking them to accounts aren't linked to anyone and simply expire on the schedule above.</li>
           <li><strong>Quiz questions.</strong> Recently served quiz questions are kept for 7 days and reusable quiz questions for up to 30 days. Questions made from your own notes or instructions are deleted with your account.</li>
           <li><strong>Usage-limit records</strong> are deleted after about 7 days. In-memory request counts disappear within minutes.</li>
           <li><strong>Server and hosting logs</strong> are kept for the limited period set by our hosting provider.</li>
         </ul>
         <h3>Deleting your account</h3>
         <p>You can delete your account and all your data at any time in <strong>Settings → Delete account</strong>. Deletion is immediate and permanent. You can also email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> and we'll do it within 30 days.</p>
-        <p>Deleting your account removes your sign-in, profile, notes, flashcards, quizzes, tutor conversations, Otto's memory and settings, progress, personal tasks, friends, notifications, and the messages and images you sent in group chats, along with your comments, attachments and assignments on other people's tasks. Study groups you own pass to the member who has been in the group the longest, together with the group tasks you created, and that member is told; a group where you're the only member is deleted. Fragments may remain for a limited period in our hosting providers' logs and backups until those are replaced.</p>
+        <p>Deleting your account removes your sign-in, profile, notes, flashcards, quizzes, study guides, tutor conversations, Otto's memory and settings, progress, personal tasks, friends, notifications, and the messages and images you sent in group chats, along with your comments, attachments and assignments on other people's tasks. Study groups you own pass to the member who has been in the group the longest, together with the group tasks you created, and that member is told; a group where you're the only member is deleted. Fragments may remain for a limited period in our hosting providers' logs and backups until those are replaced.</p>
         <p>Individual group chat messages can't yet be deleted from inside the app. They're deleted with your account, or you can ask us by email.</p>
       </section>
 
