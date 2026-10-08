@@ -448,3 +448,28 @@ button.tutor-chip:hover { text-decoration: underline; }
   .tutor__mode { flex: 1; }
   .tutor__mode .ui-segmented__item { flex: 1; justify-content: center; }
 }
+
+/* Otto's chat card that links to a guide it made. */
+
+.guide-card {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 420px;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.guide-card:hover { border-color: var(--tone); }
+.guide-card:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.guide-card__text { display: grid; flex: 1; min-width: 0; }
+.guide-card__kind { color: var(--tone-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.guide-card__title { font-size: var(--text-base); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.guide-card__open { flex: none; color: var(--color-text-secondary); font-size: var(--text-sm); }

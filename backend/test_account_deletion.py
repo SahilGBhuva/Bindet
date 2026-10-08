@@ -30,6 +30,7 @@ import practice
 import practice_tests
 import questions
 import rate_limit
+import study_guides
 import tasks
 import tutor
 
@@ -50,7 +51,7 @@ ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
     practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
-    otto.otto_metadata,
+    otto.otto_metadata, study_guides.guide_metadata,
 )
 
 
@@ -124,6 +125,7 @@ class AccountDeletionTests(unittest.TestCase):
         questions.reset_questions()
         ai_cache.reset_caches()
         practice_tests.reset_practice()
+        study_guides.reset_guides()
         practice.reset_practice()
         feedback.reset_feedback()
         onboarding.reset_onboarding()
@@ -228,6 +230,14 @@ class AccountDeletionTests(unittest.TestCase):
         self.sam_test = practice_tests.create_test(SAM, "Bio", "Cells", 600, [question])
         ai_cache.store_practice_test("b" * 64, ALEX, [question])
         ai_cache.add_ref("practice_test_cache", "b" * 64, ALEX, self.alex_note["id"])
+        # Study guides and a cached guide tied to Alex's note; Sam's guide stays.
+        guide = [{"heading": "Key ideas", "bullets": ["Mitochondria make ATP."], "terms": [], "items": []}]
+        self.alex_guide = study_guides.create_guide(ALEX, course="Bio", unit="Cells", kind="study_guide", sections=guide, instructions="",
+                                                    instructions_hash="", source_key="d" * 64, note_ids=[self.alex_note["id"]])
+        self.sam_guide = study_guides.create_guide(SAM, course="Bio", unit="Cells", kind="study_guide", sections=guide, instructions="",
+                                                   instructions_hash="", source_key="e" * 64, note_ids=[])
+        ai_cache.store_guide("d" * 64, ALEX, guide)
+        ai_cache.add_ref("study_guide_cache", "d" * 64, ALEX, self.alex_note["id"])
         self.shared_key, self.private_key = shared_key, private_key
         # Practice lab: a round and best of Alex's, a challenge Alex sent Sam (played by
         # both) and one Sam sent Alex, a round of Sam's; and feedback from Alex.
@@ -289,7 +299,7 @@ class AccountDeletionTests(unittest.TestCase):
                      "flashcard_jobs", "flashcard_styles", "flashcard_reviews", "generated_questions", "tutor_conversations",
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
-                     "practice_tests", "practice_test_cache",
+                     "practice_tests", "practice_test_cache", "study_guides", "study_guide_cache",
                      "practice_rounds", "practice_bests", "practice_challenges", "feedback", "account_onboarding",
                      "otto_profiles", "otto_memories", "tutor_conversation_settings", "tutor_message_ratings"):
             self.assertIn(name, before, name)
@@ -352,6 +362,10 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertIsNone(practice_tests.get_test(ALEX, self.alex_test["id"]))
         self.assertIsNotNone(practice_tests.get_test(SAM, self.sam_test["id"]))
         self.assertIsNone(ai_cache.cached_practice_test("b" * 64, ALEX))
+        # Alex's study guides and cached guide are gone; Sam's guide remains.
+        self.assertIsNone(study_guides.get_guide(ALEX, self.alex_guide["id"]))
+        self.assertIsNotNone(study_guides.get_guide(SAM, self.sam_guide["id"]))
+        self.assertIsNone(ai_cache.cached_guide("d" * 64, ALEX))
         # Practice: both challenges went with Alex; Sam keeps rounds and bests.
         self.assertEqual(practice.list_challenges(SAM), [])
         self.assertEqual(len(practice.list_rounds(SAM)), 2)

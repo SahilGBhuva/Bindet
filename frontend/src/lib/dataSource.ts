@@ -3,6 +3,7 @@ import * as api from './api'
 import * as offlineCards from './offlineCards'
 import * as progress from './progress'
 import * as session from './session'
+import * as studyGuides from './studyGuides'
 
 /*
  * Everything the study pages read, write or request, in one place.
@@ -82,6 +83,14 @@ export type DataSource = {
   getPracticeTest: typeof api.getPracticeTest
   submitPracticeTest: typeof api.submitPracticeTest
   listPracticeTests: typeof api.listPracticeTests
+  // Study guides by Otto. The demo shows a canned guide in memory; making or changing one is locked.
+  listStudyGuides: typeof studyGuides.listStudyGuides
+  getStudyGuide: typeof studyGuides.getStudyGuide
+  createStudyGuide: typeof studyGuides.createStudyGuide
+  regenerateStudyGuide: typeof studyGuides.regenerateStudyGuide
+  renameStudyGuide: typeof studyGuides.renameStudyGuide
+  deleteStudyGuide: typeof studyGuides.deleteStudyGuide
+  saveStudyGuideAsNote: typeof studyGuides.saveStudyGuideAsNote
 }
 
 export const realData: DataSource = {
@@ -142,6 +151,13 @@ export const realData: DataSource = {
   getPracticeTest: api.getPracticeTest,
   submitPracticeTest: api.submitPracticeTest,
   listPracticeTests: api.listPracticeTests,
+  listStudyGuides: studyGuides.listStudyGuides,
+  getStudyGuide: studyGuides.getStudyGuide,
+  createStudyGuide: studyGuides.createStudyGuide,
+  regenerateStudyGuide: studyGuides.regenerateStudyGuide,
+  renameStudyGuide: studyGuides.renameStudyGuide,
+  deleteStudyGuide: studyGuides.deleteStudyGuide,
+  saveStudyGuideAsNote: studyGuides.saveStudyGuideAsNote,
 }
 
 const DataContext = createContext<DataSource>(realData)

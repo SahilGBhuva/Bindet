@@ -10,6 +10,7 @@ import time
 import unicodedata
 import hashlib
 from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -48,6 +49,7 @@ import practice_tests
 import rate_limit
 import review
 import storage
+import study_guides
 import tutor
 import tasks
 
@@ -1430,8 +1432,9 @@ def move_notes(data: NotesMove, authorization: Annotated[str | None, Header()] =
     if not course or not new_course or (unit is not None and not unit) or (new_unit is not None and (unit is None or not new_unit)):
         raise HTTPException(status_code=400, detail="Name the course (and unit) to rename")
     moved = flashcards.move_notes(user["id"], course, unit, new_course, new_unit)
-    # Practice test history follows its course or unit too.
+    # Practice test history and study guides follow their course or unit too.
     practice_tests.move_scope(user["id"], course, unit, new_course, new_unit)
+    study_guides.move_scope(user["id"], course, unit, new_course, new_unit)
     return {"moved": moved}
 
 
@@ -1947,6 +1950,7 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
 
 # Streamed replies must reach the browser token by token: no caching, no proxy
 # buffering (nginx-style X-Accel-Buffering) and no transforms such as compression.
+GUIDE_KEEPALIVE_SECONDS = 8  # an SSE comment this often while Otto writes a study guide
 SSE_HEADERS = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
 
 
@@ -2039,6 +2043,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     # Otto: no model call, no cache lookup, no global AI budget (the tutor limits above still count).
     small_talk = None if prefiltered or image_parts else ai_tutor.small_talk_reply(content, seed=random.randrange(1 << 16))
     fixed_reply = ai_tutor.TUTOR_REFUSAL if prefiltered else small_talk
+    # "Make me a study guide for cells": Otto makes (or finds) the saved guide and answers briefly
+    # with a link to it instead of a long chat reply (otto_guide_reply). A pattern, not a model
+    # call; the guide's own limits, cache and budget apply, so the tutor's cache and budget don't.
+    guide_intent = None if fixed_reply is not None or image_parts else study_guides.detect_intent(content)
     # Otto's personalization for this student (name, personality, about text, memory).
     otto_ctx = otto_context(otto_pending)
     personal = otto_personal_key(otto_ctx, data.study_mode or "explain")
@@ -2049,7 +2057,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     grounding = None
     tutor_cache_key = None
     cached_reply = None
-    if fixed_reply is None and not data.conversation_id and not image_parts and ai_cache.enabled():
+    if fixed_reply is None and guide_intent is None and not data.conversation_id and not image_parts and ai_cache.enabled():
         if early_context:
             grounding = early_context.result()
         elif requested_course or requested_unit:
@@ -2067,7 +2075,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
-    if fixed_reply is None and cached_reply is None:
+    if fixed_reply is None and cached_reply is None and guide_intent is None:
         spend_global_ai_call()
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
@@ -2104,6 +2112,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         saving = ai_prep.submit(tutor.add_message, owner, conversation["id"], "user", content, [image.name for image in data.images])
     if small_talk is not None:
         route = {**ai_tutor.tutor_route(content, False), "tier": "small_talk"}
+    elif guide_intent is not None:
+        route = {**ai_tutor.tutor_route(content, False), "tier": "study_guide"}
     elif prefiltered or cached_reply is not None:
         route = ai_tutor.tutor_route(content, bool(image_parts))
     else:
@@ -2123,9 +2133,14 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         {"role": "user", "content": [{"type": "text", "text": turn_text}, *image_parts] if image_parts else turn_text},
     ]
     started = time.perf_counter()
+    guide_reply: dict = {}
 
     def reply_chunks():
         """The model's reply, minus the off-topic sentinel: an off-topic reply becomes the fixed refusal."""
+        if guide_intent is not None:
+            ai_tutor.log_ai_event("explain_material", outcome="study_guide", student_id=owner, tier=route["tier"], started=started)
+            yield guide_reply["text"]
+            return
         if small_talk is not None:
             ai_tutor.log_ai_event("explain_material", outcome="small_talk", student_id=owner, tier=route["tier"], started=started)
             yield small_talk
@@ -2195,6 +2210,20 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # Inside the try, so a client that leaves at the very first event still
             # releases its stream slot straight away.
             yield sse("meta", {"conversation": conversation, "tier": route["tier"], "grounded_in": labels[:10]})
+            if guide_intent is not None:
+                # One model call that can take a while: SSE comments keep the stream (and the
+                # app's idle timer) alive until the guide is saved.
+                making = ai_prep.submit(otto_guide_reply, owner, guide_intent, course, unit)
+                while True:
+                    try:
+                        text, links = making.result(timeout=GUIDE_KEEPALIVE_SECONDS)
+                        break
+                    except FutureTimeout:
+                        yield ": making a study guide\n\n"
+                    except Exception:  # noqa: BLE001 - the student gets a friendly reply, never a broken stream
+                        text, links = GUIDE_MESSAGES["ai_unavailable"], []
+                        break
+                guide_reply.update(text=text, attachments=links)
             for chunk in reply_chunks():
                 if not user_sent:
                     user_sent = True
@@ -2204,7 +2233,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                     yield sse("user", {"user_message": saving.result()})
                 chunks.append(chunk)
                 yield sse("delta", {"text": chunk})
-            reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
+            reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), guide_reply.get("attachments"),
+                                      model_tier=route["tier"])
             saved = True
             yield sse("done", {"message": reply})
             # The reply is complete: free the stream slot, then do Otto's housekeeping (a title
@@ -2215,8 +2245,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 # A replayed (cached) first reply costs no AI call, and neither does its title
                 # (a cached or heuristic title only).
                 yield from otto_after_reply(owner, conversation, first_reply=first_reply, first_message=content,
-                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"],
-                                            allow_ai_title=cached_reply is None)
+                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"] and guide_intent is None,
+                                            allow_ai_title=cached_reply is None and guide_intent is None)
         except ai_tutor.AITutorError:
             if not user_sent:
                 user_sent = True
@@ -3564,6 +3594,295 @@ def submit_practice_test(
     public["xp_earned"] = award["xp_awarded"]
     public["total_xp"] = award["total_xp"]
     return public
+
+
+# --- Study guides by Otto -----------------------------------------------------------------
+#
+# Study guides, summaries, cheat sheets, vocabulary lists, practice problems and timelines,
+# written from a unit's (or a whole course's) notes in ONE model call and saved for the
+# student (study_guides.py). The same notes, kind and preferences are never sent twice: the
+# student's saved guide is shown again, or the cached one (per owner, keyed by the exact note
+# text) is saved again, with no AI call, AI quota or budget. Errors carry {"code", "message"}.
+
+GUIDES_PER_DAY = 8                 # guides the AI writes per student per day (cache misses, Regenerate included)
+GUIDE_REQUESTS_PER_DAY = 60        # guide requests per day, saved and cached ones included
+GUIDE_WRITES_PER_HOUR = 120        # renames and deletes
+GUIDE_MESSAGES = {
+    "no_notes": "Add notes first — Otto makes study materials only from your own notes.",
+    "notes_too_short": "These notes are too short for that. Add a few more facts or definitions first.",
+    "no_dates": "A timeline needs notes with dates in them. Try a study guide or summary instead.",
+    "ai_unavailable": "Otto couldn’t write that right now. Try again in a moment.",
+    "ai_bad_output": "Otto couldn’t make something useful from these notes right now. Try again in a moment.",
+    "guide_not_found": "That study guide couldn’t be found.",
+    "pick_unit": "Pick a unit to save the flashcards in.",
+}
+
+
+def guide_error(status: int, code: str, message: str | None = None, retry_after: int | None = None) -> HTTPException:
+    headers = {"Retry-After": str(retry_after)} if retry_after else None
+    return HTTPException(status_code=status, detail={"code": code, "message": message or GUIDE_MESSAGES[code]}, headers=headers)
+
+
+def guide_rate_limit(student_id: str, action: str, limit: int, message: str, window_minutes: int = 1440) -> None:
+    try:
+        database.check_social_rate_limit(student_id, action, limit, window_minutes)
+    except ValueError as error:
+        wait = limit_retry_after(student_id, action, window_minutes)
+        raise guide_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+
+
+GuideKind = Literal["study_guide", "summary", "cheat_sheet", "vocabulary", "practice", "timeline"]
+GuideId = Annotated[str, PathParam(min_length=1, max_length=64)]
+
+
+class StudyGuideCreate(BaseModel):
+    """What the student chooses. The notes, prompt and every model setting are server-side."""
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(min_length=1, max_length=120)
+    unit: str | None = Field(default=None, min_length=1, max_length=160)  # None: the whole course
+    kind: GuideKind = "study_guide"
+    # Optional steering ("focus on chapter 3"), screened like quiz instructions (checked_instructions).
+    instructions: str | None = Field(default=None, max_length=ai_tutor.INSTRUCTIONS_MAX_CHARS)
+    # Skip the saved guide for these notes and have the AI write a fresh version.
+    fresh: bool = False
+
+
+class StudyGuideRegenerate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fresh: bool = False
+
+
+class StudyGuideRename(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=study_guides.TITLE_MAX)
+
+
+class StudyGuideNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    unit: str | None = Field(default=None, min_length=1, max_length=160)  # for a whole-course guide
+
+
+def guide_source(owner: str, course: str, unit: str | None, kind: str) -> tuple[str, list[str]]:
+    """(note text the guide is written from, note IDs). Raises the friendly 400s."""
+    _, text, note_ids = note_store.practice_context(owner, course, unit, study_guides.GUIDE_NOTE_CHARS,
+                                                    exclude_prefix=study_guides.GUIDE_NOTE_PREFIX)
+    text = study_guides.source_text(text)
+    if not text:
+        raise guide_error(400, "no_notes")
+    if ai_tutor.note_too_short(text):
+        raise guide_error(400, "notes_too_short")
+    if kind == "timeline" and not study_guides.notes_have_dates(text):
+        raise guide_error(400, "no_dates")
+    return text, note_ids
+
+
+def write_guide(owner: str, *, course: str, unit: str | None, kind: str, text: str, instructions: str, cache_key: str,
+                note_ids: list[str], fresh: bool, log) -> list[dict]:
+    """The guide's sections: from the owner's cache unless fresh, else ONE model call (after the
+    per-student AI limit and the global budget). A fresh result replaces the cached one."""
+    if not fresh:
+        cached = ai_cache.cached_guide(cache_key, owner)
+        sections = study_guides.checked_content(cached, text, kind) if cached is not None else None
+        if ai_cache.enabled():
+            log("cache_hit" if sections else "cache_miss")
+        if sections:
+            return sections
+    try:
+        guide_rate_limit(owner, "study_guide", GUIDES_PER_DAY, "You’ve made a lot of study materials today.")
+    except HTTPException:
+        log("rate_limited")
+        raise
+    if not global_ai_available():
+        raise guide_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
+    try:
+        ai_tutor.warm_connection()
+        batch = study_guides.generate(kind=kind, course=course, unit=unit or "", note_text=text, instructions=instructions,
+                                      session_id=ai_session_id(owner, course, unit or "", "guide"))
+    except ai_tutor.AIBadOutput as exc:
+        log("bad_output", error=exc)
+        raise guide_error(503, "ai_bad_output", retry_after=30) from exc
+    except ai_tutor.AITutorError as exc:
+        log("ai_error", error=exc)
+        raise guide_error(503, "ai_unavailable", retry_after=30) from exc
+    log("ok", cards_in=batch.received, cards_kept=batch.kept)
+    if ai_cache.store_guide(cache_key, owner, batch.sections):
+        # Tied to every note it was written from: deleting any of them deletes the cached copy.
+        for note_id in note_ids:
+            ai_cache.add_ref("study_guide_cache", cache_key, owner, note_id)
+    return batch.sections
+
+
+def make_study_guide(owner: str, course: str, unit: str | None, kind: str, raw_instructions: str | None,
+                     fresh: bool = False) -> tuple[dict, str]:
+    """(saved guide, how) where how is "saved" (the student's own guide for these exact notes,
+    kind and preferences, shown again), "cached" or "generated". Raises HTTPException."""
+    instructions = checked_instructions(raw_instructions, owner, "generate_guide")
+    course = course.strip()
+    unit = unit.strip() if unit is not None else None
+    if not course or (unit is not None and not unit):
+        raise HTTPException(status_code=400, detail="Choose a course (and unit) for the study guide")
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_guide", outcome=outcome, student_id=owner, tier="text", started=started, **fields)  # noqa: E731
+    text, note_ids = guide_source(owner, course, unit, kind)
+    guide_rate_limit(owner, "study_guide_request", GUIDE_REQUESTS_PER_DAY, "You’ve asked for a lot of study materials today.")
+    steering = ai_tutor.instructions_hash(instructions)
+    cache_key = ai_cache.guide_key(owner_id=owner, kind=kind, course=course, unit=unit or "", source_text=text, instructions_hash=steering)
+    if not fresh:
+        saved = study_guides.find_by_source(owner, cache_key)
+        if saved is not None:
+            log("saved_hit")
+            return saved, "saved"
+        cached = ai_cache.cached_guide(cache_key, owner)
+        sections = study_guides.checked_content(cached, text, kind) if cached is not None else None
+        if sections:
+            log("cache_hit")
+            return study_guides.create_guide(owner, course=course, unit=unit, kind=kind, sections=sections, instructions=instructions,
+                                             instructions_hash=steering, source_key=cache_key, note_ids=note_ids), "cached"
+    sections = write_guide(owner, course=course, unit=unit, kind=kind, text=text, instructions=instructions, cache_key=cache_key,
+                           note_ids=note_ids, fresh=True, log=log)
+    return study_guides.create_guide(owner, course=course, unit=unit, kind=kind, sections=sections, instructions=instructions,
+                                     instructions_hash=steering, source_key=cache_key, note_ids=note_ids), "generated"
+
+
+@app.post("/api/study-guides", status_code=201)
+def create_study_guide(data: StudyGuideCreate, authorization: Annotated[str | None, Header()] = None):
+    """Otto writes study material from the unit's (or course's) notes, or shows the saved one again."""
+    owner = auth.authenticated_user(authorization)["id"]
+    guide, how = make_study_guide(owner, data.course, data.unit, data.kind, data.instructions, data.fresh)
+    return {**guide, "source": how}
+
+
+@app.get("/api/study-guides")
+def list_study_guides(
+    course: Annotated[str, Query(min_length=1, max_length=120)],
+    unit: Annotated[str | None, Query(min_length=1, max_length=160)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """The student's guides for a unit (and the whole course's), newest first, without their
+    content; and whether the notes have dates (a timeline is offered only then). Never calls the AI."""
+    owner = auth.authenticated_user(authorization)["id"]
+    course, unit = course.strip(), unit.strip() if unit is not None else None
+    _, text, note_ids = note_store.practice_context(owner, course, unit, study_guides.GUIDE_NOTE_CHARS,
+                                                    exclude_prefix=study_guides.GUIDE_NOTE_PREFIX)
+    return {
+        "guides": study_guides.list_guides(owner, course, unit),
+        "note_count": len(note_ids),
+        "can_timeline": study_guides.notes_have_dates(text),
+    }
+
+
+@app.get("/api/study-guides/{guide_id}")
+def get_study_guide(guide_id: GuideId, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    guide = study_guides.get_guide(owner, guide_id)
+    if guide is None:
+        raise guide_error(404, "guide_not_found")
+    return guide
+
+
+@app.patch("/api/study-guides/{guide_id}")
+def rename_study_guide(guide_id: GuideId, data: StudyGuideRename, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    limit_action(owner, "study_guide_write", GUIDE_WRITES_PER_HOUR)
+    try:
+        guide = study_guides.rename_guide(owner, guide_id, data.title)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Give the guide a name") from error
+    if guide is None:
+        raise guide_error(404, "guide_not_found")
+    return guide
+
+
+@app.delete("/api/study-guides/{guide_id}")
+def delete_study_guide(guide_id: GuideId, authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    limit_action(owner, "study_guide_write", GUIDE_WRITES_PER_HOUR)
+    if not study_guides.delete_guide(owner, guide_id):
+        raise guide_error(404, "guide_not_found")
+    return {"deleted": True}
+
+
+@app.post("/api/study-guides/{guide_id}/regenerate")
+def regenerate_study_guide(guide_id: GuideId, data: StudyGuideRegenerate, authorization: Annotated[str | None, Header()] = None):
+    """A new version from the notes as they are now. When the notes haven't changed, the guide is
+    returned as it is ("unchanged") unless the student asks for a fresh version, which counts
+    toward the daily AI limit like a new guide."""
+    owner = auth.authenticated_user(authorization)["id"]
+    row = study_guides.guide_row(owner, guide_id)
+    if row is None:
+        raise guide_error(404, "guide_not_found")
+    kind, course, unit, instructions = row["kind"], row["course"], row["unit"], row["instructions"] or ""
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_guide", outcome=outcome, student_id=owner, tier="text", started=started, **fields)  # noqa: E731
+    text, note_ids = guide_source(owner, course, unit, kind)
+    steering = ai_tutor.instructions_hash(instructions)
+    cache_key = ai_cache.guide_key(owner_id=owner, kind=kind, course=course, unit=unit or "", source_text=text, instructions_hash=steering)
+    if not data.fresh and cache_key == row["source_key"]:
+        return {**study_guides.get_guide(owner, guide_id), "source": "unchanged"}
+    guide_rate_limit(owner, "study_guide_request", GUIDE_REQUESTS_PER_DAY, "You’ve asked for a lot of study materials today.")
+    sections = write_guide(owner, course=course, unit=unit, kind=kind, text=text, instructions=instructions, cache_key=cache_key,
+                           note_ids=note_ids, fresh=data.fresh, log=log)
+    guide = study_guides.replace_content(owner, guide_id, sections=sections, source_key=cache_key, note_ids=note_ids)
+    if guide is None:  # deleted meanwhile
+        raise guide_error(404, "guide_not_found")
+    return {**guide, "source": "regenerated"}
+
+
+@app.post("/api/study-guides/{guide_id}/note")
+def save_study_guide_as_note(guide_id: GuideId, data: StudyGuideNote, authorization: Annotated[str | None, Header()] = None):
+    """"Make flashcards from this": the guide is saved (once) as a text note in its unit, and the
+    app then asks for that note's flashcards through the normal path (POST /api/notes/{id}/flashcards),
+    so the usual flashcard limits and cache apply. Guide notes are never used to write guides."""
+    owner = auth.authenticated_user(authorization)["id"]
+    guide = study_guides.get_guide(owner, guide_id)
+    if guide is None:
+        raise guide_error(404, "guide_not_found")
+    course = guide["course"]
+    unit = guide["unit"] or (data.unit.strip() if data.unit else "")
+    if not unit:
+        raise guide_error(400, "pick_unit")
+    file_name = f"{study_guides.GUIDE_NOTE_PREFIX}{guide_id[:8]} – {study_guides.label(guide['kind'])}.txt"
+    existing = next((note for note in note_store.list_notes(owner, course, unit) if note["file_name"] == file_name), None)
+    if existing is not None:
+        return {"id": existing["id"], "course": course, "unit": unit, "file_name": file_name, "created": False}
+    limit_action(owner, "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
+    text = note_ingestion.clean_text(study_guides.plain_text(guide["title"], guide["sections"]))
+    if not text:
+        raise HTTPException(status_code=400, detail="That guide has nothing to make flashcards from")
+    note = note_store.save_note(owner, course, unit, file_name, "text/plain", text, len(text.encode("utf-8")))
+    return {"id": note["id"], "course": course, "unit": unit, "file_name": file_name, "created": True}
+
+
+# --- Otto: "make me a study guide for cells" -------------------------------------------------
+
+def otto_guide_reply(owner: str, intent: "study_guides.GuideIntent", course: str, unit: str) -> tuple[str, list[str]]:
+    """Otto's short reply to a request for study material, and the message attachment that links
+    the saved guide ("guide:<id>:<kind>"). Makes (or finds) the guide; never streams it into the chat."""
+    what = study_guides.label(intent.kind)
+    scope = study_guides.resolve_target(intent.target, course, unit, note_store.note_scopes(owner))
+    if scope is None:
+        return (f"Pick a course (and a unit) at the top first, and I’ll make a {what.lower()} from your notes for it.", [])
+    guide_course, guide_unit = scope
+    # A topic that isn't one of their units ("for derivatives") steers the guide instead.
+    named = intent.target and not study_guides.WHOLE_COURSE.match(intent.target)
+    unit_named = named and guide_unit and study_guides._name_key(intent.target) in study_guides._name_key(guide_unit)
+    course_named = named and guide_unit is None and study_guides._name_key(intent.target) == study_guides._name_key(guide_course)
+    steering = f"Focus on {intent.target}" if named and not unit_named and not course_named else None
+    place = guide_unit or f"all of {guide_course}"
+    try:
+        guide, how = make_study_guide(owner, guide_course, guide_unit, intent.kind, steering)
+    except HTTPException as error:
+        detail = error.detail
+        message = detail.get("message") if isinstance(detail, dict) else str(detail)
+        return (message or GUIDE_MESSAGES["ai_unavailable"], [])
+    attachment = [f"guide:{guide['id']}:{guide['kind']}"]
+    if how == "saved":
+        return (f"You already have this {what.lower()} for {place}, and your notes haven’t changed since, so here it is again. "
+                "Open it and choose Regenerate if you want a fresh version.", attachment)
+    notes = guide["note_count"]
+    return (f"Done — I made a {what.lower()} for {place} from {notes} of your {'note' if notes == 1 else 'notes'}. "
+            f"It’s saved in Study under {guide_unit or guide_course} → Guides, so you can print it, copy it or turn it into flashcards.",
+            attachment)
 
 
 # --- Practice lab -----------------------------------------------------------------------

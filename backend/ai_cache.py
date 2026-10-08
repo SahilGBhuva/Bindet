@@ -49,6 +49,7 @@ RETENTION = {
     "grading_cache": timedelta(days=60),
     "tutor_reply_cache": timedelta(days=14),
     "practice_test_cache": timedelta(days=30),
+    "study_guide_cache": timedelta(days=30),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
@@ -110,10 +111,11 @@ def prune_if_due(now: float | None = None) -> bool:
 
 # --- Where entries came from (cache_refs) ---------------------------------------------
 
-REF_TABLES = ("flashcard_cache", "extraction_cache", "grading_cache", "tutor_reply_cache", "question_bank", "practice_test_cache")
+REF_TABLES = ("flashcard_cache", "extraction_cache", "grading_cache", "tutor_reply_cache", "question_bank", "practice_test_cache",
+              "study_guide_cache")
 # Entries made from several notes at once: deleting any one of those notes deletes the
 # entry (and every reference to it), since it can quote the deleted note.
-WHOLE_SOURCE_TABLES = ("practice_test_cache",)
+WHOLE_SOURCE_TABLES = ("practice_test_cache", "study_guide_cache")
 
 
 def _cache_table_and_key(name: str):
@@ -222,6 +224,8 @@ def purge_user_ai_data_in(connection, owner_id: str) -> int:
     removed += connection.execute(delete(tutor_table).where(tutor_table.c.owner_id == owner_id)).rowcount or 0
     practice_table = _table("practice_test_cache")
     removed += connection.execute(delete(practice_table).where(practice_table.c.owner_id == owner_id)).rowcount or 0
+    guide_table = _table("study_guide_cache")
+    removed += connection.execute(delete(guide_table).where(guide_table.c.owner_id == owner_id)).rowcount or 0
     connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
     return removed
 
@@ -482,6 +486,47 @@ def store_practice_test(key: str, owner_id: str, questions: list[dict]) -> bool:
         with database.engine().begin() as connection:
             connection.execute(delete(table).where(table.c.key == key))
             connection.execute(table.insert().values(key=key, owner_id=owner_id, questions=kept, created_at=_now(), hits=0))
+        return True
+    except Exception:  # noqa: BLE001 - failing to cache must not fail the request
+        return False
+
+
+# --- Study guides (per account, never shared) -------------------------------------------
+#
+# Like practice tests: the key includes the owner, the guide kind, the course and unit the
+# prompt names, the exact note text sent and the hash of the student's preferences, and every
+# read filters by owner. A note it was made from being deleted deletes it (cache_refs,
+# WHOLE_SOURCE_TABLES). The saved guide itself (study_guides) is the student's and stays.
+
+def guide_version() -> str:
+    import study_guides  # local: study_guides imports ai_tutor only, keep the graph one-way
+    return "guide-v1:" + fingerprint(
+        study_guides.GUIDE_PROMPT, study_guides.GUIDE_SCHEMA, {kind: spec["ask"] for kind, spec in study_guides.KINDS.items()},
+        ai_tutor.OPENROUTER_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
+        ai_tutor.OPERATIONS["generate_guide"]["max_tokens"], ai_tutor.OPERATIONS["generate_guide"]["temperature"],
+    )
+
+
+def guide_key(*, owner_id: str, kind: str, course: str, unit: str, source_text: str, instructions_hash: str = "") -> str:
+    return make_key("guide", guide_version(), owner_id, kind, course, unit, source_text, instructions_hash)
+
+
+def cached_guide(key: str, owner_id: str) -> list[dict] | None:
+    row = lookup("study_guide_cache", key, owner_id=owner_id)
+    content = row["content"] if row is not None else None
+    return content if isinstance(content, list) and content else None
+
+
+def store_guide(key: str, owner_id: str, sections: list[dict]) -> bool:
+    """Store (or replace: a student asking for a fresh version gets that one next time) a guide."""
+    if not enabled() or not sections:
+        return False
+    try:
+        database.init_db()
+        table = _table("study_guide_cache")
+        with database.engine().begin() as connection:
+            connection.execute(delete(table).where(table.c.key == key))
+            connection.execute(table.insert().values(key=key, owner_id=owner_id, content=sections, created_at=_now(), hits=0))
         return True
     except Exception:  # noqa: BLE001 - failing to cache must not fail the request
         return False
