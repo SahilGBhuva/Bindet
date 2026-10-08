@@ -735,6 +735,13 @@
 
 @keyframes tasks-drawer { from { opacity: 0; transform: translateX(24px); } }
 
+/* Phones: the board stacks its columns (To do, In progress, Review, Done) in one readable
+   column instead of four narrow ones; empty columns shrink to their "Nothing here" line. */
+@media (max-width: 560px) {
+  .tasks-board { grid-template-columns: minmax(0, 1fr); }
+  .tasks-board .tasks-box { min-height: 0; }
+}
+
 @media (max-width: 420px) {
   .tasks-tabs { gap: 2px var(--space-3); }
   .tasks-date__tile { width: 36px; height: 38px; font-size: var(--text-base); }
