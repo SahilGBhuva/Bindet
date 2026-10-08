@@ -25,6 +25,7 @@ import help_bot
 import main
 import note_store
 import onboarding
+import otto
 import practice
 import practice_tests
 import questions
@@ -49,6 +50,7 @@ ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
     practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
+    otto.otto_metadata,
 )
 
 
@@ -125,6 +127,7 @@ class AccountDeletionTests(unittest.TestCase):
         practice.reset_practice()
         feedback.reset_feedback()
         onboarding.reset_onboarding()
+        otto.reset_otto()
         with database.engine().begin() as connection:
             connection.execute(delete(note_store.notes))
         rate_limit.limiter.reset()
@@ -210,6 +213,9 @@ class AccountDeletionTests(unittest.TestCase):
         ai_cache.add_ref("grading_cache", "d" * 64, ALEX)
         conversation = tutor.start_conversation(ALEX, "What is ATP?")
         tutor.add_message(ALEX, conversation["id"], "user", "What is ATP?")
+        reply = tutor.add_message(ALEX, conversation["id"], "assistant", "Energy currency")
+        tutor.rate_message(ALEX, reply["id"], 1)
+        tutor.update_settings(ALEX, conversation["id"], pinned=True, study_mode="guide")
         ai_cache.store_tutor_reply("c" * 64, ALEX, "Energy currency")
         ai_cache.add_ref("tutor_reply_cache", "c" * 64, ALEX, ai_cache.conversation_source(conversation["id"]))
         questions.save_question(ALEX, "1+1?", "2", "addition", 1)
@@ -236,6 +242,12 @@ class AccountDeletionTests(unittest.TestCase):
         feedback.save(ALEX, "bug", "The timer froze", {"browser": "Safari 18", "os": "iOS"}, "games")
         onboarding.update_state(ALEX, setup_done=True)
         onboarding.update_state(SAM, setup_done=True, checklist_dismissed=True)
+        # Otto: settings and memory for Alex (one item Otto saved, one Alex wrote) and for Sam.
+        for person in (ALEX, SAM):
+            otto.save_profile(person, preferred_name=PEOPLE[person].title(), personality="chill",
+                              about="I like worked examples", memory_enabled=True)
+            otto.add_memory(person, "taking AP Biology")
+            otto.apply_memory_ops(person, [{"op": "add", "text": "has a test on cells on Oct 10"}])
 
     # --- helpers --------------------------------------------------------------------
 
@@ -278,7 +290,8 @@ class AccountDeletionTests(unittest.TestCase):
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
                      "practice_tests", "practice_test_cache",
-                     "practice_rounds", "practice_bests", "practice_challenges", "feedback", "account_onboarding"):
+                     "practice_rounds", "practice_bests", "practice_challenges", "feedback", "account_onboarding",
+                     "otto_profiles", "otto_memories", "tutor_conversation_settings", "tutor_message_ratings"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
@@ -300,7 +313,8 @@ class AccountDeletionTests(unittest.TestCase):
 
         # Sam still has everything that was Sam's (only rows also naming Alex went).
         sam_after = self.rows_mentioning(SAM)
-        for name in ("profiles", "student_progress", "study_notes", "flashcards", "flashcard_reviews", "cache_refs", "xp_events"):
+        for name in ("profiles", "student_progress", "study_notes", "flashcards", "flashcard_reviews", "cache_refs", "xp_events",
+                     "otto_profiles", "otto_memories"):
             self.assertEqual(sam_after.get(name), sam_before.get(name), name)
         # Group A passed to Sam (who joined before Eve) and Sam was told; B is gone; C is Sam's.
         group_a = database.get_study_group(SAM, self.group_a["id"])
@@ -452,6 +466,34 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertEqual(auth.signed_in_at(token(iat=True)), None)
         self.assertIsNone(auth.signed_in_at(None))
         self.assertIsNone(auth.signed_in_at("Bearer a.b"))
+
+
+class OttoLockdownTests(unittest.TestCase):
+    def test_tutor_extra_tables_are_locked_down_and_migrated(self):
+        extra = ("tutor_conversation_settings", "tutor_message_ratings")
+        for table in extra:
+            self.assertIn(table, tutor.TUTOR_TABLES)
+            self.assertIn(table, database.RLS_TABLES)
+            self.assertIn(table, database.CLIENT_REVOKED_TABLES)
+        path = os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", "20261014_tutor_conversation_extras.sql")
+        with open(path, encoding="utf-8") as handle:
+            sql = handle.read()
+        for table in extra:
+            self.assertIn(f"'{table}'", sql)
+        self.assertNotIn("drop ", sql.lower())
+
+    def test_otto_tables_are_locked_down_and_migrated(self):
+        for table in otto.OTTO_TABLES:
+            self.assertIn(table, database.RLS_TABLES)
+            self.assertIn(table, database.CLIENT_REVOKED_TABLES)
+        path = os.path.join(os.path.dirname(__file__), "..", "supabase", "migrations", "20261014_otto_memory_and_profile.sql")
+        with open(path, encoding="utf-8") as handle:
+            sql = handle.read()
+        for table in otto.OTTO_TABLES:
+            self.assertIn(f"'{table}'", sql)
+        self.assertIn("to_regclass", sql)
+        self.assertNotIn("drop ", sql.lower())
+        self.assertNotIn("delete from", sql.lower())
 
 
 if __name__ == "__main__":

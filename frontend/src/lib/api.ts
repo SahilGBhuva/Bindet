@@ -787,8 +787,10 @@ export function reportSocialUser(userId: string, accessToken: string) {
 
 /* ---- Tutor ---------------------------------------------------------------- */
 
-export type TutorConversation = { id: string; title: string; course: string; unit: string; created_at: string; updated_at: string }
-export type TutorMessage = { id: number; role: 'user' | 'assistant'; content: string; attachments: string[]; model_tier: string; created_at: string }
+export type StudyMode = 'explain' | 'guide'
+export type TutorConversation = { id: string; title: string; course: string; unit: string; created_at: string; updated_at: string; pinned?: boolean; study_mode?: StudyMode }
+/* model_tier "small_talk" marks Otto's fixed reply to chit-chat (no AI involved). rating: 1 up, -1 down, 0 none. */
+export type TutorMessage = { id: number; role: 'user' | 'assistant'; content: string; attachments: string[]; model_tier: string; created_at: string; rating?: number }
 export type TutorStreamHandlers = {
   onUploadProgress?: (fraction: number) => void
   onMeta?: (meta: { conversation: TutorConversation; tier: string; grounded_in: string[] }) => void
@@ -797,6 +799,10 @@ export type TutorStreamHandlers = {
   /* Text that arrived since the last call. Batched to at most one call per frame. */
   onDelta?: (text: string) => void
   onDone?: (result: { message: TutorMessage; partial?: boolean }) => void
+  /* After the reply: Otto named the new conversation. */
+  onTitle?: (result: { conversation_id: string; title: string }) => void
+  /* After the reply: Otto saved something to its memory (notice is true the first time ever). */
+  onMemory?: (result: { saved: number; notice: boolean }) => void
   onError?: (message: string) => void
 }
 
@@ -834,6 +840,85 @@ export async function getTutorMessages(accessToken: string, conversationId: stri
   return data
 }
 
+export function updateTutorConversation(accessToken: string, conversationId: string, change: { title?: string; pinned?: boolean; study_mode?: StudyMode }) {
+  return request<TutorConversation>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}`, { method: 'PATCH', body: JSON.stringify(change) }, accessToken)
+}
+
+/* Thumbs up (1), down (-1) or cleared (0) on one of Otto's replies. */
+export function rateTutorMessage(accessToken: string, messageId: number, rating: -1 | 0 | 1) {
+  return request<{ message_id: number; rating: number }>(`/api/tutor/messages/${messageId}/rating`, { method: 'PUT', body: JSON.stringify({ rating }) }, accessToken)
+}
+
+/* Saves one of Otto's replies (once) as a note in a unit; its flashcards then come from generateNoteFlashcards. */
+export function saveTutorReplyAsNote(accessToken: string, messageId: number, course: string, unit: string) {
+  return request<{ id: string; course: string; unit: string; file_name: string; created: boolean }>(`/api/tutor/messages/${messageId}/note`, {
+    method: 'POST', body: JSON.stringify({ course, unit }),
+  }, accessToken)
+}
+
+/* ---- Otto: how Otto talks to you, and what Otto remembers ---------------- */
+
+export type OttoPersonality = 'friendly' | 'chill' | 'direct' | 'coach' | 'funny'
+export type OttoProfile = { preferred_name: string; personality: OttoPersonality; about: string; memory_enabled: boolean; memory_noticed?: boolean }
+export type OttoMemoryItem = { id: number; text: string; source: 'otto' | 'student'; created_at: string; updated_at: string }
+export type OttoMemory = { enabled: boolean; items: OttoMemoryItem[]; limits: { max_items: number; max_chars: number; item_max_chars: number } }
+export const OTTO_PERSONALITIES: { id: OttoPersonality; label: string; hint: string }[] = [
+  { id: 'friendly', label: 'Friendly & encouraging', hint: 'Warm and upbeat' },
+  { id: 'chill', label: 'Chill & casual', hint: 'Relaxed, everyday words' },
+  { id: 'direct', label: 'Straight to the point', hint: 'Answer first, little chat' },
+  { id: 'coach', label: 'Coach mode', hint: 'Pushes you to try first' },
+  { id: 'funny', label: 'Funny', hint: 'The odd joke or pun' },
+]
+export const OTTO_ABOUT_MAX = 300
+export const OTTO_NAME_MAX = 30
+export const OTTO_MEMORY_CHANGED_EVENT = 'bindit:otto-memory-changed'
+
+const ottoProfileCache = new Map<string, OttoProfile>()
+
+export function getCachedOttoProfile(accessToken: string) {
+  const identity = tokenSubject(accessToken)
+  return ottoProfileCache.get(identity) ?? readSessionCache<OttoProfile>(`bindit:otto:${identity}`)?.data ?? null
+}
+
+function cacheOttoProfile(accessToken: string, profile: OttoProfile) {
+  const identity = tokenSubject(accessToken)
+  ottoProfileCache.set(identity, profile)
+  writeSessionCache(`bindit:otto:${identity}`, profile)
+}
+
+export async function getOttoProfile(accessToken: string) {
+  const profile = await request<OttoProfile>('/api/otto/profile', undefined, accessToken)
+  cacheOttoProfile(accessToken, profile)
+  return profile
+}
+
+export async function saveOttoProfile(accessToken: string, profile: OttoProfile) {
+  const { preferred_name, personality, about, memory_enabled } = profile
+  const saved = await request<OttoProfile>('/api/otto/profile', { method: 'PUT', body: JSON.stringify({ preferred_name, personality, about, memory_enabled }) }, accessToken)
+  cacheOttoProfile(accessToken, saved)
+  return saved
+}
+
+export function getOttoMemory(accessToken: string, signal?: AbortSignal) {
+  return request<OttoMemory>('/api/otto/memory', { signal }, accessToken)
+}
+
+export function addOttoMemoryItem(accessToken: string, text: string) {
+  return request<OttoMemoryItem>('/api/otto/memory', { method: 'POST', body: JSON.stringify({ text }) }, accessToken)
+}
+
+export function editOttoMemoryItem(accessToken: string, id: number, text: string) {
+  return request<OttoMemoryItem>(`/api/otto/memory/${id}`, { method: 'PATCH', body: JSON.stringify({ text }) }, accessToken)
+}
+
+export function deleteOttoMemoryItem(accessToken: string, id: number) {
+  return request<{ deleted: boolean }>(`/api/otto/memory/${id}`, { method: 'DELETE' }, accessToken)
+}
+
+export function clearOttoMemory(accessToken: string) {
+  return request<{ deleted: number }>('/api/otto/memory', { method: 'DELETE' }, accessToken)
+}
+
 export function deleteTutorConversation(accessToken: string, conversationId: string) {
   tutorMessageCache.delete(`${tokenSubject(accessToken)}:${conversationId}`)
   return request<{ deleted: boolean }>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' }, accessToken)
@@ -864,7 +949,7 @@ export const TUTOR_IDLE_TIMEOUT_MS = 45_000
  */
 export function streamTutorMessage(
   accessToken: string,
-  body: { conversation_id?: string; content: string; course?: string; unit?: string; images?: { name: string; data_url: string }[] },
+  body: { conversation_id?: string; content: string; course?: string; unit?: string; images?: { name: string; data_url: string }[]; study_mode?: StudyMode; regenerate?: boolean },
   handlers: TutorStreamHandlers,
 ): () => void {
   const xhr = new XMLHttpRequest()
@@ -873,6 +958,7 @@ export function streamTutorMessage(
   let pending = ''
   let frame = 0
   let idleTimer = 0
+  let stopped = false
 
   let fallback = 0
   const flush = () => {
@@ -898,7 +984,16 @@ export function streamTutorMessage(
   const handleBlock = (block: string) => {
     const name = /^event: (.+)$/m.exec(block)?.[1]
     const raw = /^data: (.+)$/m.exec(block)?.[1]
-    if (!name || !raw || finished) return
+    if (!name || !raw) return
+    // Otto's housekeeping arrives after "done", on the same stream.
+    if (name === 'title' || name === 'memory') {
+      if (stopped) return
+      const extra = JSON.parse(raw)
+      if (name === 'title') handlers.onTitle?.(extra)
+      else handlers.onMemory?.(extra)
+      return
+    }
+    if (finished) return
     const payload = JSON.parse(raw)
     if (name === 'meta') handlers.onMeta?.(payload)
     else if (name === 'user') handlers.onSaved?.(payload.user_message)
@@ -951,6 +1046,7 @@ export function streamTutorMessage(
   resetIdle()
   return () => {
     finished = true
+    stopped = true
     window.clearTimeout(idleTimer)
     if (frame) cancelAnimationFrame(frame)
     window.clearTimeout(fallback)
@@ -1021,6 +1117,7 @@ const analyticsCache = new Map<string, GroupAnalytics>()
 window.addEventListener(ACCOUNT_DATA_CLEARED_EVENT, () => {
   tutorListCache.clear()
   tutorMessageCache.clear()
+  ottoProfileCache.clear()
   taskCache.clear()
   analyticsCache.clear()
 })
