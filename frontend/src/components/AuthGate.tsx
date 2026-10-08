@@ -1,7 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
   AUTH_SESSION_KEY,
+  AuthRequestError,
+  EMAIL_TAKEN,
   discardSession,
+  friendlyAuthError,
   exchangeOAuthCode,
   googleSignInEnabled,
   loadAuthSession,
@@ -39,6 +42,18 @@ type LinkGate =
   | { kind: 'other-account'; linkedEmail: string; via: 'link' | 'google' }
 const MAX_REFRESH_RETRY_MS = 60_000
 const RESEND_SECS = 60
+// The email confirmation code is 6 digits (the auth server's OTP length); a full code submits itself.
+const CODE_LENGTH = 6
+const PASSWORD_MIN = 8
+
+function emailTaken(error: unknown) {
+  return error instanceof AuthRequestError && (error.code === EMAIL_TAKEN || error.code === 'user_already_exists')
+}
+
+function needsConfirmation(error: unknown) {
+  if (error instanceof AuthRequestError && error.code === 'email_not_confirmed') return true
+  return /confirm|not confirmed|verify/i.test(error instanceof Error ? error.message : '')
+}
 
 // The landing page (and its demo and 3D scene) is only downloaded by signed-out visitors.
 // Without a saved session the download starts as soon as this module runs, in parallel with the first render.
@@ -119,6 +134,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Google sign-in shows only once the server says the provider is configured.
   const [googleEnabled, setGoogleEnabled] = useState(false)
   const [googleBusy, setGoogleBusy] = useState(false)
+  // Sign-up hit an email that already has an account: offer Log in and Reset password.
+  const [taken, setTaken] = useState(false)
+  const codeInput = useRef<HTMLInputElement>(null)
+  const emailInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     localStorage.removeItem('bindit-guest-mode')
@@ -283,6 +302,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  // The code field takes focus when the confirm step opens, so the code can be typed or pasted at once.
+  useEffect(() => {
+    if (view === 'confirm' && !session) codeInput.current?.focus()
+  }, [view, session])
+
   useEffect(() => {
     if (resendIn <= 0) return
     const timer = window.setTimeout(() => setResendIn((value) => value - 1), 1000)
@@ -300,6 +324,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   function switchMode(nextMode: Mode) {
     setSignupReason('')
     setMode(nextMode)
+    setTaken(false)
     setError('')
     setMessage('')
     setPassword('')
@@ -307,13 +332,26 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setShowPassword(false)
   }
 
-  function startConfirm(nextEmail: string, note: string) {
+  // resendNow: the code was sent earlier (a sign-in before confirming), so it may have expired.
+  function startConfirm(nextEmail: string, note = '', resendNow = false) {
     setPendingEmail(nextEmail)
     setCode('')
     setMessage(note)
     setError('')
-    setResendIn(RESEND_SECS)
+    setResendIn(resendNow ? 0 : RESEND_SECS)
     setView('confirm')
+  }
+
+  // Back from the code step to the form, with the email kept and ready to correct.
+  function changeEmail() {
+    setView('auth')
+    setError('')
+    setMessage('')
+    setCode('')
+    window.setTimeout(() => {
+      emailInput.current?.focus()
+      emailInput.current?.select()
+    }, 0)
   }
 
   async function sendCodeAgain() {
@@ -323,11 +361,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
     try {
       await resendSignupConfirmation(pendingEmail)
       setResendIn(RESEND_SECS)
-      setMessage('A new code is on the way. Check your inbox in about a minute if it is not here yet.')
+      setCode('')
+      setMessage('New code sent. Use the newest email; older codes stop working.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resend the code.')
+      setError(friendlyAuthError(err, 'We couldn’t send a new code. Try again in a minute.'))
     } finally {
       setBusy(false)
+      window.setTimeout(() => codeInput.current?.focus(), 0)
     }
   }
 
@@ -543,6 +583,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setBusy(true)
       setError('')
       setMessage('')
+      setTaken(false)
       const trimmed = email.trim()
       try {
         if (mode === 'reset') {
@@ -552,24 +593,24 @@ export function AuthGate({ children }: { children: ReactNode }) {
           try {
             setSession(await signIn(trimmed, password))
           } catch (err) {
-            const text = err instanceof Error ? err.message : ''
-            if (/confirm|not confirmed|verify/i.test(text)) {
-              startConfirm(trimmed, 'Confirm your email with the code we sent, then you can get in.')
+            if (needsConfirmation(err)) {
+              startConfirm(trimmed, 'Confirm your email first. Use the code we sent, or send a new one.', true)
               return
             }
             throw err
           }
         } else {
-          if (password.length < 8) {
-            setError('Use at least 8 characters for your password.')
+          if (password.length < PASSWORD_MIN) {
+            setError(`Use at least ${PASSWORD_MIN} characters for your password.`)
             return
           }
           const result = await signUp(trimmed, password)
           if (result.session) setSession(result.session)
-          else startConfirm(trimmed, 'Enter the code from your email. If it does not arrive, you can resend after 1 minute.')
+          else startConfirm(trimmed)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'We couldn’t complete that request. Try again.')
+        if (mode === 'signup' && emailTaken(err)) setTaken(true)
+        setError(friendlyAuthError(err, 'We couldn’t complete that request. Try again.'))
       } finally {
         setBusy(false)
       }
@@ -588,17 +629,40 @@ export function AuthGate({ children }: { children: ReactNode }) {
       }
     }
 
-    async function submitCode(event: FormEvent) {
-      event.preventDefault()
+    async function verifyCode(value: string) {
+      if (busy) return
+      if (value.length < CODE_LENGTH) {
+        setError(`Enter all ${CODE_LENGTH} digits of the code.`)
+        codeInput.current?.focus()
+        return
+      }
       setBusy(true)
       setError('')
+      setMessage('')
+      let failed = false
       try {
-        setSession(await verifySignupCode(pendingEmail, code.trim()))
+        setSession(await verifySignupCode(pendingEmail, value))
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'That code did not work.')
+        failed = true
+        setError(friendlyAuthError(err, 'That code didn’t work. Check the digits or send a new code.'))
       } finally {
         setBusy(false)
+        // Select the code so a retyped one replaces it.
+        if (failed) window.setTimeout(() => codeInput.current?.select(), 0)
       }
+    }
+
+    function submitCode(event: FormEvent) {
+      event.preventDefault()
+      void verifyCode(code)
+    }
+
+    // Typing or pasting keeps digits only ("123 456" and "123-456" work); a full code submits.
+    function onCodeChange(value: string) {
+      const digits = value.replace(/\D/g, '').slice(0, CODE_LENGTH)
+      setCode(digits)
+      if (error) setError('')
+      if (digits.length === CODE_LENGTH && digits !== code) void verifyCode(digits)
     }
 
     if (view === 'confirm') {
@@ -607,36 +671,46 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <section className="auth-card" aria-labelledby="auth-title">
             <AuthBrand />
             <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
-            <p className="auth-eyebrow">Confirm email</p>
-            <h1 className="auth-title" id="auth-title">Check your inbox</h1>
-            <p className="auth-lead">We sent a code to {pendingEmail}. Paste it below. You can resend after 1 minute if it never shows up.</p>
-            <form className="auth-form" onSubmit={submitCode}>
+            <p className="auth-eyebrow">Last step</p>
+            <h1 className="auth-title" id="auth-title">Check your email</h1>
+            <p className="auth-lead">
+              Enter the {CODE_LENGTH}-digit code we sent to <strong className="auth-email">{pendingEmail}</strong>.
+            </p>
+            <form className="auth-form" onSubmit={submitCode} noValidate>
               <label className="auth-field">
-                <span>Confirmation code</span>
+                <span>{CODE_LENGTH}-digit code</span>
                 <input
-                  className="auth-input"
+                  ref={codeInput}
+                  className="auth-input auth-code"
+                  type="text"
                   inputMode="numeric"
+                  pattern="[0-9]*"
                   autoComplete="one-time-code"
                   enterKeyHint="go"
-                  placeholder="6-digit code"
+                  maxLength={CODE_LENGTH + 4}
+                  placeholder={'•'.repeat(CODE_LENGTH)}
+                  aria-describedby="auth-code-help"
+                  aria-invalid={error ? true : undefined}
                   required
-                  disabled={busy}
+                  readOnly={busy}
                   value={code}
-                  onChange={(event) => setCode(event.target.value)}
+                  onChange={(event) => onCodeChange(event.target.value)}
                 />
               </label>
+              <p className="auth-help" id="auth-code-help">Not there after a minute? Check your spam or promotions folder.</p>
               {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
-              {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
-              <button className="auth-submit" type="submit" disabled={busy}>
-                {busy ? 'Checking…' : 'Confirm and enter'}
+              <div className="sr-only" role="status" aria-live="polite">{busy ? 'Checking the code…' : message}</div>
+              {message ? <div className="auth-feedback is-ok" aria-hidden="true">{message}</div> : null}
+              <button className="auth-submit" type="submit" disabled={busy} aria-busy={busy}>
+                {busy ? 'Checking…' : 'Confirm and continue'}
               </button>
             </form>
             <div className="auth-links">
               <button className="auth-text-btn" type="button" disabled={busy || resendIn > 0} onClick={() => void sendCodeAgain()}>
-                {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+                {resendIn > 0 ? <>Send a new code in <span aria-hidden="true">{resendIn}s</span><span className="sr-only">{resendIn > 50 ? 'a minute' : `${resendIn} seconds`}</span></> : 'Send a new code'}
               </button>
-              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => setView('auth')}>
-                Back to sign in
+              <button className="auth-text-btn" type="button" disabled={busy} onClick={changeEmail}>
+                Use a different email
               </button>
             </div>
           </section>
@@ -685,7 +759,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <form className="auth-form" onSubmit={submit}>
               <label className="auth-field">
                 <span>Email</span>
-                <input className="auth-input" type="email" autoComplete="email" placeholder="you@school.edu" required disabled={busy || googleBusy} enterKeyHint={mode === 'reset' ? 'send' : 'next'} value={email} onChange={(event) => setEmail(event.target.value)} />
+                <input ref={emailInput} className="auth-input" type="email" inputMode="email" autoComplete={mode === 'signup' ? 'email' : 'username'} autoCapitalize="none" spellCheck={false} placeholder="you@school.edu" required disabled={busy || googleBusy} enterKeyHint={mode === 'reset' ? 'send' : 'next'} value={email} onChange={(event) => setEmail(event.target.value)} />
               </label>
               {mode !== 'reset' ? <label className="auth-field">
                 <span>Password</span>
@@ -694,10 +768,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
                     className="auth-input"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    minLength={mode === 'signup' ? 8 : 6}
+                    minLength={mode === 'signup' ? PASSWORD_MIN : 6}
                     required
                     disabled={busy}
                     enterKeyHint="go"
+                    aria-describedby={mode === 'signup' ? 'auth-password-rule' : undefined}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                   />
@@ -706,13 +781,32 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   </button>
                 </div>
               </label> : null}
-              {mode === 'signup' && password ? (
-                <div className={`auth-strength is-${Math.max(1, passwordScore)}`}>
-                  <div>{[0, 1, 2, 3].map((index) => <span key={index} className={index < passwordScore ? 'is-on' : ''} />)}</div>
-                  <small>{passwordScore <= 1 ? 'Make it stronger' : passwordScore === 2 ? 'Good password' : 'Strong password'}</small>
+              {mode === 'signup' ? (
+                <div className={`auth-strength is-${password.length >= PASSWORD_MIN ? Math.max(1, passwordScore) : 0}`}>
+                  <small id="auth-password-rule" className={password.length >= PASSWORD_MIN ? 'is-met' : ''}>
+                    {password.length >= PASSWORD_MIN ? <span aria-hidden="true">✓ </span> : null}
+                    At least {PASSWORD_MIN} characters
+                    {password && password.length < PASSWORD_MIN ? ` (${PASSWORD_MIN - password.length} more)` : ''}
+                  </small>
+                  {password.length >= PASSWORD_MIN ? (
+                    <>
+                      <div aria-hidden="true">{[0, 1, 2, 3].map((index) => <span key={index} className={index < passwordScore ? 'is-on' : ''} />)}</div>
+                      <small>{passwordScore <= 1 ? 'Add a number or symbol to make it stronger' : passwordScore === 2 ? 'Good password' : 'Strong password'}</small>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
-              {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+              {error ? (
+                <div className="auth-feedback is-error" role="alert">
+                  {error}
+                  {taken ? (
+                    <span className="auth-feedback__actions">
+                      <button className="auth-text-btn" type="button" onClick={() => switchMode('login')}>Log in instead</button>
+                      <button className="auth-text-btn" type="button" onClick={() => switchMode('reset')}>Reset password</button>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
               <button className="auth-submit" type="submit" disabled={busy}>
                 {busy ? (mode === 'login' ? 'Logging in…' : mode === 'reset' ? 'Sending…' : 'Creating account…') : mode === 'login' ? 'Log in' : mode === 'reset' ? 'Send reset link' : 'Create account'}

@@ -12,7 +12,7 @@ export type AuthSession = {
 }
 
 type AuthConfig = { supabase_url: string; supabase_anon_key: string; google_enabled?: boolean; account_deletion?: boolean }
-type AuthResponse = Partial<AuthSession> & { expires_in?: number; user?: AuthUser }
+type AuthResponse = Partial<AuthSession> & { expires_in?: number; user?: AuthUser & { identities?: unknown[] }; identities?: unknown[] }
 
 export const AUTH_SESSION_KEY = 'bindit-auth-session'
 const SESSION_KEY = AUTH_SESSION_KEY
@@ -187,10 +187,38 @@ export function subscribeToAuthSession(listener: () => void) {
 /** An error the Supabase auth server answered with (as opposed to a network failure). */
 export class AuthRequestError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /** The auth server's error_code (e.g. invalid_credentials, otp_expired), when it sent one. */
+  readonly code: string
+  constructor(message: string, status: number, code = '') {
     super(message)
     this.status = status
+    this.code = code
   }
+}
+
+/** Sign-up was refused because the email already has an account. */
+export const EMAIL_TAKEN = 'email_taken'
+
+/**
+ * Plain words for what the auth server (or the network) said. Known cases get fixed,
+ * friendly text with a next step; anything else keeps the server's own message.
+ */
+export function friendlyAuthError(error: unknown, fallback: string): string {
+  if (error instanceof TypeError) return 'We can’t reach bindet right now. Check your connection and try again.'
+  if (!(error instanceof Error)) return fallback
+  const code = error instanceof AuthRequestError ? error.code : ''
+  const status = error instanceof AuthRequestError ? error.status : 0
+  const text = `${code} ${error.message}`.toLowerCase()
+  if (code === EMAIL_TAKEN || /user_already_exists|already registered|already been registered/.test(text)) {
+    return 'That email already has a bindet account. Log in instead, or reset your password if you forgot it.'
+  }
+  if (/invalid_credentials|invalid login credentials/.test(text)) return 'That email and password don’t match. Check them and try again, or reset your password.'
+  if (/otp_expired|token has expired|invalid otp|token is invalid|otp_invalid/.test(text)) return 'That code didn’t work. It may have expired: check the 6 digits or send a new code.'
+  if (/weak_password|password should|password is too/.test(text)) return 'Use at least 8 characters for your password.'
+  if (/email_address_invalid|validate email|invalid email|email address .* is invalid/.test(text)) return 'That email address doesn’t look right. Check it and try again.'
+  if (status === 429 || /rate limit|too many|over_email_send_rate_limit|over_request_rate_limit/.test(text)) return 'Too many tries for now. Wait a minute, then try again.'
+  if (/signup.* disabled|signups not allowed/.test(text)) return 'New accounts are paused right now. Try again later.'
+  return error.message || fallback
 }
 
 async function readAuthResponse(response: Response, fallback: string): Promise<Record<string, unknown>> {
@@ -203,7 +231,8 @@ async function readAuthResponse(response: Response, fallback: string): Promise<R
   }
   if (!response.ok) {
     const message = [data.msg, data.error_description, data.message].find((value) => typeof value === 'string')
-    throw new AuthRequestError((message as string | undefined) ?? fallback, response.status)
+    const code = [data.error_code, data.code, data.error].find((value) => typeof value === 'string' && /^[a-z_]+$/.test(value))
+    throw new AuthRequestError((message as string | undefined) ?? fallback, response.status, (code as string | undefined) ?? '')
   }
   return data
 }
@@ -316,6 +345,14 @@ export async function refreshAuthSession(session: AuthSession, options: { reload
 
 export async function signUp(email: string, password: string) {
   const data = await authRequest('signup', { email, password }, appReturnUrl())
+  // With email confirmation on, the auth server answers a sign-up for an email that is
+  // already registered with a stand-in user that has no identities, and sends no code.
+  // Say so instead of waiting for a code that never comes.
+  // (Without a session the server returns the user itself, not { user }.)
+  const created = (data.user ?? data) as { identities?: unknown[] }
+  if (!data.access_token && Array.isArray(created.identities) && created.identities.length === 0) {
+    throw new AuthRequestError('That email already has an account.', 422, EMAIL_TAKEN)
+  }
   const session = asSession(data)
   saveAuthSession(session)
   return { session, needsConfirmation: !session }
@@ -328,12 +365,7 @@ export async function resendSignupConfirmation(email: string) {
     headers: { apikey: settings.supabase_anon_key, 'Content-Type': 'application/json' },
     body: JSON.stringify({ type: 'signup', email, options: { emailRedirectTo: appReturnUrl() } }),
   })
-  const text = await response.text()
-  const data = text ? (JSON.parse(text) as Record<string, unknown>) : {}
-  if (!response.ok) {
-    const message = [data.msg, data.error_description, data.message].find((value) => typeof value === 'string')
-    throw new Error((message as string | undefined) ?? 'Could not resend the confirmation email.')
-  }
+  await readAuthResponse(response, 'Could not resend the confirmation email.')
 }
 
 export async function verifySignupCode(email: string, token: string) {
