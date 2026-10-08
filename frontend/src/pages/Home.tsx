@@ -265,10 +265,16 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
       if (!active) return
       setScopes(listed)
       const hidden = data.sandboxed ? [] : loadHiddenCourses()
-      setNotebook((current) => {
-        const merged = mergeNoteScopes(current, listed, hidden)
-        return merged === current ? current : { ...merged, courses: withCourseTones(merged.courses) }
-      })
+      // Save what the server knows, so the sidebar and Study show these courses on a new device too.
+      const current = data.loadNotebook()
+      const merged = mergeNoteScopes(current, listed, hidden)
+      if (merged === current) return
+      try {
+        data.saveNotebook(merged)
+      } catch {
+        // Storage can be unavailable; Home still shows the merged courses.
+      }
+      setNotebook({ ...merged, courses: withCourseTones(merged.courses) })
     }, () => undefined)
     return () => { active = false }
   }, [data, studentId, token])
