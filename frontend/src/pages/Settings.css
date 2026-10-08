@@ -123,3 +123,7 @@
   .settings__dialog .ui-dialog__footer { flex-direction: column-reverse; padding: var(--space-4); }
   .settings__dialog .ui-dialog__footer .ui-button { width: 100%; }
 }
+
+/* Help & feedback (guides and the feedback form come from pages/More.tsx). */
+.settings__feedback { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
+.settings__subhead { margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: var(--weight-semibold); }

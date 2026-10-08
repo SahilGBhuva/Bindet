@@ -7,6 +7,7 @@ import { useDrawer } from '../lib/useDrawer'
 import { InstallBindit } from '../components/AppPrompts'
 import { useInstallOffer } from '../lib/pwa'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
+import { FeedbackForm, HelpGuides } from './More'
 import './Settings.css'
 
 const GOALS = [
@@ -73,6 +74,25 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [canDelete, setCanDelete] = useState<boolean | null>(null)
+
+  // "#settings?help" (old Help links, the command palette) opens on Help & feedback.
+  useEffect(() => {
+    let timer = 0
+    const openHelp = () => {
+      if (!/[?&]help\b/.test(window.location.hash)) return
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        document.getElementById('settings-help')?.scrollIntoView({ block: 'start' })
+        window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#settings`)
+      }, 50)
+    }
+    openHelp()
+    window.addEventListener('hashchange', openHelp)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('hashchange', openHelp)
+    }
+  }, [])
 
   useEffect(() => {
     let live = true
@@ -451,7 +471,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                 {canDelete === false ? (
                   <p className="settings__hint">
                     To delete your account and all your data, email{' '}
-                    <a className="ui-link" href="mailto:officialbindet@gmail.com?subject=Delete%20my%20bindit%20account">officialbindet@gmail.com</a>{' '}
+                    <a className="ui-link" href="mailto:officialbindet@gmail.com?subject=Delete%20my%20bindet%20account">officialbindet@gmail.com</a>{' '}
                     from your account’s email address and we’ll do it within 30 days.
                   </p>
                 ) : (
@@ -463,6 +483,14 @@ export function Settings({ session, onSession }: SettingsProps) {
           {deleteOpen ? <DeleteAccountDialog session={session} onCancel={() => setDeleteOpen(false)} /> : null}
         </>
       )}
+
+      <Section id="settings-help" title="Help & feedback" copy="Short guides for every part of bindet, and a way to tell us what to fix or build next.">
+        <HelpGuides />
+        <div className="settings__feedback">
+          <h3 className="settings__subhead">Send feedback</h3>
+          <FeedbackForm session={session} />
+        </div>
+      </Section>
     </div>
   )
 }

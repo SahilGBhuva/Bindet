@@ -21,7 +21,6 @@ const loaders = {
   profile: () => import('./pages/Profile').then((module) => ({ default: module.Profile })),
   settings: () => import('./pages/Settings').then((module) => ({ default: module.Settings })),
   games: () => import('./pages/Games').then((module) => ({ default: module.Games })),
-  more: () => import('./pages/More').then((module) => ({ default: module.More })),
   admin: () => import('./pages/Admin').then((module) => ({ default: module.Admin })),
 }
 
@@ -34,7 +33,6 @@ const Chat = lazy(loaders.chat)
 const Profile = lazy(loaders.profile)
 const Settings = lazy(loaders.settings)
 const Games = lazy(loaders.games)
-const More = lazy(loaders.more)
 const Admin = lazy(loaders.admin)
 
 /* The routes students open most often after Home, fetched while the browser is idle. */
@@ -267,7 +265,6 @@ function AppShell() {
           {screen === 'chat' ? <Chat session={session} /> : null}
           {screen === 'profile' ? <Profile session={session} onError={setNotice} /> : null}
           {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
-          {screen === 'more' ? <More session={session} /> : null}
         </Suspense>
       </main>
       {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}

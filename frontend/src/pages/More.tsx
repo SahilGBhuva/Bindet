@@ -155,6 +155,27 @@ const CATEGORIES: { id: FeedbackCategory; label: string }[] = [
 ]
 const MESSAGE_MAX = 2000
 
+/* The guides list, shown in Settings → Help & feedback. */
+export function HelpGuides() {
+  return (
+    <div className="ui-panel help__guides">
+      {GUIDES.map((guide) => (
+        <details key={guide.id} className={`help__guide ${toneClass(guide.tone)}`} id={`guide-${guide.id}`}>
+          <summary>
+            <span className="ui-icon" aria-hidden="true">{guide.icon}</span>
+            <span className="help__guide-text">
+              <span className="help__guide-title">{guide.title}</span>
+              <span className="help__guide-summary">{guide.summary}</span>
+            </span>
+            <svg className="help__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+          </summary>
+          <div className="help__guide-body">{guide.body}</div>
+        </details>
+      ))}
+    </div>
+  )
+}
+
 export function More({ session }: { session?: AuthSession | null }) {
   return (
     <div className="ui-page help">
@@ -193,7 +214,7 @@ export function More({ session }: { session?: AuthSession | null }) {
   )
 }
 
-function FeedbackForm({ session }: { session: AuthSession | null }) {
+export function FeedbackForm({ session }: { session: AuthSession | null }) {
   const [category, setCategory] = useState<FeedbackCategory>('bug')
   const [message, setMessage] = useState('')
   const [includeDevice, setIncludeDevice] = useState(false)

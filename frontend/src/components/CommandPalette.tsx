@@ -18,7 +18,7 @@ const COMMANDS: Command[] = [
   { id: 'profile', screen: 'profile', href: '#profile', label: 'Friends & groups', detail: 'People, groups, and your profile', keywords: 'social account groups friends', group: 'Go to' },
   { id: 'games', screen: 'games', href: '#games', label: 'Practice lab', detail: 'Timed rounds, personal bests and challenges', keywords: 'play games quick round challenge friends personal best practice', group: 'Go to' },
   { id: 'settings', screen: 'settings', href: '#settings', label: 'Settings', detail: 'Account, theme, and preferences', keywords: 'account preferences theme dark light', group: 'Go to' },
-  { id: 'more', screen: 'more', href: '#more', label: 'Help', detail: 'Guides and feedback', keywords: 'help about feedback', group: 'Go to' },
+  { id: 'help', screen: 'settings', href: '#settings?help', label: 'Help & feedback', detail: 'Guides, and tell us what to fix (in Settings)', keywords: 'help about feedback guide bug idea', group: 'Go to' },
 ]
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {

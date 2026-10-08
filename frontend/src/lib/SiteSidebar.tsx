@@ -200,7 +200,6 @@ const glyphs = {
   test: svg(<><rect x="3" y="2.5" width="10" height="11" rx="1.2" /><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3" /></>),
   bolt: svg(<path d="M9 1.8 3.8 9h3.6L7 14.2 12.2 7H8.6z" />),
   chat: svg(<path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />),
-  help: svg(<><circle cx="8" cy="8" r="5.5" /><path d="M6.4 6.3a1.7 1.7 0 0 1 3.2.6c0 1.2-1.6 1.4-1.6 2.4M8 11.2v.1" /></>),
   grip: svg(<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" />),
   eyeOff: svg(<><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" /><path d="M3 3l10 10" /></>),
 }
@@ -471,7 +470,6 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
             { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
             { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask Otto', current: active === 'tutor' },
-            { key: 'help', tone: 'green', glyph: glyphs.help, href: '#more', label: 'Help & feedback', current: active === 'more' },
           ] as const).map((item) => (
             <li key={item.key}>
               <a
@@ -744,7 +742,6 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             <InstallBindit place="menu" />
             <div className="bindit-sheet__footer">
               <a href="#settings" onClick={() => setMenuOpen(false)}><NavIcon kind="settings" />Settings</a>
-              <a href="#more" onClick={() => setMenuOpen(false)}><NavIcon kind="more" />Help</a>
               <ThemeButton />
             </div>
           </div>
