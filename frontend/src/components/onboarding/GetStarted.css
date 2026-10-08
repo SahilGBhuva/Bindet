@@ -1,0 +1,61 @@
+/* "Get started" on Home: one ruled sheet, numbered rows, the next step's button in ink. */
+
+.get-started {
+  container: get-started / inline-size;
+  margin: 16px 0 4px;
+  padding: 18px 20px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+.get-started.is-complete { padding-bottom: 18px; }
+
+.get-started__head { display: flex; align-items: center; gap: 12px; }
+.get-started__head > div { flex: 1; min-width: 0; }
+.get-started__title { margin: 0; font-family: var(--font-serif); font-size: 26px; font-weight: 400; line-height: 1.1; }
+.get-started__count { margin: 2px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.get-started__hide { flex: none; }
+.get-started__meter { margin: 12px 0 4px; }
+
+.get-started__list { margin: 6px 0 0; padding: 0; list-style: none; }
+.get-started__item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 0; }
+.get-started__item + .get-started__item { border-top: 1px solid var(--color-border); }
+
+.get-started__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.get-started__mark svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.get-started__item.is-next .get-started__mark { border-color: var(--color-brand); color: var(--color-brand-text); }
+.get-started__item.is-done .get-started__mark { border-color: var(--color-positive); background: var(--color-positive-subtle); color: var(--color-positive); }
+
+.get-started__text { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.get-started__text strong { font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.get-started__text span { color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.4; }
+.get-started__item.is-done .get-started__text strong { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+
+.get-started__link { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
+.get-started__link:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+/* The row is the target: its link stretches over the whole row. */
+.get-started__item { position: relative; }
+.get-started__link::after { content: ""; position: absolute; inset: 0; }
+.get-started__go { position: relative; z-index: 1; flex: none; }
+.get-started__chevron { flex: none; color: var(--color-text-tertiary); font-size: 20px; line-height: 1; }
+.get-started__error { margin: 8px 0; color: var(--color-danger); font-size: var(--text-sm); }
+
+/* Narrow: the button drops under the text, full width, thumb-sized. */
+@container get-started (max-width: 480px) {
+  .get-started__item { flex-wrap: wrap; }
+  .get-started__go { flex-basis: calc(100% - 40px); height: 44px; margin-left: 40px; font-size: var(--text-sm); }
+  .get-started__item { min-height: 64px; }
+  .get-started__hide { height: 44px; padding: 0 14px; }
+}

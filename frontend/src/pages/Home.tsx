@@ -223,7 +223,8 @@ function Icon({ name }: { name: IconName }) {
 
 /* ---------- Page ---------- */
 
-export function Home({ session }: { session: AuthSession | null }) {
+/* firstRun: the "Get started" list, passed in by the signed-in app only (never by the landing demo). */
+export function Home({ session, firstRun = null }: { session: AuthSession | null; firstRun?: ReactNode }) {
   const data = useData()
   const token = session?.access_token
   const [notebook, setNotebook] = useState(() => {
@@ -540,6 +541,7 @@ export function Home({ session }: { session: AuthSession | null }) {
         </header>
 
         {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
+        {data.sandboxed ? null : firstRun}
 
         <ul className="home-today" aria-label="Today at a glance">
           <li className="home-today__card ui-tone--blue">

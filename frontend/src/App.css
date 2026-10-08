@@ -149,3 +149,9 @@
   .app-skeleton__body,
   .app-skeleton.is-sketch .app-skeleton__body { grid-template-columns: 1fr; }
 }
+
+/* The first-run check (App.tsx SignedInApp): a quiet brand mark, normally gone in a blink. */
+.onb-loading { display: grid; place-items: center; min-height: 100vh; min-height: 100dvh; background: var(--color-bg); color: var(--color-text-tertiary); }
+.onb-loading svg { animation: onb-breathe 1.6s ease-in-out infinite; }
+@keyframes onb-breathe { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .onb-loading svg { animation: none; } }
