@@ -17,6 +17,8 @@ from sqlalchemy import (
     JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, Text,
     UniqueConstraint, and_, create_engine, delete, func, inspect, literal, or_, select, text, union_all, update,
 )
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -168,6 +170,28 @@ social_action_events = Table(
     Index("ix_social_action_events_student_action_created", "student_id", "action", "created_at"),
 )
 
+# One row per student per study day, on the student's own calendar day (local_today):
+# a correct quiz answer, a Practice lab round with something right, a flashcard review or
+# a finished practice test (record_study_day). Friend streaks compare these days. Kept
+# for STREAK_LOOKBACK_DAYS and deleted with the account.
+study_days = Table(
+    "study_days", metadata,
+    Column("student_id", String(100), ForeignKey("student_progress.student_id", ondelete="CASCADE"), primary_key=True),
+    Column("day", Date, primary_key=True),
+)
+
+# Friend-streak notifications already sent, so each goes out once: a milestone once per
+# streak (mark "7:2026-10-01", the day the streak started) and an "at risk" nudge once per
+# day (mark "2026-10-08"). student_id is the recipient, friend_id the other student.
+friend_streak_marks = Table(
+    "friend_streak_marks", metadata,
+    Column("student_id", String(100), ForeignKey("profiles.student_id", ondelete="CASCADE"), primary_key=True),
+    Column("friend_id", String(100), ForeignKey("profiles.student_id", ondelete="CASCADE"), primary_key=True),
+    Column("kind", String(12), primary_key=True),
+    Column("mark", String(32), primary_key=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 uploaded_images = Table(
     "uploaded_images", metadata,
     Column("id", String(36), primary_key=True),
@@ -285,6 +309,7 @@ RLS_TABLES = (
     "flashcard_styles",
     "flashcards",
     "friend_quests",
+    "friend_streak_marks",
     "friendships",
     "feedback",
     "generated_questions",
@@ -306,6 +331,7 @@ RLS_TABLES = (
     "study_group_members",
     "study_groups",
     "student_progress",
+    "study_days",
     "study_tasks",
     "topic_progress",
     "practice_test_cache",
@@ -341,6 +367,7 @@ CLIENT_REVOKED_TABLES = (
     "flashcard_reviews",
     "flashcard_styles",
     "flashcards",
+    "friend_streak_marks",
     "grading_cache",
     "help_bot_cache",
     "otto_memories",
@@ -351,6 +378,7 @@ CLIENT_REVOKED_TABLES = (
     "practice_test_cache",
     "practice_test_items",
     "practice_tests",
+    "study_days",
     "tutor_conversation_settings",
     "tutor_conversations",
     "tutor_message_ratings",
@@ -674,7 +702,11 @@ def init_db() -> None:
             if column not in existing:
                 connection.exec_driver_sql(statement)
 
-    create_locked_tables(active_engine, metadata, RLS_TABLES, CLIENT_REVOKED_TABLES, extra=add_missing_columns)
+    def prepare(connection) -> None:
+        add_missing_columns(connection)
+        _backfill_study_days(connection)
+
+    create_locked_tables(active_engine, metadata, RLS_TABLES, CLIENT_REVOKED_TABLES, extra=prepare)
     if active_engine.dialect.name == "sqlite":
         columns = {column["name"] for column in inspect(active_engine).get_columns("student_progress")}
         if "last_active_date" not in columns:
@@ -702,6 +734,8 @@ def init_db() -> None:
                 connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN discoverable BOOLEAN NOT NULL DEFAULT 1")
             if "allow_friend_requests" not in profile_columns:
                 connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN allow_friend_requests BOOLEAN NOT NULL DEFAULT 1")
+        with active_engine.begin() as connection:
+            _backfill_study_days(connection)
 
 
 def _next_streak(current_streak: int, last_active: date | None, correct: bool, today: date) -> int:
@@ -883,6 +917,8 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
         ).mappings().all()
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
+        if correct:
+            record_study_day(connection, student_id, today)
 
     return {
         "student_id": updated["student_id"],
@@ -931,6 +967,7 @@ def award_xp(student_id: str, xp: int) -> dict:
             ))
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
+        record_study_day(connection, student_id, today)
     return {"xp_awarded": xp, "total_xp": total, "streak": streak}
 
 
@@ -974,6 +1011,8 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
     ))
     if xp > 0:
         connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
+    if active:
+        record_study_day(connection, student_id, today)
     return {"xp_awarded": xp, "total_xp": progress["total_xp"] + xp, "streak": streak}
 
 
@@ -990,7 +1029,10 @@ def mark_study_day(student_id: str) -> int:
                 student_id=student_id, total_xp=0, attempts=0, correct_answers=0, streak=1, best_streak=1,
                 last_active_date=today, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
             ))
+            record_study_day(connection, student_id, today)
             return 1
+        # Written even when the streak already counts today (idempotent), so the day is never missed.
+        record_study_day(connection, student_id, today)
         if progress["last_active_date"] == today:
             return int(progress["streak"])
         streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
@@ -998,6 +1040,187 @@ def mark_study_day(student_id: str) -> int:
             streak=streak, best_streak=max(int(progress["best_streak"]), streak), last_active_date=today, updated_at=now,
         ))
         return streak
+
+
+# --- Study days and friend streaks ----------------------------------------------------------
+
+# Study days and friend-streak marks are kept this long, so a long streak still counts.
+STREAK_LOOKBACK_DAYS = 400
+# How far back the one-time backfill reads XP history when study_days starts out empty.
+STUDY_DAY_BACKFILL_DAYS = 60
+# Friend streaks of these lengths send both friends a notification.
+STREAK_MILESTONES = (3, 7, 14, 30, 50, 100)
+# The friend detail shows this many days of history.
+STREAK_HISTORY_DAYS = 14
+
+
+def _insert_ignore(connection, table, rows: list[dict], keys: list[str]) -> int:
+    """INSERT ... ON CONFLICT DO NOTHING. Returns how many rows were new."""
+    if not rows:
+        return 0
+    insert = postgres_insert if connection.dialect.name == "postgresql" else sqlite_insert
+    return connection.execute(insert(table).values(rows).on_conflict_do_nothing(index_elements=keys)).rowcount or 0
+
+
+def record_study_day(connection, student_id: str, day: date | None = None) -> bool:
+    """Mark `day` (default: the student's local today) as a study day, inside the caller's
+    transaction. Idempotent. The student_progress row must already exist.
+
+    The first time a day is recorded, old study days and marks are pruned and the student's
+    friends are told what it means for their shared streak (a milestone, or "your turn").
+    Returns True when the day is new."""
+    day = day or local_today()
+    if not _insert_ignore(connection, study_days, [{"student_id": student_id, "day": day}], ["student_id", "day"]):
+        return False
+    connection.execute(delete(study_days).where(
+        study_days.c.student_id == student_id, study_days.c.day < day - timedelta(days=STREAK_LOOKBACK_DAYS),
+    ))
+    connection.execute(delete(friend_streak_marks).where(
+        friend_streak_marks.c.student_id == student_id,
+        friend_streak_marks.c.created_at < datetime.now(timezone.utc) - timedelta(days=STREAK_LOOKBACK_DAYS),
+    ))
+    _announce_study_day(connection, student_id, day)
+    return True
+
+
+def _backfill_study_days(connection) -> None:
+    """Seed study_days once from recent XP history (UTC days) and each student's last
+    active day, so friend streaks don't all restart at 0 when the table is new. Skipped as
+    soon as the table has any row; inserts ignore days that are already there. Runs in
+    init_db's table-creation transaction on Postgres."""
+    if connection.execute(select(study_days.c.student_id).limit(1)).first() is not None:
+        return
+    if connection.dialect.name == "postgresql":
+        day = func.date(func.timezone("UTC", xp_events.c.created_at))
+    else:
+        day = func.date(xp_events.c.created_at)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=STUDY_DAY_BACKFILL_DAYS)
+    rows = connection.execute(select(xp_events.c.student_id, day).where(xp_events.c.created_at >= cutoff).distinct()).all()
+    rows += connection.execute(select(student_progress.c.student_id, student_progress.c.last_active_date).where(
+        student_progress.c.last_active_date >= cutoff.date(),
+    )).all()
+    values = {(owner, value if isinstance(value, date) else date.fromisoformat(str(value)[:10])) for owner, value in rows if value}
+    batch = [{"student_id": owner, "day": value} for owner, value in sorted(values)]
+    for start in range(0, len(batch), 500):
+        _insert_ignore(connection, study_days, batch[start:start + 500], ["student_id", "day"])
+
+
+def _streak_friend_ids(connection, student_id: str) -> list[str]:
+    """Accepted friends who are not blocked in either direction."""
+    friend_ids = _friend_ids(connection, student_id)
+    if not friend_ids:
+        return []
+    blocked = set(connection.execute(select(social_blocks.c.blocker_id, social_blocks.c.blocked_id).where(or_(
+        and_(social_blocks.c.blocker_id == student_id, social_blocks.c.blocked_id.in_(friend_ids)),
+        and_(social_blocks.c.blocked_id == student_id, social_blocks.c.blocker_id.in_(friend_ids)),
+    ))).all())
+    hidden = {blocker if blocked_id == student_id else blocked_id for blocker, blocked_id in blocked}
+    return [friend_id for friend_id in friend_ids if friend_id not in hidden]
+
+
+def _study_days(connection, student_ids: list[str], since: date) -> dict[str, set[date]]:
+    if not student_ids:
+        return {}
+    rows = connection.execute(select(study_days.c.student_id, study_days.c.day).where(
+        study_days.c.student_id.in_(student_ids), study_days.c.day >= since,
+    )).all()
+    days: dict[str, set[date]] = {}
+    for owner_id, value in rows:
+        days.setdefault(owner_id, set()).add(value if isinstance(value, date) else date.fromisoformat(str(value)[:10]))
+    return days
+
+
+def _streak_view(mine: set[date], theirs: set[date], today: date) -> dict:
+    """The shared streak between two students' study days, seen from `today`.
+
+    status: "done" (both studied today), "at_risk" (a streak through yesterday that today
+    hasn't extended yet), "broken" (they had a shared day before, but no live streak) or
+    "none" (never studied on the same day)."""
+    shared = mine & theirs
+    streak = _shared_streak(mine, theirs, today)
+    me_today, friend_today = today in mine, today in theirs
+    if streak and me_today and friend_today:
+        status = "done"
+    elif streak:
+        status = "at_risk"
+    elif shared:
+        status = "broken"
+    else:
+        status = "none"
+    best = run = 0
+    previous = None
+    for day in sorted(shared):
+        run = run + 1 if previous is not None and day - previous == timedelta(days=1) else 1
+        best = max(best, run)
+        previous = day
+    history = [today - timedelta(days=offset) for offset in range(STREAK_HISTORY_DAYS - 1, -1, -1)]
+    return {
+        "friend_streak": streak, "best_friend_streak": best, "streak_status": status,
+        "me_today": me_today, "friend_today": friend_today,
+        "streak_days": [{"day": day.isoformat(), "me": day in mine, "friend": day in theirs} for day in history],
+    }
+
+
+def _names(connection, student_ids) -> dict[str, str]:
+    ids = list(student_ids)
+    if not ids:
+        return {}
+    return dict(connection.execute(select(profiles.c.student_id, profiles.c.display_name).where(profiles.c.student_id.in_(ids))).all())
+
+
+def _send_streak_notices(connection, notices: list[dict]) -> int:
+    """Insert each notice whose mark is new. notice: recipient, actor, kind, mark, message."""
+    sent = 0
+    now = datetime.now(timezone.utc)
+    for notice in notices:
+        if not _insert_ignore(connection, friend_streak_marks, [{
+            "student_id": notice["recipient"], "friend_id": notice["actor"], "kind": notice["kind"],
+            "mark": notice["mark"], "created_at": now,
+        }], ["student_id", "friend_id", "kind", "mark"]):
+            continue
+        connection.execute(social_notifications.insert().values(
+            recipient_id=notice["recipient"], actor_id=notice["actor"], kind=f"streak_{notice['kind']}",
+            message=notice["message"][:240], is_read=False, created_at=now,
+        ))
+        sent += 1
+    return sent
+
+
+def _milestone_notices(first_id: str, second_id: str, streak: int, today: date, names: dict[str, str]) -> list[dict]:
+    if streak not in STREAK_MILESTONES:
+        return []
+    mark = f"{streak}:{(today - timedelta(days=streak - 1)).isoformat()}"
+    return [
+        {"recipient": recipient, "actor": other, "kind": "milestone", "mark": mark,
+         "message": f"You and {names.get(other, 'your friend')} hit a {streak}-day streak!"}
+        for recipient, other in ((first_id, second_id), (second_id, first_id))
+    ]
+
+
+def _at_risk_notice(recipient: str, studied_id: str, streak: int, today: date, names: dict[str, str]) -> dict:
+    name = names.get(studied_id, "Your friend")
+    return {"recipient": recipient, "actor": studied_id, "kind": "at_risk", "mark": today.isoformat(),
+            "message": f"{name} studied today. Your turn to keep your {streak}-day streak going."}
+
+
+def _announce_study_day(connection, student_id: str, today: date) -> None:
+    """Called once per new study day: milestone notices for streaks this day completes, and
+    an "at risk" notice to friends with a live streak who haven't studied yet today."""
+    friend_ids = _streak_friend_ids(connection, student_id)
+    if not friend_ids:
+        return
+    days = _study_days(connection, [student_id, *friend_ids], today - timedelta(days=STREAK_LOOKBACK_DAYS))
+    mine = days.get(student_id, set())
+    names = _names(connection, [student_id, *friend_ids])
+    notices: list[dict] = []
+    for friend_id in friend_ids:
+        theirs = days.get(friend_id, set())
+        streak = _shared_streak(mine, theirs, today)
+        if today in theirs:
+            notices += _milestone_notices(student_id, friend_id, streak, today, names)
+        elif streak:
+            notices.append(_at_risk_notice(friend_id, student_id, streak, today, names))
+    _send_streak_notices(connection, notices)
 
 
 def record_daily_login(student_id: str) -> dict:
@@ -1421,55 +1644,100 @@ def list_friends(student_id: str) -> list[dict]:
         weekly = dict(connection.execute(select(xp_events.c.student_id, func.sum(xp_events.c.xp)).where(
             xp_events.c.student_id.in_(friend_ids), xp_events.c.created_at >= week_start,
         ).group_by(xp_events.c.student_id)).all())
-        active_days = _active_days(connection, [student_id, *friend_ids])
-    today = local_today()
-    return [{**dict(row), "streak": live_streak(row["streak"], row["last_active_date"], today), "active_today": row["last_active_date"] == today,
-             "weekly_xp": weekly.get(row["student_id"], 0),
-             "friend_streak": _shared_streak(active_days.get(student_id, set()), active_days.get(row["student_id"], set()))}
-            for row in rows]
-
-
-# Shared streaks only look back this far, so the query stays small for long-time students.
-STREAK_LOOKBACK_DAYS = 400
-
-
-def _active_days(connection, student_ids: list[str]) -> dict[str, set[date]]:
-    """The distinct UTC days each student earned XP on, within the lookback window."""
-    if connection.dialect.name == "postgresql":
-        day = func.date(func.timezone("UTC", xp_events.c.created_at))
-    else:
-        # SQLite stores the UTC wall time as text; date() reads its calendar day.
-        day = func.date(xp_events.c.created_at)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=STREAK_LOOKBACK_DAYS)
-    rows = connection.execute(select(xp_events.c.student_id, day.label("day")).where(
-        xp_events.c.student_id.in_(student_ids), xp_events.c.created_at >= cutoff,
-    ).distinct()).all()
-    active: dict[str, set[date]] = {}
-    for owner_id, value in rows:
-        if value is None:
+        today = local_today()
+        streak_ids = set(_streak_friend_ids(connection, student_id))
+        days = _study_days(connection, [student_id, *friend_ids], today - timedelta(days=STREAK_LOOKBACK_DAYS))
+        names = {student_id: connection.execute(select(profiles.c.display_name).where(
+            profiles.c.student_id == student_id)).scalar_one_or_none() or "Your friend"}
+    mine = days.get(student_id, set())
+    friends = []
+    for row in rows:
+        if row["student_id"] not in streak_ids:
             continue
-        active.setdefault(owner_id, set()).add(value if isinstance(value, date) else date.fromisoformat(str(value)[:10]))
-    return active
+        names[row["student_id"]] = row["display_name"]
+        friends.append({
+            **dict(row), "streak": live_streak(row["streak"], row["last_active_date"], today),
+            "active_today": row["last_active_date"] == today, "weekly_xp": weekly.get(row["student_id"], 0),
+            **_streak_view(mine, days.get(row["student_id"], set()), today),
+        })
+    _catch_up_streak_notices(student_id, friends, today, names)
+    return friends
+
+
+def _catch_up_streak_notices(student_id: str, friends: list[dict], today: date, names: dict[str, str]) -> None:
+    """Notices the study-day hook can miss (two friends finishing at the same moment, or
+    time zones that disagree about "today"), sent when the friends list is read. Cheap: only
+    friends whose streak is a milestone today or at risk on the viewer's turn are checked,
+    and marks keep every notice to once."""
+    notices: list[dict] = []
+    for friend in friends:
+        streak, friend_id = friend["friend_streak"], friend["student_id"]
+        if friend["streak_status"] == "done":
+            notices += [notice for notice in _milestone_notices(student_id, friend_id, streak, today, names)
+                        if notice["recipient"] == student_id]
+        elif friend["streak_status"] == "at_risk" and friend["friend_today"] and not friend["me_today"]:
+            notices.append(_at_risk_notice(student_id, friend_id, streak, today, names))
+    if not notices:
+        return
+    with engine().connect() as connection:
+        sent = {(row[0], row[1], row[2]) for row in connection.execute(
+            select(friend_streak_marks.c.friend_id, friend_streak_marks.c.kind, friend_streak_marks.c.mark).where(
+                friend_streak_marks.c.student_id == student_id,
+                friend_streak_marks.c.friend_id.in_([notice["actor"] for notice in notices]),
+            )).all()}
+    missing = [notice for notice in notices if (notice["actor"], notice["kind"], notice["mark"]) not in sent]
+    if missing:
+        with engine().begin() as connection:
+            _send_streak_notices(connection, missing)
 
 
 def _friend_streak(first_id: str, second_id: str) -> int:
+    """The live shared streak between two students, in the requesting student's day."""
+    today = local_today()
     with engine().connect() as connection:
-        active = _active_days(connection, [first_id, second_id])
-    return _shared_streak(active.get(first_id, set()), active.get(second_id, set()))
+        days = _study_days(connection, [first_id, second_id], today - timedelta(days=STREAK_LOOKBACK_DAYS))
+    return _shared_streak(days.get(first_id, set()), days.get(second_id, set()), today)
 
 
-def _shared_streak(first_days: set[date], second_days: set[date]) -> int:
+def _shared_streak(first_days: set[date], second_days: set[date], today: date | None = None) -> int:
+    """Consecutive days both studied, counted back from today, or from yesterday while
+    today isn't shared yet (the streak is still alive until today ends).
+
+    Days are each student's own calendar days (study_days); `today` is the viewer's
+    (local_today), so the streak follows the clock of whoever is looking."""
     shared = first_days & second_days
-    # XP event timestamps are stored in UTC, so their calendar-day comparison
-    # must use the same clock. Mixing local `date.today()` with UTC timestamps
-    # breaks shared streaks for several hours around midnight UTC.
-    today_utc = datetime.now(timezone.utc).date()
-    cursor = today_utc if today_utc in shared else today_utc - timedelta(days=1)
+    today = today or local_today()
+    cursor = today if today in shared else today - timedelta(days=1)
     streak = 0
     while cursor in shared:
         streak += 1
         cursor -= timedelta(days=1)
     return streak
+
+
+def nudge_friend(student_id: str, friend_id: str) -> dict:
+    """Send a friend an in-app reminder to study today (no email or push). Only between
+    accepted, unblocked friends, and only while the friend hasn't studied today."""
+    init_db()
+    today = local_today()
+    with engine().begin() as connection:
+        if friend_id == student_id or friend_id not in _streak_friend_ids(connection, student_id):
+            raise ValueError("not_friends")
+        days = _study_days(connection, [student_id, friend_id], today - timedelta(days=STREAK_LOOKBACK_DAYS))
+        mine, theirs = days.get(student_id, set()), days.get(friend_id, set())
+        if today in theirs:
+            raise ValueError("already_studied")
+        name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
+        if name is None:
+            raise ValueError("profile_not_found")
+        streak = _shared_streak(mine, theirs, today)
+        message = (f"{name} reminded you to study today to keep your {streak}-day streak going."
+                   if streak else f"{name} reminded you to study today. Study on the same days to start a streak.")
+        connection.execute(social_notifications.insert().values(
+            recipient_id=friend_id, actor_id=student_id, kind="streak_nudge", message=message[:240],
+            is_read=False, created_at=datetime.now(timezone.utc),
+        ))
+    return {"nudged": True}
 
 
 # Each student can belong to at most this many study groups, counting ones they created.
@@ -2073,6 +2341,8 @@ def reset_db() -> None:
         connection.execute(delete(social_notifications))
         connection.execute(delete(social_reactions))
         connection.execute(delete(social_blocks))
+        connection.execute(delete(friend_streak_marks))
+        connection.execute(delete(study_days))
         connection.execute(delete(xp_events))
         connection.execute(delete(friend_quests))
         connection.execute(delete(friendships))

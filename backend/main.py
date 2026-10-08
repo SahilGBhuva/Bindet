@@ -27,6 +27,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from sqlalchemy import func, select, text
 
 import base64
+import contextvars
 import binascii
 import json
 
@@ -94,7 +95,8 @@ def gather(*calls):
     The first failure (in call order) is re-raised once every call has been
     started, so a failed limit check still raises the same error it always did.
     """
-    futures = [ai_prep.submit(function, *args) for function, *args in calls]
+    # Each call runs in a copy of this request's context, so it sees the student's time zone.
+    futures = [ai_prep.submit(contextvars.copy_context().run, function, *args) for function, *args in calls]
     return [future.result() for future in futures]
 
 app.add_middleware(
@@ -1085,6 +1087,8 @@ def social_error(error: ValueError) -> HTTPException:
         "activity_not_found": (404, "That activity is not available"),
         "cannot_block_self": (400, "You cannot block yourself"),
         "cannot_report_self": (400, "You cannot report yourself"),
+        "not_friends": (404, "You can only remind your friends"),
+        "already_studied": (409, "They already studied today, so there’s nothing to remind them of"),
         "social_rate_limited": (429, "You’re doing that too quickly. Please wait and try again."),
         "invalid_group_name": (400, "Group names must be between 2 and 48 characters"),
         "invalid_group_goal": (400, "The weekly group goal must be between 100 and 10,000 XP"),
@@ -1505,7 +1509,8 @@ def get_friends(authorization: Annotated[str | None, Header()] = None):
         "activity": database.activity_feed,
         "notifications": database.notifications_for,
     }
-    pending = {name: social_reads.submit(reader, student_id) for name, reader in readers.items()}
+    # A copy of the request context per reader, so friend streaks use the student's own day.
+    pending = {name: social_reads.submit(contextvars.copy_context().run, reader, student_id) for name, reader in readers.items()}
     return {
         name: future.result() for name, future in pending.items()
     }
@@ -2332,6 +2337,24 @@ def delete_friend(friend_id: str, authorization: Annotated[str | None, Header()]
     if not database.remove_friend(user["id"], friend_id):
         raise HTTPException(status_code=404, detail="Friend not found")
     return {"deleted": True}
+
+
+# Friend streak reminders: in-app notifications only (never email or push).
+NUDGES_PER_FRIEND_PER_DAY = 3
+NUDGES_PER_DAY = 20
+
+
+@app.post("/api/friend-streaks/{friend_id}/nudge")
+def nudge_friend(friend_id: Annotated[str, PathParam(min_length=1, max_length=100)], authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "nudge", NUDGES_PER_DAY, 1440)
+        # The action name holds a short hash of the friend, so each friend has their own daily limit.
+        per_friend = "nudge_" + hashlib.blake2s(friend_id.encode(), digest_size=7).hexdigest()
+        database.check_social_rate_limit(user["id"], per_friend, NUDGES_PER_FRIEND_PER_DAY, 1440)
+        return database.nudge_friend(user["id"], friend_id)
+    except ValueError as error:
+        raise social_error(error) from error
 
 
 @app.post("/api/friend-quests", status_code=201)

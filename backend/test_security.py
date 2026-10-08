@@ -258,23 +258,23 @@ class SocialQueryTests(unittest.TestCase):
         request = database.send_friend_request("alex-id", self.sam["friend_code"])
         database.respond_to_friend_request(request["request_id"], "sam-id", True)
 
-    def add_xp(self, student_id, days_ago, xp=10):
-        when = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    def add_day(self, student_id, days_ago):
+        day = database.local_today() - timedelta(days=days_ago)
         with database.engine().begin() as connection:
-            connection.execute(database.xp_events.insert().values(student_id=student_id, xp=xp, created_at=when))
+            database._insert_ignore(connection, database.study_days, [{"student_id": student_id, "day": day}], ["student_id", "day"])
 
     def test_shared_streak_counts_consecutive_shared_days(self):
         for days_ago in (0, 1, 2, 4):
-            self.add_xp("alex-id", days_ago)
-            self.add_xp("sam-id", days_ago)
-        self.add_xp("alex-id", 0)  # duplicate day is counted once
-        self.add_xp("sam-id", 500)  # outside the lookback window
+            self.add_day("alex-id", days_ago)
+            self.add_day("sam-id", days_ago)
+        self.add_day("alex-id", 0)  # duplicate day is counted once
+        self.add_day("sam-id", 500)  # outside the lookback window
         self.assertEqual(database._friend_streak("alex-id", "sam-id"), 3)
         self.assertEqual(database.list_friends("alex-id")[0]["friend_streak"], 3)
 
     def test_streak_ignores_days_only_one_friend_studied(self):
-        self.add_xp("alex-id", 0)
-        self.add_xp("sam-id", 1)
+        self.add_day("alex-id", 0)
+        self.add_day("sam-id", 1)
         self.assertEqual(database._friend_streak("alex-id", "sam-id"), 0)
 
     def test_weekly_sums_only_cover_relevant_students(self):
