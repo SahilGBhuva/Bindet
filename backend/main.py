@@ -2354,6 +2354,8 @@ def nudge_friend(friend_id: Annotated[str, PathParam(min_length=1, max_length=10
         database.check_social_rate_limit(user["id"], per_friend, NUDGES_PER_FRIEND_PER_DAY, 1440)
         return database.nudge_friend(user["id"], friend_id)
     except ValueError as error:
+        if str(error) == "social_rate_limited":
+            raise HTTPException(status_code=429, detail="You’ve sent enough reminders for today. Try again tomorrow.") from error
         raise social_error(error) from error
 
 
