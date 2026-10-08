@@ -740,3 +740,23 @@
 
 /* Friend rows: the streak line wraps rather than cutting off in the narrow column. */
 .profile__friend .profile__row-meta { white-space: normal; }
+
+/*
+ * Phones: a friend row keeps the name and its controls on the first line, and the streak
+ * line runs the full width underneath instead of wrapping in a sliver beside the buttons.
+ */
+@media (max-width: 560px) {
+  .profile__friend .profile__person {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) repeat(3, auto);
+    align-items: center;
+    column-gap: var(--space-2);
+    row-gap: 2px;
+    padding-block: var(--space-2);
+  }
+  .profile__friend .profile__person > .ui-avatar { grid-row: 1 / span 2; grid-column: 1; align-self: start; margin-top: 2px; margin-right: var(--space-1); }
+  .profile__friend .profile__person > .ui-row__main { display: contents; }
+  .profile__friend .profile__person .ui-row__title { grid-row: 1; grid-column: 2; }
+  .profile__friend .profile__person .profile__row-meta { grid-row: 2; grid-column: 2 / -1; }
+  .profile__friend .profile__person > :not(.ui-avatar):not(.ui-row__main) { grid-row: 1; }
+}
