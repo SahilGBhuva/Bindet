@@ -20,6 +20,8 @@ import { announceReviewChange } from '../lib/review'
 import { useReviewSummary } from '../lib/useReviewSummary'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
+import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
+import type { StudyGuide } from '../lib/studyGuides'
 import { prepareNotePhoto } from '../lib/notePhoto'
 import {
   FOCUS_SIZES,
@@ -36,7 +38,7 @@ import {
 import type { InstructionKind } from '../lib/studyPrefs'
 import './Tools.css'
 
-type ToolView = 'scan' | 'cards' | 'quiz'
+type ToolView = 'scan' | 'cards' | 'quiz' | 'guides'
 type NoteSource = 'file' | 'paste' | 'photo'
 // repeat: the server had nothing new, so this is a question the student has seen before.
 type QuizQuestion = GeneratedQuestion & { repeat?: boolean }
@@ -133,6 +135,7 @@ const VIEWS: { id: ToolView; label: string }[] = [
   { id: 'scan', label: 'Notes' },
   { id: 'cards', label: 'Flashcards' },
   { id: 'quiz', label: 'Quiz' },
+  { id: 'guides', label: 'Guides' },
 ]
 
 function courseTone(course: { name: string; tone?: string }) {
@@ -342,6 +345,12 @@ function quizLoadFailure(error: unknown) {
 const wait = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
 
 /* Study's hash asks for Review mode over every unit ("#tools?review=all", from Home or the sidebar). */
+/* "#tools?guide=<id>" (Otto's chat card): the study guide to open. */
+function guideRequested() {
+  const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
+  return screen === 'tools' ? new URLSearchParams(query).get('guide') ?? '' : ''
+}
+
 function reviewRequested() {
   const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
   return screen === 'tools' && new URLSearchParams(query).get('review') === 'all'
@@ -419,6 +428,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [lookHint, setLookHint] = useState('')
   // An open practice test (setup, test or results) for a unit, or for the whole course (unit null).
   const [practice, setPractice] = useState<{ course: string; unit: string | null; openId?: string; key: number } | null>(null)
+  // Study guides over the workspace: the whole course's (course), or one guide opened from a link (openId).
+  const [guideView, setGuideView] = useState<{ course: string; openId?: string; key: number } | null>(null)
   // The active unit's practice tests (for Resume and the last score on the Quiz panel).
   const [unitTests, setUnitTests] = useState<{ key: string; tests: PracticeTestSummary[] } | null>(null)
   const [unitTestsRequest, setUnitTestsRequest] = useState(0)
@@ -584,7 +595,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     return () => document.removeEventListener('keydown', onKey)
   }, [orderOpen])
 
-  const focusOn = focusMode && (panelFn !== 'scan' || reviewAll || practice !== null)
+  const focusOn = focusMode && ((panelFn !== 'scan' && panelFn !== 'guides') || reviewAll || practice !== null) && !guideView
 
   // Home and the sidebar link to "#tools?review=all": open Review over every unit, then
   // drop the request from the address so a reload or Back doesn't reopen it.
@@ -595,6 +606,23 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       // A practice test in progress stays on the server; its unit's Quiz panel offers Resume.
       setPractice(null)
       setReviewAll(true)
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
+    }
+    sync()
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [data])
+
+  // Otto's chat card links to "#tools?guide=<id>": open that guide over the workspace, then drop
+  // the request from the address so a reload or Back doesn't reopen it.
+  useEffect(() => {
+    if (data.sandboxed) return
+    const sync = () => {
+      const id = guideRequested()
+      if (!id) return
+      setPractice(null)
+      setReviewAll(false)
+      setGuideView({ course: '', openId: id, key: Date.now() })
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
     }
     sync()
@@ -724,6 +752,20 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     setFocusMode(false)
     setReviewAll(false)
     setPractice({ course: activeCourse, unit, openId, key: Date.now() })
+  }
+
+  /* A guide opened from a link: show its course and unit behind it, so Back lands on its Guides tab. */
+  function showGuidePlace(guide: StudyGuide) {
+    setNotebook((current) => {
+      const course = current.courses.find((item) => sameName(item.name, guide.course))
+      if (!course) return current
+      const unit = guide.unit ? course.units.find((item) => sameName(item, guide.unit ?? '')) : undefined
+      const activeUnit = unit ?? (sameName(current.activeCourse, course.name) ? current.activeUnit : course.units[0] ?? '')
+      if (current.activeCourse === course.name && current.activeUnit === activeUnit) return current
+      return { ...current, activeCourse: course.name, activeUnit }
+    })
+    setGuideView((current) => (current?.openId === guide.id ? { ...current, course: guide.course } : current))
+    setPanelFn('guides')
   }
 
   function reloadLibrary() {
@@ -925,6 +967,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   function chooseCourse(name: string) {
     // A test in progress stays on the server and can be resumed from its unit's Quiz panel.
     if (practice && !sameName(practice.course, name)) setPractice(null)
+    if (guideView?.course && !sameName(guideView.course, name)) setGuideView(null)
     setAddingUnit(false)
     setNewUnit('')
     setRenamingUnit('')
@@ -1920,6 +1963,17 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               Test the whole course
             </button>
           ) : null}
+          {current ? (
+            <button
+              className="ui-button tools__course-guide"
+              type="button"
+              disabled={!courseNoteCount}
+              title={courseNoteCount ? `Otto writes a study guide from every unit in ${activeCourse}` : 'Add notes to this course first'}
+              onClick={() => { setPractice(null); setReviewAll(false); setGuideView({ course: activeCourse, key: Date.now() }) }}
+            >
+              Study guide for the whole course
+            </button>
+          ) : null}
           <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
         </div>
       </header>
@@ -2023,6 +2077,34 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               onClose={() => { setPractice(null); setFocusMode(false) }}
               onChanged={() => setUnitTestsRequest((count) => count + 1)}
             />
+          ) : guideView ? (
+            <div className="tools__guide-sheet">
+              {guideView.openId ? (
+                <GuideReader
+                  key={guideView.key}
+                  guideId={guideView.openId}
+                  accessToken={accessToken}
+                  fallbackUnit={activeUnit || undefined}
+                  backLabel={activeUnit ? `Guides for ${activeUnit}` : 'Back'}
+                  onBack={() => setGuideView(null)}
+                  onLoaded={showGuidePlace}
+                  onDeleted={() => { setGuideView(null); setNotice('Study guide deleted.') }}
+                  onNotice={setNotice}
+                  onCardsMade={reloadLibrary}
+                />
+              ) : (
+                <StudyGuides
+                  key={guideView.key}
+                  course={guideView.course}
+                  unit={null}
+                  accessToken={accessToken}
+                  fallbackUnit={activeUnit || undefined}
+                  onClose={() => setGuideView(null)}
+                  onNotice={setNotice}
+                  onCardsMade={reloadLibrary}
+                />
+              )}
+            </div>
           ) : (<>
           <div className="ui-tabs tools__unit-tabs" role="tablist" aria-label={`Units in ${activeCourse}`}>
             {units.map((item) =>
@@ -2441,6 +2523,20 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </button>
                   )) : null}
                   {remaking ? <p className="tools__status" role="status"><span className="ui-spinner" />Making new cards… {remaking.done} of {remaking.total} notes</p> : null}
+                </div>
+              ) : null}
+
+              {panelFn === 'guides' ? (
+                <div className="tools__guides" role="tabpanel" aria-label="Guides">
+                  {unsavedPaste}
+                  <StudyGuides
+                    key={unitKey}
+                    course={activeCourse}
+                    unit={activeUnit}
+                    accessToken={accessToken}
+                    onNotice={setNotice}
+                    onCardsMade={reloadLibrary}
+                  />
                 </div>
               ) : null}
 

@@ -5,6 +5,7 @@ import { nextValues, previewFor, stateName, type SchedulerState } from '../../li
 import { COURSE_TONES } from '../../lib/session'
 import type { NoteDeposit, Notebook, UnitAttempt } from '../../lib/types'
 import type { NoteScope } from '../../lib/api'
+import type { StudyGuide, StudyGuideSummary } from '../../lib/studyGuides'
 
 /*
  * Sandboxed data for the landing page's live demo. Everything lives in memory
@@ -280,6 +281,20 @@ function demoTestQuestions(course: string, unit: string | null): DemoQuestion[] 
   ])
 }
 
+/* A study guide for each demo unit, written ahead of time from that unit's own material (no AI, nothing saved). */
+function demoGuides(): StudyGuide[] {
+  return COURSES.flatMap((course, c) => Object.entries(course.units).map(([unit, content], u) => ({
+    id: `demo-guide-${c}-${u}`, course: course.name, unit, kind: 'study_guide' as const, title: `Study guide: ${unit}`, instructions: '',
+    note_count: 1, created_at: iso(c + u * 0.5 + 0.1), updated_at: iso(c + u * 0.5 + 0.1),
+    sections: [
+      { heading: 'Key ideas', bullets: [content.preview, ...content.cards.map(([, back]) => back)], terms: [], items: [] },
+      { heading: 'Common mistakes', terms: [], items: [], bullets: content.questions.slice(0, 2).map((item) => item.hint) },
+      { heading: 'Likely test questions', bullets: [], terms: [], items: content.questions.map((item) => ({ question: item.q, answer: `${item.answer}. ${item.why}` })) },
+    ].filter((section) => section.bullets.length + section.terms.length + section.items.length > 0),
+    section_count: 3, entry_count: content.cards.length + content.questions.length + 3,
+  })))
+}
+
 export function createDemoData(onLocked: (action: string) => void): DataSource {
   let notebook = initialNotebook()
   const attempts = initialAttempts()
@@ -396,6 +411,10 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     ...structuredClone(test),
     items: test.items.map(({ position, type, prompt, choices }) => ({ position, type, prompt, choices: [...choices] })),
   })
+
+  // Study guides: one written ahead of time per unit, read-only.
+  const guides = demoGuides()
+  const guideSummary = ({ sections, ...summary }: StudyGuide): StudyGuideSummary => { void sections; return summary }
 
   const notebookListeners = new Set<() => void>()
   return {
@@ -661,5 +680,19 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
       .filter((test) => test.course === course && (unit === null || test.unit === unit))
       .reverse()
       .map(practiceSummary)),
+    listStudyGuides: (course, unit) => wait({
+      guides: guides.filter((guide) => guide.course === course && (unit === null || guide.unit === unit)).map(guideSummary),
+      note_count: 1,
+      can_timeline: false,
+    }),
+    getStudyGuide: (guideId) => {
+      const guide = guides.find((item) => item.id === guideId)
+      return guide ? wait(structuredClone(guide)) : Promise.reject(new Error('That study guide couldn’t be found.'))
+    },
+    createStudyGuide: locked('make study guides with Otto'),
+    regenerateStudyGuide: locked('make study guides with Otto'),
+    renameStudyGuide: locked('rename study guides'),
+    deleteStudyGuide: locked('delete study guides'),
+    saveStudyGuideAsNote: locked('make flashcards from a study guide'),
   }
 }

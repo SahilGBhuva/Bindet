@@ -12,6 +12,7 @@ import { useReviewSummary } from '../lib/useReviewSummary'
 import { MathExpression, MathText } from '../components/math/Math'
 import { OttoSheet, type OttoSheetTab } from '../components/otto/OttoSheet'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
+import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
 import './Tutor.css'
 
 /*
@@ -661,6 +662,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     const list: Starter[] = []
     const due = [...(review?.by_unit ?? [])].filter((item) => item.due > 0).sort((a, b) => b.due - a.due)[0]
     if (due) list.push({ key: 'due', label: `Quiz me on my ${due.due} due ${due.course} ${due.due === 1 ? 'card' : 'cards'}`, prompt: `Quiz me on ${due.unit} in ${due.course}. Ask 3 quick questions, one at a time.`, course: due.course, unit: due.unit, tone: toneOf(due.course) })
+    // One tap: Otto makes a saved study guide from the unit's notes (a card links to it).
+    if (notebook.activeCourse && notebook.activeUnit) list.push({ key: 'guide', label: `Make a study guide for ${notebook.activeUnit}`, prompt: `Make me a study guide for ${notebook.activeUnit}`, course: notebook.activeCourse, unit: notebook.activeUnit, tone: toneOf(notebook.activeCourse) })
     const weak = stats?.weak_topics?.[0]
     if (weak) list.push({ key: 'weak', label: `Help me get better at ${weak}`, prompt: `I keep missing questions on ${weak}. Explain the key idea and give me one practice question.` })
     const today = new Date(now)
@@ -674,9 +677,11 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   }, [review, stats, tasks, notebook, now, toneOf])
 
   const generic: Starter[] = unit
-    ? [{ key: 'g1', label: `Explain ${unit} like I'm seeing it for the first time`, prompt: `Explain ${unit} like I'm seeing it for the first time` }, { key: 'g2', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
+    ? [{ key: 'g1', label: `Explain ${unit} like I'm seeing it for the first time`, prompt: `Explain ${unit} like I'm seeing it for the first time` }, { key: 'g4', label: `Make a study guide for ${unit}`, prompt: `Make me a study guide for ${unit}` }, { key: 'g2', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
     : [{ key: 'g1', label: 'Help me make a study plan for this week', prompt: 'Help me make a study plan for this week' }, { key: 'g2', label: 'Explain a concept step by step', prompt: 'Explain a concept step by step' }, { key: 'g3', label: 'Check my understanding with a few questions', prompt: 'Check my understanding with a few questions' }]
-  const startersShown = starters.length ? [...starters, ...generic].slice(0, 4) : generic
+  const startersShown = (starters.length ? [...starters, ...generic] : generic)
+    .filter((item, index, all) => all.findIndex((other) => other.label === item.label) === index)
+    .slice(0, 4)
 
   function startFrom(starter: Starter) {
     if (starter.course !== undefined) { setCourse(starter.course); setUnit(starter.unit ?? '') }
@@ -825,6 +830,9 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               const last = index === lastAssistant
               const sourceCourse = message.groundedIn?.course || active?.course || course
               const sourceUnit = message.groundedIn?.unit || active?.unit || unit
+              // A study guide Otto made for this reply ("guide:<id>:<kind>"), shown as a card that opens it in Study.
+              const guides = isReply ? message.attachments.map(guideFromAttachment).filter((item) => item !== null) : []
+              const files = guides.length ? [] : message.attachments
               return (
                 <article key={message.key} className={`tutor-message is-${message.role}${message.status ? ` is-${message.status}` : ''}`}>
                   {isReply ? <img className="tutor-message__avatar" src={MASCOT} alt="" width="32" height="32" decoding="async" loading="lazy" /> : null}
@@ -832,13 +840,26 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     {isReply ? <span className="sr-only">Otto said:</span> : null}
                     {message.previews?.length ? (
                       <div className="tutor-message__images">{message.previews.map((src, imageIndex) => <img key={src} src={src} alt={message.attachments[imageIndex] ?? 'Attached image'} width="120" height="120" loading="lazy" decoding="async" />)}</div>
-                    ) : message.attachments.length ? (
-                      <div className="tutor-message__files">{message.attachments.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
+                    ) : files.length ? (
+                      <div className="tutor-message__files">{files.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
                     ) : null}
                     {isReply ? (
                       message.content ? <div className="tutor-rich"><Rich text={message.content} />{message.status === 'streaming' ? <span className="tutor-caret" aria-hidden="true" /> : null}</div>
                         : <div className="tutor-thinking" role="status"><span /><span /><span /><span className="sr-only">Otto is thinking</span></div>
                     ) : <p className="tutor-message__text">{message.content}</p>}
+                    {guides.map((guide) => {
+                      const kind = guideKind(guide.kind)
+                      return (
+                        <a key={guide.id} className={`guide-card ui-tone--${kind.tone}`} href={guideHash(guide.id)}>
+                          <span className="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4" /></svg></span>
+                          <span className="guide-card__text">
+                            <span className="guide-card__kind">{kind.label}</span>
+                            <span className="guide-card__title">Saved in Study{sourceUnit ? ` · ${sourceUnit}` : ''}</span>
+                          </span>
+                          <span className="guide-card__open">Open<span aria-hidden="true"> →</span></span>
+                        </a>
+                      )
+                    })}
                     {message.status === 'sending' && message.progress !== undefined && message.progress < 1 ? (
                       <div className="tutor-message__progress" role="progressbar" aria-label="Uploading images" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(message.progress * 100)}><i style={{ width: `${Math.round(message.progress * 100)}%` }} /></div>
                     ) : null}
@@ -861,10 +882,10 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     {done && smallTalk && last ? starterList(startersShown, 'tutor__suggestions--inline') : null}
                     {done && !smallTalk ? (
                       <div className="tutor-actions" role="group" aria-label="Reply actions">
-                        {last ? FOLLOW_UPS.map((item) => (
+                        {last && message.model_tier !== 'study_guide' ? FOLLOW_UPS.map((item) => (
                           <button key={item.id} type="button" className="tutor-actions__chip" disabled={streaming} onClick={() => send(item.prompt, [])}>{item.label}</button>
                         )) : null}
-                        {last && course && unit && message.id ? (
+                        {last && course && unit && message.id && message.model_tier !== 'study_guide' ? (
                           <button type="button" className="tutor-actions__chip" disabled={streaming || cardState[message.key] === 'making' || cardState[message.key] === 'done'} onClick={() => void makeFlashcards(message)}>
                             <Icon name="cards" />{cardState[message.key] === 'making' ? 'Making flashcards…' : cardState[message.key] === 'done' ? 'Flashcards saved' : 'Make flashcards'}
                           </button>

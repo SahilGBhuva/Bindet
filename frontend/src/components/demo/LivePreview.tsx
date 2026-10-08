@@ -54,6 +54,16 @@ const ALLOWED = [
   '.practice__retake',
   '.practice__new',
   '.practice__bar-actions .tools__focus-controls button',
+  // Study guides: the sandbox has one written ahead of time per unit. Opening, reading and
+  // revealing answers only change what is shown; making, printing, copying, downloading,
+  // flashcards, rename, regenerate and delete stay locked.
+  '.tools__course-guide',
+  '.guides__back',
+  '.guides__retry',
+  '.guides__open',
+  '.guide__back',
+  '.guide__reveal',
+  '.guide__reveal-all',
   // Only change what is shown: Home's project filter and arrows, sidebar section folding.
   '.home-filter__select',
   '.home-arrow',
@@ -84,6 +94,9 @@ const ACTION_NAMES: [string, string][] = [
   ['.tools__note-cards *', 'Make flashcards'],
   ['.tools__deck-status *', 'Make flashcards'],
   ['.tools__source *', 'Remove notes'],
+  ['.guides__make', 'Make a study guide'],
+  ['.guide__tools *', 'Print or save a study guide'],
+  ['.guide__cards', 'Make flashcards from a study guide'],
   ['.avatar', 'Change your avatar'],
   ['.profile__friend-forms *', 'Find friends'],
   ['.profile__menu *', 'Manage friends'],
