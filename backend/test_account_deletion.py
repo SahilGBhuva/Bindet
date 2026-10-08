@@ -152,6 +152,11 @@ class AccountDeletionTests(unittest.TestCase):
         request = database.send_friend_request(ALEX, sam_code)
         database.respond_to_friend_request(request["request_id"], SAM, True)
         database.create_friend_quest(ALEX, SAM, 100)
+        # Friend-streak notices sent both ways (study_days rows come from update_progress above).
+        with database.engine().begin() as connection:
+            for recipient, other in ((ALEX, SAM), (SAM, ALEX)):
+                connection.execute(insert(database.friend_streak_marks).values(
+                    student_id=recipient, friend_id=other, kind="milestone", mark="3:2026-10-01", created_at=now))
         with database.engine().connect() as connection:
             alex_event = connection.execute(select(database.xp_events.c.id).where(database.xp_events.c.student_id == ALEX)).scalar()
             sam_event = connection.execute(select(database.xp_events.c.id).where(database.xp_events.c.student_id == SAM)).scalar()
@@ -301,7 +306,8 @@ class AccountDeletionTests(unittest.TestCase):
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
                      "practice_tests", "practice_test_cache", "study_guides", "study_guide_cache",
                      "practice_rounds", "practice_bests", "practice_challenges", "feedback", "account_onboarding",
-                     "otto_profiles", "otto_memories", "tutor_conversation_settings", "tutor_message_ratings"):
+                     "otto_profiles", "otto_memories", "tutor_conversation_settings", "tutor_message_ratings",
+                     "study_days", "friend_streak_marks"):
             self.assertIn(name, before, name)
 
     def test_deletes_every_row_of_the_account_and_keeps_everyone_elses(self):
@@ -324,7 +330,7 @@ class AccountDeletionTests(unittest.TestCase):
         # Sam still has everything that was Sam's (only rows also naming Alex went).
         sam_after = self.rows_mentioning(SAM)
         for name in ("profiles", "student_progress", "study_notes", "flashcards", "flashcard_reviews", "cache_refs", "xp_events",
-                     "otto_profiles", "otto_memories"):
+                     "otto_profiles", "otto_memories", "study_days"):
             self.assertEqual(sam_after.get(name), sam_before.get(name), name)
         # Group A passed to Sam (who joined before Eve) and Sam was told; B is gone; C is Sam's.
         group_a = database.get_study_group(SAM, self.group_a["id"])

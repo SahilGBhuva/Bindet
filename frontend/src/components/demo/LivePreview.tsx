@@ -32,6 +32,9 @@ const ALLOWED = [
   '.progress__info',
   '.progress__info-panel button',
   '.profile__group-tabs .ui-tab',
+  // Friend streaks: opening a friend's 14-day history only changes what is shown
+  // (sorting uses .ui-segmented__item above). "Remind … to study" stays locked.
+  '.profile__streak-toggle',
   // Practice tests: the sandbox writes, grades and lists them in memory only.
   '.tools__practice-entry',
   '.practice__count',
@@ -100,6 +103,7 @@ const ACTION_NAMES: [string, string][] = [
   ['.avatar', 'Change your avatar'],
   ['.profile__friend-forms *', 'Find friends'],
   ['.profile__menu *', 'Manage friends'],
+  ['.profile__nudge', 'Remind a friend to study'],
   ['.profile__toggle, .profile__toggle *', 'Privacy settings'],
   ['.profile__invite, .profile__invite *', 'Invite code'],
 ]

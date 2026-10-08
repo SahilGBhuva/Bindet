@@ -6,6 +6,8 @@ import { useData } from '../lib/dataSource'
 import { mergeNoteScopes, withCourseTones } from '../lib/session'
 import { loadHiddenCourses } from '../lib/studyPrefs'
 import { REVIEW_ALL_HASH, useReviewSummary } from '../lib/useReviewSummary'
+import { rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
+import { toneClass, toneForName } from '../lib/tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
@@ -215,6 +217,10 @@ const ICONS: Record<IconName, ReactNode> = {
   test: <><rect x="3" y="2.5" width="10" height="11" rx="1.2" /><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3" /></>,
   bolt: <path d="M9 1.8L3.8 9h3.6L7 14.2 12.2 7H8.6z" />,
   chat: <><path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" /></>,
+}
+
+function initialsOf(name: string) {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || '?'
 }
 
 function Icon({ name }: { name: IconName }) {
@@ -470,6 +476,8 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
   const accuracy = stats && stats.attempts > 0 ? Math.round(stats.accuracy) : null
   const friendCount = social?.friends.length ?? 0
+  // Friend streaks: whoever is waiting on you first, then the longest live streaks.
+  const friendStreaks = social ? rankFriendStreaks(social.friends).slice(0, 4) : null
   const reviewNew = reviewSummary?.new_available ?? 0
   const studyNext: { key: string; tone: string; icon: IconName; title: string; copy: string; href: string; review?: boolean }[] = [
     {
@@ -719,6 +727,46 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                 </ul>
               ) : (
                 <p className="home-rows__empty">Nothing due. <a className="ui-link" href="#goals">Add a task</a></p>
+              )}
+            </section>
+
+            <section className="home-streaks ui-tone--orange" aria-labelledby="home-streaks-title">
+              <div className="home-streaks__head">
+                <span className="ui-icon home-streaks__icon"><Icon name="flame" /></span>
+                <h2 className="home-streaks__title" id="home-streaks-title">Friend streaks</h2>
+                {friendStreaks?.length ? <a className="home-streaks__all ui-link" href="#profile">All friends <span aria-hidden="true">⟩</span></a> : null}
+              </div>
+              {token && friendStreaks === null ? (
+                <div className="home-rows" aria-busy="true" aria-label="Loading friend streaks">
+                  <span className="ui-skeleton home-rows__skeleton" /><span className="ui-skeleton home-rows__skeleton" />
+                </div>
+              ) : friendStreaks?.length ? (
+                <ul className="home-streaks__list">
+                  {friendStreaks.map((friend) => {
+                    const alive = friend.friend_streak > 0
+                    return (
+                      <li key={friend.student_id} className={`home-streak is-${friend.streak_status}${friend.friend_today && !friend.me_today ? ' is-your-turn' : ''}`}>
+                        <span className={`ui-avatar ${toneClass(toneForName(friend.display_name))}`} aria-hidden="true">{initialsOf(friend.display_name)}</span>
+                        <span className="home-streak__text">
+                          <strong className="home-streak__title">
+                            {alive ? <>{streakDays(friend.friend_streak)} with {friend.display_name}</> : friend.display_name}
+                          </strong>
+                          <span className="home-streak__status">
+                            {friend.streak_status === 'done' ? <Icon name="check" /> : null}
+                            {streakStatusLine(friend)}
+                          </span>
+                        </span>
+                        <span className={`home-streak__count${alive ? '' : ' is-zero'}`} aria-hidden="true">
+                          <Icon name="flame" />{friend.friend_streak}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p className="home-rows__empty">
+                  Study on the same days as a friend to build a streak together. <a className="ui-link" href="#profile">Add a friend</a>
+                </p>
               )}
             </section>
           </div>

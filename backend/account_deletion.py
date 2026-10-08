@@ -17,8 +17,8 @@ safe for foreign keys:
   generated questions, private question banks and every AI cache entry tied to the
   account (ai_cache.purge_user_ai_data_in; shared entries another user's identical
   upload still references are kept).
-- Progress (student_progress, topic_progress, xp_events, progress_claims), friends,
-  friend quests, blocks and reports (both directions), reactions, notifications to
+- Progress (student_progress, topic_progress, xp_events, progress_claims, study_days), friends,
+  friend quests, friend-streak marks, blocks and reports (both directions), reactions, notifications to
   and from the student, rate-limit events, uploaded_images rows and the profile.
 - Practice lab: rounds and personal bests, and every challenge the student sent or
   received (the friend's copy of a received challenge goes too), and feedback they sent.
@@ -234,6 +234,11 @@ def _delete_social(connection, student_id: str) -> None:
         db.social_reports.c.reporter_id == student_id, db.social_reports.c.reported_id == student_id,
     )))
     connection.execute(delete(db.social_action_events).where(db.social_action_events.c.student_id == student_id))
+    # Friend streaks: the student's study days, and streak notices sent to or about them.
+    connection.execute(delete(db.study_days).where(db.study_days.c.student_id == student_id))
+    connection.execute(delete(db.friend_streak_marks).where(or_(
+        db.friend_streak_marks.c.student_id == student_id, db.friend_streak_marks.c.friend_id == student_id,
+    )))
 
 
 def delete_account_data(student_id: str) -> dict:

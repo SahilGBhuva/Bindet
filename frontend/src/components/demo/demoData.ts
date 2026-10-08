@@ -1,4 +1,4 @@
-import type { AnswerResult, Flashcard, FlashcardLibrary, FriendsHub, GeneratedQuestion, PracticeItem, PracticeTest, PracticeTestSummary, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
+import type { AnswerResult, Flashcard, FlashcardLibrary, Friend, FriendStreakStatus, FriendsHub, GeneratedQuestion, PracticeItem, PracticeTest, PracticeTestSummary, Profile, Progress, ReviewCard, ReviewGradeResult, ReviewSummary, StudyGroup, Task } from '../../lib/api'
 import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { nextValues, previewFor, stateName, type SchedulerState } from '../../lib/review'
@@ -232,8 +232,40 @@ function initialAttempts(): UnitAttempt[] {
   )
 }
 
-const friend = (id: string, name: string, username: string, weekly: number, active = true) => ({
-  student_id: id, username, display_name: name, avatar_path: '', total_xp: weekly * 9, streak: 6, active_today: active, weekly_xp: weekly, friend_streak: 4,
+const person = (id: string, name: string, username: string, weekly: number, active = true, streak = 6) => ({
+  student_id: id, username, display_name: name, avatar_path: '', total_xp: weekly * 9, streak, active_today: active, weekly_xp: weekly,
+})
+
+/* Days (counted back from today) the demo student studied: a 5-day streak, after a gap. */
+const MAYA_DAYS = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16]
+
+/* A friend streak from canned study days, worked out the way the server does (database._streak_view). */
+function streakWith(theirs: number[]): Omit<Friend, keyof ReturnType<typeof person>> {
+  const mine = new Set(MAYA_DAYS)
+  const them = new Set(theirs)
+  const both = (ago: number) => mine.has(ago) && them.has(ago)
+  let streak = 0
+  for (let ago = both(0) ? 0 : 1; both(ago); ago += 1) streak += 1
+  let best = 0
+  let run = 0
+  for (let ago = 60; ago >= 0; ago -= 1) {
+    run = both(ago) ? run + 1 : 0
+    best = Math.max(best, run)
+  }
+  const meToday = mine.has(0)
+  const friendToday = them.has(0)
+  const status: FriendStreakStatus = streak && meToday && friendToday ? 'done' : streak ? 'at_risk' : best ? 'broken' : 'none'
+  return {
+    friend_streak: streak, best_friend_streak: best, streak_status: status, me_today: meToday, friend_today: friendToday,
+    streak_days: Array.from({ length: 14 }, (_, index) => {
+      const ago = 13 - index
+      return { day: iso(ago).slice(0, 10), me: mine.has(ago), friend: them.has(ago) }
+    }),
+  }
+}
+
+const friend = (id: string, name: string, username: string, weekly: number, days: number[], active = true, streak = 6): Friend => ({
+  ...person(id, name, username, weekly, active, streak), ...streakWith(days),
 })
 
 function findContent(course: string, unit: string): UnitContent {
@@ -310,14 +342,15 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     student_id: DEMO_STUDENT, username: 'maya_r', display_name: 'Maya Rodriguez', avatar_path: '', friend_code: 'BND-DEMO-2026',
     daily_goal: 30, discoverable: true, allow_friend_requests: true, total_xp: 2480, streak: 5, best_streak: 11, login_streak: 12, best_login_streak: 12,
   }
-  const leaderboard = [
-    friend('f1', 'Jordan Kim', 'jordank', 310),
-    friend(DEMO_STUDENT, 'Maya Rodriguez', 'maya_r', 285),
-    friend('f2', 'Priya Natarajan', 'priya_n', 240),
-    friend('f3', 'Sam Rivera', 'samr', 120, false),
+  // Friend streaks: Jordan and Maya both studied today; Priya hasn't yet; Sam's streak ended.
+  const friends = [
+    friend('f1', 'Jordan Kim', 'jordank', 310, [0, 1, 2, 3, 4, 5, 6, 8, 9]),
+    friend('f2', 'Priya Natarajan', 'priya_n', 240, [1, 2, 3, 6, 7, 8, 9], false, 3),
+    friend('f3', 'Sam Rivera', 'samr', 120, [6, 7, 8, 9, 10, 11, 12], false, 0),
   ]
+  const leaderboard = [friends[0], person(DEMO_STUDENT, 'Maya Rodriguez', 'maya_r', 285, true, 5), friends[1], friends[2]]
   const hub: FriendsHub = {
-    friends: leaderboard.filter((item) => item.student_id !== DEMO_STUDENT),
+    friends,
     requests: [{ request_id: 1, username: 'alex_t', display_name: 'Alex Thompson', created_at: iso(1) }],
     leaderboard,
     quests: [{ id: 1, friend_id: 'f1', friend_name: 'Jordan Kim', target_xp: 100, progress_xp: 72, status: 'active', expires_at: iso(-2) }],
@@ -328,6 +361,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     ],
     notifications: [
       { id: 1, kind: 'friend_request', message: 'Alex Thompson sent you a friend request.', is_read: false, created_at: iso(1) },
+      { id: 3, kind: 'streak_milestone', message: 'You and Jordan Kim hit a 3-day streak!', is_read: true, created_at: iso(2) },
       { id: 2, kind: 'quest', message: 'Jordan started a friend quest with you.', is_read: true, created_at: iso(2) },
     ],
   }
@@ -531,6 +565,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     searchFriends: locked('find friends'),
     sendFriendRequest: locked('add friends'),
     startFriendQuest: locked('start a friend quest'),
+    nudgeFriend: locked('remind friends to study'),
 
     now: () => DEMO_NOW,
     hourOf: () => DEMO_HOUR,

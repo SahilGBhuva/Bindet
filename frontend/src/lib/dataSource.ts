@@ -91,6 +91,8 @@ export type DataSource = {
   renameStudyGuide: typeof studyGuides.renameStudyGuide
   deleteStudyGuide: typeof studyGuides.deleteStudyGuide
   saveStudyGuideAsNote: typeof studyGuides.saveStudyGuideAsNote
+  // Friend streak reminder (in-app only). Locked in the demo.
+  nudgeFriend: typeof api.nudgeFriend
 }
 
 export const realData: DataSource = {
@@ -158,6 +160,7 @@ export const realData: DataSource = {
   renameStudyGuide: studyGuides.renameStudyGuide,
   deleteStudyGuide: studyGuides.deleteStudyGuide,
   saveStudyGuideAsNote: studyGuides.saveStudyGuideAsNote,
+  nudgeFriend: api.nudgeFriend,
 }
 
 const DataContext = createContext<DataSource>(realData)
