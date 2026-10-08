@@ -175,12 +175,12 @@ class FlashcardCacheTests(CacheTestCase):
         with patch.object(ai_tutor, "_chat_json", return_value={"cards": GOOD_CARDS}):
             self.generate(self.note("alex"), "alex")
         with database.engine().begin() as connection:
-            connection.execute(update(database.flashcard_cache).values(created_at=ai_cache._now() - timedelta(days=31)))
+            connection.execute(update(database.flashcard_cache).values(created_at=ai_cache._now() - ai_cache.RETENTION["flashcard_cache"] - timedelta(days=1)))
         with patch.object(ai_tutor, "_chat_json", return_value={"cards": GOOD_CARDS}) as chat:
             self.generate(self.note("sam"), "sam")
         chat.assert_called_once()
         with database.engine().begin() as connection:
-            connection.execute(update(database.flashcard_cache).values(created_at=ai_cache._now() - timedelta(days=31)))
+            connection.execute(update(database.flashcard_cache).values(created_at=ai_cache._now() - ai_cache.RETENTION["flashcard_cache"] - timedelta(days=1)))
         with patch.object(ai_cache, "_last_prune", float("-inf")):
             self.assertTrue(ai_cache.prune_if_due())
             self.assertFalse(ai_cache.prune_if_due())  # at most once per PRUNE_SECONDS
@@ -561,10 +561,10 @@ class TutorCacheTests(CacheTestCase):
             asyncio.run(first_deltas())
         self.assertEqual(self.rows("tutor_reply_cache"), [])
 
-    def test_entries_expire_after_seven_days(self):
+    def test_entries_expire_after_the_retention_window(self):
         self.send("alex")
         with database.engine().begin() as connection:
-            connection.execute(update(database.tutor_reply_cache).values(created_at=ai_cache._now() - timedelta(days=8)))
+            connection.execute(update(database.tutor_reply_cache).values(created_at=ai_cache._now() - ai_cache.RETENTION["tutor_reply_cache"] - timedelta(days=1)))
         _, calls = self.send("alex")
         self.assertEqual(len(calls), 1)
 

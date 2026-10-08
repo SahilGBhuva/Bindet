@@ -41,12 +41,14 @@ import database
 import note_ingestion
 
 # How long entries stay usable; older rows are ignored and pruned.
+# Longer windows mean more repeats are answered without an AI call; entries tied to a
+# note, conversation or account are still deleted with it (cache_refs).
 RETENTION = {
-    "flashcard_cache": timedelta(days=30),
-    "extraction_cache": timedelta(days=30),
-    "grading_cache": timedelta(days=30),
-    "tutor_reply_cache": timedelta(days=7),
-    "practice_test_cache": timedelta(days=14),
+    "flashcard_cache": timedelta(days=90),
+    "extraction_cache": timedelta(days=90),
+    "grading_cache": timedelta(days=60),
+    "tutor_reply_cache": timedelta(days=14),
+    "practice_test_cache": timedelta(days=30),
 }
 PRUNE_SECONDS = 600  # prune at most this often per server instance (like rate-limit events)
 _last_prune = float("-inf")
