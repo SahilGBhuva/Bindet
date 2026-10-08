@@ -532,6 +532,22 @@
   .lp-workflow__steps { grid-template-columns: 1fr; }
   .lp-workflow__steps li + li { border-left: 0; border-top: 1px solid var(--lp-line); }
   .lp-legend { gap: 6px 12px; }
+
+  /* Phone hero: the headline, lead and both actions fit the first screen under a
+     shorter map, and the title uses the full width instead of four short lines. */
+  .lp-constellation { aspect-ratio: 6 / 3.4; }
+  .lp-hero { padding-bottom: 32px; }
+  .lp-hero__title { max-width: none; font-size: clamp(40px, 11.6vw, 52px); }
+  .lp-hero__lead { margin-top: 16px; font-size: 16px; line-height: 1.5; }
+  .lp-hero__cta { flex-wrap: nowrap; margin-top: 22px; }
+  .lp-hero__cta .lp-btn { flex: 1 1 auto; min-width: 0; padding-inline: 16px; }
+  .lp-hero__cta .lp-btn--primary { flex-grow: 2; }
+  .lp-hero__note { margin-top: 12px; }
+
+  /* The demo's caption: one line each, the link keeps its arrow. */
+  .lp-product__strip { gap: var(--space-3); padding-inline: var(--space-4); }
+  .lp-product__live { min-width: 0; letter-spacing: .02em; white-space: nowrap; }
+  .lp-product__strip .lp-textlink { flex: none; white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {
