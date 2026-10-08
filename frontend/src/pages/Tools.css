@@ -1241,6 +1241,10 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 @media (max-width: 420px) {
   .tools__empty-form { flex-direction: column; }
   .tools__result-actions { width: 100%; justify-content: space-between; }
+  /* The level picker gets its own full-width row so "Level 1" is never cut off;
+     New question and Focus share the row below. */
+  .tools__quiz-controls .ui-select { flex: 1 1 100%; }
+  .tools__quiz-controls > .ui-button { flex: 1 1 auto; }
 }
 
 /* Touch: course tabs, their menus and the add row are 40px targets on phones. */
@@ -1688,4 +1692,14 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   }
   .tools__header-actions::-webkit-scrollbar { display: none; }
   .tools__header-actions > * { flex: none; white-space: nowrap; }
+  /* The selected unit tab already names the unit: its heading stays for screen readers only,
+     so the card or notes start higher on the screen. */
+  .tools__toolbar .tools__unit-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
