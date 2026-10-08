@@ -390,7 +390,10 @@
   .guide__title { font-size: 26px; }
   .guide__term,
   .guide__timeline li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .guide__tools .ui-button { flex: 1 1 auto; }
+  /* One swipeable row of actions so the guide itself starts higher. */
+  .guide__tools { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .guide__tools::-webkit-scrollbar { display: none; }
+  .guide__tools .ui-button { flex: none; min-height: 40px; white-space: nowrap; }
   .guides__head-actions { width: 100%; }
   .guides__head-actions .guides__make { flex: 1; }
 }

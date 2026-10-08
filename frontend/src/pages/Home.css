@@ -119,8 +119,11 @@
   right: 0;
   z-index: 1;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   width: max(250px, var(--side));
+  max-width: 100%;
+  min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--ink-soft);
   border-radius: 10px;
@@ -145,6 +148,7 @@
 .home-notice__title a:hover { color: var(--color-text); text-decoration: underline; text-underline-offset: 3px; }
 .home-notice__row {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   min-height: 26px;
@@ -590,6 +594,18 @@
   .home-today { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
   .home-today__value { font-size: 22px; }
   .home-today__card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* Phones: compact stat cards so Home's real content shows sooner. */
+@container home (max-width: 480px) {
+  .home-today { gap: 8px; }
+  .home-today__link { padding: 10px 12px; column-gap: 8px; row-gap: 2px; }
+  .home-today__icon { width: 26px; height: 26px; }
+  .home-today__icon .home-icon { width: 15px; height: 15px; }
+  .home-today__label { font-size: var(--text-xs); }
+  .home-today__value { font-size: 20px; }
+  .home-today__card:last-child:nth-child(odd) .home-today__link { grid-template-columns: auto auto minmax(0, 1fr); }
+  .home-today__card:last-child:nth-child(odd) .home-today__value { grid-column: auto; justify-self: end; }
 }
 
 @container home (max-width: 780px) {

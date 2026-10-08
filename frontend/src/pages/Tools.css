@@ -1673,3 +1673,19 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   .tools__header-actions .tools__practice-entry,
   .tools__header-actions .tools__course-guide { min-height: 44px; }
 }
+
+/* Phones: the page actions are one swipeable row instead of three stacked rows. */
+@media (max-width: 560px) {
+  .tools__header-actions {
+    flex-wrap: nowrap;
+    width: calc(100% + 2 * var(--space-4));
+    margin-inline: calc(-1 * var(--space-4));
+    padding: 2px var(--space-4) 6px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tools__header-actions::-webkit-scrollbar { display: none; }
+  .tools__header-actions > * { flex: none; white-space: nowrap; }
+}

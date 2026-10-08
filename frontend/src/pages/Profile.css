@@ -718,6 +718,11 @@
   .profile__block .ui-row { padding-inline: var(--space-4) var(--space-2); }
   .profile__friends-head { padding-inline: var(--space-4) var(--space-2); }
   .profile__streak-detail { margin-inline: var(--space-3) var(--space-2); padding-inline: var(--space-3); }
+
+  /* Phones: 40px tap targets on the friends list. */
+  .profile__friend-sort .ui-segmented__item { min-height: 40px; padding-inline: var(--space-4); }
+  .profile__streak-toggle { height: 40px; padding-inline: 10px 12px; }
+  .profile__menu > summary { min-width: 40px; min-height: 40px; display: grid; place-items: center; }
   .profile__streak-grid tbody th, .profile__streak-grid thead td { width: 44px; }
   .profile__streak-dot { width: 10px; height: 10px; }
   .profile__friend-forms { padding: var(--space-4); }
