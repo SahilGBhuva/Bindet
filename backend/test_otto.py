@@ -573,9 +573,13 @@ class SmallTalkTests(OttoTestCase):
         events, _ = self.send("alex", content=LONG, conversation_id=conversation_id, model=model)
         self.assertEqual(dict(events)["title"]["title"], "Cell membrane transport")
 
-    def test_system_prompt_tells_the_model_to_refuse_small_talk(self):
-        self.assertIn("Small talk with nothing to study", ai_tutor.TUTOR_SYSTEM_PROMPT)
-        self.assertIn("A greeting together with a study question is fine", ai_tutor.TUTOR_SYSTEM_PROMPT)
+    def test_system_prompt_keeps_small_talk_short_and_is_lenient_with_study_questions(self):
+        prompt = ai_tutor.TUTOR_SYSTEM_PROMPT
+        self.assertIn("only a greeting or chit-chat", prompt)
+        self.assertIn("A greeting together with a study question is fine", prompt)
+        # Typos, single words and "what's the answer" are study questions, not off-topic.
+        self.assertIn("fix typos silently", prompt)
+        self.assertIn("When in doubt, help.", prompt)
 
 
 class ConversationToolsTests(OttoTestCase):
