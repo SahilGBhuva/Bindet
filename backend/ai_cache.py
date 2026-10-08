@@ -396,9 +396,15 @@ def normalize_message(message: str) -> str:
     return " ".join(unicodedata.normalize("NFC", message or "").split())
 
 
-def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: list[str], source_text: str, tier: str, model: str = "") -> str:
+def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: list[str], source_text: str, tier: str, model: str = "",
+              personal: str = "") -> str:
+    """`personal` identifies the student's Otto personalization (name, personality, about text and
+    memory) the reply was written with; a reply is only replayed for the same personalization."""
     grounding = make_key("grounding", course, unit, json.dumps(labels[:10], ensure_ascii=False), (source_text or "").strip())
-    return make_key("tutor", tutor_version(), owner_id, normalize_message(message), grounding, tier, model)
+    parts = ["tutor", tutor_version(), owner_id, normalize_message(message), grounding, tier, model]
+    if personal:
+        parts.append("personal:" + personal)
+    return make_key(*parts)
 
 
 def cached_tutor_reply(key: str, owner_id: str) -> str | None:

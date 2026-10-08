@@ -492,7 +492,8 @@ class AIOperationLockdownTests(unittest.TestCase):
         self.assertTrue(any("REVOKE ALL ON TABLE public.flashcard_jobs" in statement for statement in statements))
 
     def test_every_call_must_name_a_registered_operation(self):
-        self.assertEqual(set(ai_tutor.OPERATIONS), {"generate_flashcards", "generate_quiz", "grade_answer", "explain_material", "extract_notes", "generate_test", "grade_test"})
+        self.assertEqual(set(ai_tutor.OPERATIONS), {"generate_flashcards", "generate_quiz", "grade_answer", "explain_material", "extract_notes", "generate_test", "grade_test",
+                                                         "title_conversation", "update_memory"})
         for config in ai_tutor.OPERATIONS.values():
             self.assertGreater(config["max_tokens"], 0)
             self.assertGreater(config["timeout"], 0)

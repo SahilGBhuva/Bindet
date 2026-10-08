@@ -11,7 +11,8 @@ safe for foreign keys:
   group and pass to the group's owner, so the group keeps its work. The student's
   comments, attachments, assignments and activity on any task are removed.
 - Notes, flashcards (cards, jobs, styles, review state), practice tests and their items,
-  tutor conversations and messages,
+  tutor conversations and messages, Otto's memory and Otto settings (name, personality,
+  "about me" note, memory switch),
   generated questions, private question banks and every AI cache entry tied to the
   account (ai_cache.purge_user_ai_data_in; shared entries another user's identical
   upload still references are kept).
@@ -39,6 +40,7 @@ import database
 import feedback
 import flashcards
 import note_store
+import otto
 import practice
 import practice_tests
 import questions
@@ -61,6 +63,7 @@ def init_all() -> None:
     practice_tests.init_practice()
     practice.init_practice()
     feedback.init_feedback()
+    otto.init_otto()
 
 
 def _now() -> datetime:
@@ -240,6 +243,7 @@ def delete_account_data(student_id: str) -> dict:
         _delete_social(connection, student_id)
         practice.delete_for_account_in(connection, student_id)
         feedback.delete_for_account_in(connection, student_id)
+        otto.delete_for_account_in(connection, student_id)
 
         if "study_group_messages" in chat_tables:
             connection.execute(text("DELETE FROM public.study_group_messages WHERE sender_id = :id"), {"id": student_id})

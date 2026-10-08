@@ -89,8 +89,11 @@ def list_conversations(owner_id: str, limit: int = 50) -> list[dict]:
 
 
 def start_conversation(owner_id: str, first_message: str, course: str = "", unit: str = "") -> dict:
+    import ai_tutor  # local: keeps this module free of the AI client at import time
     init_tutor()
-    title = " ".join(first_message.split())[:80] or "New conversation"
+    # A tidy first title; after the first reply it may be replaced by a short AI-written one
+    # (set_auto_title), unless the student has renamed the conversation by then.
+    title = ai_tutor.heuristic_title(first_message)[:80] or "New conversation"
     now = datetime.now(timezone.utc)
     row = {"id": secrets.token_hex(16), "owner_id": owner_id, "title": title, "course": course[:120], "unit": unit[:160], "created_at": now, "updated_at": now}
     with database.engine().begin() as connection:
@@ -150,6 +153,59 @@ def add_message(owner_id: str, conversation_id: str, role: str, content: str, at
         )).inserted_primary_key[0]
         connection.execute(update(conversations).where(conversations.c.id == conversation_id).values(updated_at=now))
     return {"id": message_id, "role": role, "content": content, "attachments": attachments or [], "model_tier": model_tier, "created_at": now}
+
+
+TITLE_MAX_CHARS = 80
+
+
+def clean_title(title: str) -> str:
+    """A title the student typed: one line, no control or invisible characters, at most 80 characters."""
+    import unicodedata
+    value = unicodedata.normalize("NFKC", title or "")
+    value = "".join(" " if unicodedata.category(char) in ("Cc", "Zl", "Zp") else char for char in value
+                    if unicodedata.category(char) != "Cf")
+    return " ".join(value.split())[:TITLE_MAX_CHARS].strip()
+
+
+def rename_conversation(owner_id: str, conversation_id: str, title: str) -> dict:
+    """The student renames a conversation. Raises ValueError("conversation_not_found" | "title_required")."""
+    clean = clean_title(title)
+    if not clean:
+        raise ValueError("title_required")
+    init_tutor()
+    with database.engine().begin() as connection:
+        row = _owned(connection, owner_id, conversation_id)
+        connection.execute(update(conversations).where(conversations.c.id == conversation_id, conversations.c.owner_id == owner_id)
+                           .values(title=clean))
+    return {**_conversation(row), "title": clean}
+
+
+def set_auto_title(owner_id: str, conversation_id: str, expected: str, title: str) -> bool:
+    """Replace an automatic title, but only while it is still `expected` (compare-and-set), so a
+    title the student renamed in the meantime is never overwritten. True when it changed."""
+    clean = clean_title(title)
+    if not clean or clean == expected:
+        return False
+    init_tutor()
+    with database.engine().begin() as connection:
+        changed = connection.execute(update(conversations).where(
+            conversations.c.id == conversation_id, conversations.c.owner_id == owner_id, conversations.c.title == expected,
+        ).values(title=clean)).rowcount
+    return bool(changed)
+
+
+def count_user_messages(owner_id: str, conversation_id: str) -> int:
+    init_tutor()
+    with database.engine().connect() as connection:
+        _owned(connection, owner_id, conversation_id)
+        return connection.execute(select(func.count()).select_from(messages).where(
+            messages.c.conversation_id == conversation_id, messages.c.role == "user",
+        )).scalar_one()
+
+
+def recent_turns(owner_id: str, conversation_id: str, limit: int = 8) -> list[dict]:
+    """The newest `limit` turns (oldest first) as {"role", "content"}."""
+    return [{"role": item["role"], "content": item["content"]} for item in list_messages(owner_id, conversation_id, limit=limit)]
 
 
 def delete_conversation(owner_id: str, conversation_id: str) -> bool:

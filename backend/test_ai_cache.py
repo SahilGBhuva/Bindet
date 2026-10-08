@@ -431,7 +431,10 @@ class TutorCacheTests(CacheTestCase):
             yield from (chunks or [REPLY[:30], REPLY[30:]])
             return finish  # how the provider ended the stream (AI-F7: only "stop" is cached)
 
-        with self.as_user(student_id), patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream):
+        # Otto's AI title for a new conversation is its own paid call (test_otto.py); these tests
+        # count only the reply's use of the budget.
+        with self.as_user(student_id), patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream), \
+                patch.object(main, "conversation_title", return_value=None):
             events = parse_events(main.send_tutor_message(main.TutorMessageRequest(content=content, **fields), "Bearer t"))
         return events, calls
 
