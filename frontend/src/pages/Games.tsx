@@ -375,7 +375,7 @@ function Lobby({ token, selfId, onStart, onNotice }: { token: string; selfId: st
               <p className="practice__best-line ui-tone--amber">
                 <span className="practice__best-icon" aria-hidden="true">{Icons.trophy}</span>
                 {best
-                  ? <span>Your best here: <b>{best.best_score} points</b>, {best.best_accuracy}% right, {shortDate(best.achieved_at)}</span>
+                  ? <span>Your best here: <b>{best.best_score} {best.best_score === 1 ? 'point' : 'points'}</b>, {best.best_accuracy}% right, {shortDate(best.achieved_at)}</span>
                   : <span>No best yet for this unit, length and mode.</span>}
               </p>
               {startError ? <div className="ui-alert" role="alert"><span>{startError}</span></div> : null}
@@ -724,8 +724,8 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
             {newBest ? <span className="ui-icon ui-tone--amber practice__title-icon" aria-hidden="true">{Icons.trophy}</span> : null}
             {title}
           </h1>
-          {newBest && saved?.previous_best ? <p className="ui-page-subtitle">Your previous best was {saved.previous_best.best_score} points ({saved.previous_best.best_accuracy}% right).</p> : null}
-          {!newBest && saved?.best && !nothing ? <p className="ui-page-subtitle">Your best for this unit, length and mode is {saved.best.best_score} points.</p> : null}
+          {newBest && saved?.previous_best ? <p className="ui-page-subtitle">Your previous best was {saved.previous_best.best_score} {saved.previous_best.best_score === 1 ? 'point' : 'points'} ({saved.previous_best.best_accuracy}% right).</p> : null}
+          {!newBest && saved?.best && !nothing ? <p className="ui-page-subtitle">Your best for this unit, length and mode is {saved.best.best_score} {saved.best.best_score === 1 ? 'point' : 'points'}.</p> : null}
           {game.source === 'review' ? <p className="ui-page-subtitle">A round on the cards you missed.</p> : null}
         </div>
       </header>
