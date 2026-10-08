@@ -67,15 +67,19 @@ def context_for(student_id: str, course: str, unit: str, limit_chars: int = 18_0
     return labels, '\n\n'.join(chunks)
 
 
-def practice_context(student_id: str, course: str, unit: str | None, limit_chars: int = 16_000) -> tuple[list[str], str, list[str]]:
+def practice_context(student_id: str, course: str, unit: str | None, limit_chars: int = 16_000,
+                     exclude_prefix: str = '') -> tuple[list[str], str, list[str]]:
     """(file names, note text, note IDs) for a practice test: one unit's notes, or with unit
     None the whole course's, where each unit gets an even share of limit_chars so a course
-    test covers every unit rather than only the newest one. Only the owner's notes."""
+    test covers every unit rather than only the newest one. Only the owner's notes. Notes
+    whose file name starts with exclude_prefix (if given) are left out."""
     init_notes()
     excerpt = func.substr(notes.c.text, 1, max(0, limit_chars)).label('text')
     query = select(notes.c.id, notes.c.unit, notes.c.file_name, excerpt).where(notes.c.student_id == student_id, notes.c.course == course)
     if unit is not None:
         query = query.where(notes.c.unit == unit)
+    if exclude_prefix:
+        query = query.where(func.substr(notes.c.file_name, 1, len(exclude_prefix)) != exclude_prefix)
     with database.engine().connect() as connection:
         rows = connection.execute(query.order_by(notes.c.unit, notes.c.created_at.desc())).mappings().all()
     by_unit: dict[str, list] = {}

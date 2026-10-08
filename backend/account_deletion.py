@@ -11,6 +11,7 @@ safe for foreign keys:
   group and pass to the group's owner, so the group keeps its work. The student's
   comments, attachments, assignments and activity on any task are removed.
 - Notes, flashcards (cards, jobs, styles, review state), practice tests and their items,
+  study guides,
   tutor conversations and messages, Otto's memory and Otto settings (name, personality,
   "about me" note, memory switch),
   generated questions, private question banks and every AI cache entry tied to the
@@ -47,6 +48,7 @@ import otto
 import practice
 import practice_tests
 import questions
+import study_guides
 import tasks
 import tutor
 
@@ -65,6 +67,7 @@ def init_all() -> None:
     tasks.init_tasks()
     practice_tests.init_practice()
     practice.init_practice()
+    study_guides.init_guides()
     feedback.init_feedback()
     onboarding.init_onboarding()
     help_bot.init_help_bot()
@@ -197,6 +200,7 @@ def _delete_study_material(connection, student_id: str) -> int:
     connection.execute(delete(flashcards.styles).where(flashcards.styles.c.owner_id == student_id))
     connection.execute(delete(notes).where(notes.c.student_id == student_id))
     practice_tests.delete_for_owner(connection, student_id)
+    study_guides.delete_for_owner(connection, student_id)
     conversation_ids = select(tutor.conversations.c.id).where(tutor.conversations.c.owner_id == student_id)
     tutor._delete_children(connection, conversation_ids)
     connection.execute(delete(tutor.ratings).where(tutor.ratings.c.owner_id == student_id))

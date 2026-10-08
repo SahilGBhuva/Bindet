@@ -232,6 +232,17 @@ practice_test_cache = Table(
     Column("hits", Integer, nullable=False, default=0),
 )
 
+# Per-account study guides (study_guides.py) as the AI wrote them, keyed by the guide kind,
+# the notes text sent and the student's preferences. Every read filters by owner.
+study_guide_cache = Table(
+    "study_guide_cache", metadata,
+    Column("key", String(64), primary_key=True),
+    Column("owner_id", String(100), nullable=False, index=True),
+    Column("content", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("hits", Integer, nullable=False, default=0),
+)
+
 # Which owner and source (a note ID, "conversation:<id>", or "" for none) produced or
 # used each cache entry. A shared entry (flashcards, OCR text) is deleted when its last
 # reference goes; see ai_cache.release_source and ai_cache.purge_user_ai_data.
@@ -305,6 +316,8 @@ RLS_TABLES = (
     "study_group_members",
     "study_groups",
     "student_progress",
+    "study_guide_cache",
+    "study_guides",
     "study_tasks",
     "topic_progress",
     "practice_test_cache",
@@ -350,6 +363,8 @@ CLIENT_REVOKED_TABLES = (
     "practice_test_cache",
     "practice_test_items",
     "practice_tests",
+    "study_guide_cache",
+    "study_guides",
     "tutor_conversation_settings",
     "tutor_conversations",
     "tutor_message_ratings",
@@ -2008,6 +2023,7 @@ def reset_db() -> None:
         connection.execute(delete(grading_cache))
         connection.execute(delete(tutor_reply_cache))
         connection.execute(delete(practice_test_cache))
+        connection.execute(delete(study_guide_cache))
         connection.execute(delete(study_tasks))
         connection.execute(delete(uploaded_images))
         connection.execute(delete(study_group_members))

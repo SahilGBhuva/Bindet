@@ -31,6 +31,8 @@ FLASHCARD_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_FLASHCAR
 # A 15-question practice test is about 4,000 output tokens; one batch of short-answer grades far less.
 PRACTICE_TEST_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_PRACTICE_TIMEOUT_SECONDS", "40")))
 PRACTICE_GRADE_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_PRACTICE_GRADE_TIMEOUT_SECONDS", "20")))
+# A study guide (study_guides.py) is the longest structured output: up to about 4,500 tokens.
+GUIDE_TIMEOUT = max(OPENROUTER_TIMEOUT, float(os.getenv("OPENROUTER_GUIDE_TIMEOUT_SECONDS", "45")))
 
 logger = logging.getLogger("bindit.ai")
 if not logger.handlers:
@@ -67,6 +69,9 @@ OPERATIONS: dict[str, dict[str, Any]] = {
     "extract_notes": {"models": ("vision",), "max_tokens": 2000, "timeout": max(OPENROUTER_VISION_TIMEOUT, 12.0), "temperature": 0},
     "generate_test": {"models": ("text",), "max_tokens": 4200, "timeout": PRACTICE_TEST_TIMEOUT, "temperature": 0.3},
     "grade_test": {"models": ("text",), "max_tokens": 1600, "timeout": PRACTICE_GRADE_TIMEOUT, "temperature": 0.05},
+    # Study guides, summaries, cheat sheets, vocabulary, practice problems, timelines (study_guides.py):
+    # one call per guide, on the cheapest text model.
+    "generate_guide": {"models": ("text",), "max_tokens": 4500, "timeout": GUIDE_TIMEOUT, "temperature": 0.25},
     # "How to use bindet" help bot (help_bot.py): single turn, three short sentences, fixed knowledge.
     "help_bot": {"models": ("text",), "max_tokens": 200, "timeout": min(OPENROUTER_TIMEOUT, 8.0), "temperature": 0.1},
     # Otto's housekeeping, after a reply has finished streaming: a few words, then a few short ops.
