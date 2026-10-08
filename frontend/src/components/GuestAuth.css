@@ -293,6 +293,9 @@
   .auth-text-btn { min-height: 44px; }
   /* The Log in / Sign up switch is a full 44px target, not just its line of text. */
   .auth-switch .auth-text-btn { display: inline-flex; align-items: center; min-width: 44px; padding: 0 4px; }
+  /* Log in / Reset password inside a sentence: the 44px target is invisible padding,
+     so the sentence keeps its normal line spacing. */
+  .auth-help--existing .auth-text-btn { min-height: 0; padding-block: 12px; margin-block: -12px; }
 }
 
 /* One-time notice over the landing page (after an account is deleted). */
