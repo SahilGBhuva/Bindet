@@ -337,10 +337,13 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     if (token && conversations) setCachedTutorConversations(token, conversations)
   }, [token, conversations])
 
-  // Follow the reply as it streams, unless the student has scrolled up to read.
+  // Follow the reply as it streams, unless the student has scrolled up to read. The welcome
+  // (no messages yet) starts at its top, so a short phone screen shows Otto's greeting first.
   useEffect(() => {
     const node = scroller.current
-    if (node && stickToBottom.current) node.scrollTop = node.scrollHeight
+    if (!node) return
+    if ((threads[activeId] ?? []).length === 0) node.scrollTop = 0
+    else if (stickToBottom.current) node.scrollTop = node.scrollHeight
   }, [threads, activeId])
 
   useEffect(() => {

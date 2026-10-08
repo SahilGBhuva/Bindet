@@ -422,6 +422,10 @@ button.tutor-chip:hover { text-decoration: underline; }
   .tutor__camera { display: grid; }
   .tutor__composer { padding: 0 12px 10px; }
   .tutor__thread { padding: 20px 14px 24px; }
+  /* Phones: a shorter welcome, so the greeting and the first starters share one screen. */
+  .tutor__welcome { gap: 8px; padding-top: 4px; }
+  .tutor__welcome img { width: 64px; margin-bottom: 0; }
+  .tutor__welcome h2 { font-size: 28px; }
   .tutor__input textarea { font-size: 16px; }
   .tutor__tool,
   .tutor__send { width: 44px; height: 44px; }
