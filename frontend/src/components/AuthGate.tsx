@@ -713,6 +713,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 Use a different email
               </button>
             </div>
+            <p className="auth-help auth-help--existing">
+              Already have an account with this email? No code is sent then.{' '}
+              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => { changeEmail(); switchMode('login') }}>Log in</button>
+              {' · '}
+              <button className="auth-text-btn" type="button" disabled={busy} onClick={() => { changeEmail(); switchMode('reset') }}>Reset password</button>
+            </p>
           </section>
           <AuthAside mode="confirm" />
         </main>

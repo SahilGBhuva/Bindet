@@ -345,14 +345,9 @@ export async function refreshAuthSession(session: AuthSession, options: { reload
 
 export async function signUp(email: string, password: string) {
   const data = await authRequest('signup', { email, password }, appReturnUrl())
-  // With email confirmation on, the auth server answers a sign-up for an email that is
-  // already registered with a stand-in user that has no identities, and sends no code.
-  // Say so instead of waiting for a code that never comes.
-  // (Without a session the server returns the user itself, not { user }.)
-  const created = (data.user ?? data) as { identities?: unknown[] }
-  if (!data.access_token && Array.isArray(created.identities) && created.identities.length === 0) {
-    throw new AuthRequestError('That email already has an account.', 422, EMAIL_TAKEN)
-  }
+  // An email that is already registered gets the same answer as a new one (the auth server
+  // hides it on purpose so nobody can check who has an account). The code screen offers
+  // "Log in" and "Reset password" for that case instead.
   const session = asSession(data)
   saveAuthSession(session)
   return { session, needsConfirmation: !session }
