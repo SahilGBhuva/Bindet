@@ -112,6 +112,8 @@ async def limit_request_rate(request, call_next):
     """Burst guard: refuse floods before any sign-in check, database or AI work (see rate_limit.py)."""
     address = rate_limit.address_of(request.headers, request.client.host if request.client else None)
     rate_limit.client_address.set(address)
+    # The student's time zone, so streak days follow their own calendar (database.local_today).
+    database.client_tz_offset.set(database.clamp_tz_offset(request.headers.get("x-tz-offset", "0")))
     wait = rate_limit.check_request(request.url.path, request.method, address, request.headers.get("authorization"))
     if wait:
         seconds = rate_limit.retry_after(wait)
@@ -3141,6 +3143,9 @@ def grade_review_card(card_id: str, data: ReviewGradeRequest, authorization: Ann
     result = review.grade(owner, card_id, data.grade, tz_offset=review.clamp_offset(data.tz_offset))
     if result is None:
         raise HTTPException(status_code=404, detail={"code": "card_not_found", "message": REVIEW_CARD_NOT_FOUND})
+    if not result.get("duplicate"):
+        # Reviewing flashcards counts as studying today for the streak (no XP).
+        database.mark_study_day(owner)
     return result
 
 

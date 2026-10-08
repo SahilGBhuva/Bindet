@@ -5,6 +5,7 @@ import re
 import secrets
 import threading
 import time
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -711,6 +712,34 @@ def _next_streak(current_streak: int, last_active: date | None, correct: bool, t
     return 1
 
 
+# The student's UTC offset in minutes, as JavaScript's Date.getTimezoneOffset() gives it
+# (UTC minus local time). The API middleware sets it from the X-TZ-Offset header, so a
+# "day" for streaks is the student's own calendar day, not the server's (UTC).
+client_tz_offset: ContextVar[int] = ContextVar("client_tz_offset", default=0)
+
+
+def clamp_tz_offset(value: object) -> int:
+    try:
+        return max(-840, min(840, int(str(value).strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
+def local_today(now: datetime | None = None) -> date:
+    """Today in the requesting student's time zone (UTC when unknown)."""
+    current = now or datetime.now(timezone.utc)
+    return (current - timedelta(minutes=client_tz_offset.get())).date()
+
+
+def live_streak(streak: int | None, last_date: date | None, today: date | None = None) -> int:
+    """A streak only counts while it's alive: active today or yesterday. Otherwise it's 0
+    (the stored value is kept until the next active day restarts it at 1)."""
+    if not streak or last_date is None:
+        return 0
+    today = today or local_today()
+    return int(streak) if last_date >= today - timedelta(days=1) else 0
+
+
 def _next_login_streak(current_streak: int, last_login: date | None, today: date) -> int:
     if last_login == today:
         return current_streak
@@ -784,7 +813,7 @@ DAILY_XP_CAP = 3000
 def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict:
     """Record one answer. The result's xp_awarded can be below xp once the daily cap is reached."""
     init_db()
-    today = date.today()
+    today = local_today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
         if xp > 0:
@@ -885,17 +914,21 @@ def award_xp(student_id: str, xp: int) -> dict:
         )).scalar_one()
         xp = max(0, min(int(xp), DAILY_XP_CAP - int(earned_today)))
         progress = connection.execute(select(student_progress).where(student_progress.c.student_id == student_id)).mappings().first()
+        # Finishing a practice test is a study day for the streak, even with no XP left today.
+        today = local_today(now)
         if progress is None:
             connection.execute(student_progress.insert().values(
-                student_id=student_id, total_xp=xp, attempts=0, correct_answers=0, streak=0, best_streak=0,
-                last_active_date=None, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
+                student_id=student_id, total_xp=xp, attempts=0, correct_answers=0, streak=1, best_streak=1,
+                last_active_date=today, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
             ))
-            total, streak = xp, 0
+            total, streak = xp, 1
         else:
-            total, streak = int(progress["total_xp"]) + xp, int(progress["streak"])
-            if xp:
-                connection.execute(update(student_progress).where(student_progress.c.student_id == student_id)
-                                   .values(total_xp=total, updated_at=now))
+            total = int(progress["total_xp"]) + xp
+            streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
+            connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
+                total_xp=total, streak=streak, best_streak=max(int(progress["best_streak"]), streak),
+                last_active_date=today, updated_at=now,
+            ))
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
     return {"xp_awarded": xp, "total_xp": total, "streak": streak}
@@ -909,7 +942,7 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
     and topic accuracy alone: a timed self-check round is not a graded quiz answer.
     Returns {"xp_awarded", "total_xp", "streak"}.
     """
-    today = date.today()
+    today = local_today()
     now = datetime.now(timezone.utc)
     if xp > 0:
         day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
@@ -944,9 +977,32 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
     return {"xp_awarded": xp, "total_xp": progress["total_xp"] + xp, "streak": streak}
 
 
+def mark_study_day(student_id: str) -> int:
+    """Count today as a study day for the streak (flashcard reviews), with no XP. Returns the streak."""
+    init_db()
+    now = datetime.now(timezone.utc)
+    today = local_today(now)
+    with engine().begin() as connection:
+        _advisory_lock(connection, f"xp:{student_id}")
+        progress = connection.execute(select(student_progress).where(student_progress.c.student_id == student_id)).mappings().first()
+        if progress is None:
+            connection.execute(student_progress.insert().values(
+                student_id=student_id, total_xp=0, attempts=0, correct_answers=0, streak=1, best_streak=1,
+                last_active_date=today, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
+            ))
+            return 1
+        if progress["last_active_date"] == today:
+            return int(progress["streak"])
+        streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
+        connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
+            streak=streak, best_streak=max(int(progress["best_streak"]), streak), last_active_date=today, updated_at=now,
+        ))
+        return streak
+
+
 def record_daily_login(student_id: str) -> dict:
     init_db()
-    today = date.today()
+    today = local_today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
         progress = connection.execute(
@@ -986,9 +1042,9 @@ def record_daily_login(student_id: str) -> dict:
         "total_xp": progress["total_xp"],
         "attempts": progress["attempts"],
         "correct_answers": progress["correct_answers"],
-        "streak": progress["streak"],
+        "streak": live_streak(progress["streak"], progress["last_active_date"]),
         "best_streak": progress["best_streak"],
-        "login_streak": progress.get("login_streak", 0),
+        "login_streak": live_streak(progress.get("login_streak", 0), progress.get("last_login_date")),
         "best_login_streak": progress.get("best_login_streak", 0),
         "topics": {
             row["topic"]: {"attempts": row["attempts"], "correct": row["correct_answers"]}
@@ -1056,9 +1112,9 @@ def get_progress(student_id: str) -> dict | None:
         "total_xp": progress["total_xp"],
         "attempts": progress["attempts"],
         "correct_answers": progress["correct_answers"],
-        "streak": progress["streak"],
+        "streak": live_streak(progress["streak"], progress["last_active_date"]),
         "best_streak": progress["best_streak"],
-        "login_streak": progress.get("login_streak", 0),
+        "login_streak": live_streak(progress.get("login_streak", 0), progress.get("last_login_date")),
         "best_login_streak": progress.get("best_login_streak", 0),
         "topics": {
             row["topic"]: {"attempts": row["attempts"], "correct": row["correct_answers"]}
@@ -1123,7 +1179,7 @@ def get_profile(student_id: str) -> dict | None:
     init_db()
     with engine().connect() as connection:
         row = connection.execute(
-            select(profiles, student_progress.c.total_xp, student_progress.c.streak, student_progress.c.best_streak)
+            select(profiles, student_progress.c.total_xp, student_progress.c.streak, student_progress.c.best_streak, student_progress.c.last_active_date)
             .join(student_progress, profiles.c.student_id == student_progress.c.student_id)
             .where(profiles.c.student_id == student_id)
         ).mappings().first()
@@ -1139,7 +1195,7 @@ def get_profile(student_id: str) -> dict | None:
         "discoverable": bool(row["discoverable"]),
         "allow_friend_requests": bool(row["allow_friend_requests"]),
         "total_xp": row["total_xp"],
-        "streak": row["streak"],
+        "streak": live_streak(row["streak"], row["last_active_date"]),
         "best_streak": row["best_streak"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -1366,8 +1422,8 @@ def list_friends(student_id: str) -> list[dict]:
             xp_events.c.student_id.in_(friend_ids), xp_events.c.created_at >= week_start,
         ).group_by(xp_events.c.student_id)).all())
         active_days = _active_days(connection, [student_id, *friend_ids])
-    today = date.today()
-    return [{**dict(row), "active_today": row["last_active_date"] == today,
+    today = local_today()
+    return [{**dict(row), "streak": live_streak(row["streak"], row["last_active_date"], today), "active_today": row["last_active_date"] == today,
              "weekly_xp": weekly.get(row["student_id"], 0),
              "friend_streak": _shared_streak(active_days.get(student_id, set()), active_days.get(row["student_id"], set()))}
             for row in rows]
@@ -1826,13 +1882,13 @@ def friend_leaderboard(student_id: str) -> list[dict]:
             .where(profiles.c.student_id.in_(friend_ids))
             .order_by(func.coalesce(weekly_xp.c.weekly_xp, 0).desc(), profiles.c.username.asc())
         ).mappings().all()
-    today = date.today()
+    today = local_today()
     return [
         {
             "student_id": row["student_id"], "username": row["username"],
             "display_name": row["display_name"], "total_xp": row["total_xp"],
             "weekly_xp": row["weekly_xp"],
-            "streak": row["streak"], "active_today": row["last_active_date"] == today,
+            "streak": live_streak(row["streak"], row["last_active_date"], today), "active_today": row["last_active_date"] == today,
         }
         for row in rows
     ]

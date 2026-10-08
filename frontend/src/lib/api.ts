@@ -271,6 +271,8 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
   if (!(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
   const token = await resolvedToken(accessToken)
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  // The student's time zone (minutes, as getTimezoneOffset gives it), so streak days follow their own calendar.
+  headers.set('X-TZ-Offset', String(new Date().getTimezoneOffset()))
   callerSignal?.throwIfAborted()
   // Offline: say so at once instead of waiting for the request to fail.
   if (deviceOffline()) throw new OfflineError()
@@ -362,6 +364,7 @@ async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: numb
     }
     xhr.open('POST', `${API_URL}${path}`)
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.setRequestHeader('X-TZ-Offset', String(new Date().getTimezoneOffset()))
     xhr.timeout = timeoutMs
     xhr.upload.onload = markSent
     xhr.upload.onprogress = (event) => { if (event.lengthComputable && event.loaded >= event.total) markSent() }
@@ -620,6 +623,7 @@ export async function getProgress(studentId: string, accessToken?: string, force
   const headers = new Headers()
   const token = await resolvedToken(accessToken)
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  headers.set('X-TZ-Offset', String(new Date().getTimezoneOffset()))
   const response = await fetch(`${API_URL}/api/progress/${encodeURIComponent(studentId)}?tz_offset=${new Date().getTimezoneOffset()}`, { headers })
   if (response.status === 404) return null
   if (!response.ok) {
@@ -1023,6 +1027,7 @@ export function streamTutorMessage(
   xhr.open('POST', `${API_URL}/api/tutor/messages`)
   xhr.setRequestHeader('Content-Type', 'application/json')
   xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
+  xhr.setRequestHeader('X-TZ-Offset', String(new Date().getTimezoneOffset()))
   xhr.upload.onprogress = (event) => {
     resetIdle()
     if (body.images?.length && event.lengthComputable) handlers.onUploadProgress?.(event.loaded / event.total)
