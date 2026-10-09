@@ -1,4 +1,5 @@
 import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, subscribeToAuthSession, type AuthSession } from './auth'
+import { isRecord, readList } from './listGuards'
 
 export type ChatMessage = {
   id: string
@@ -45,6 +46,32 @@ export type ChatUnread = {
 
 type SupabaseConfig = { supabase_url: string; supabase_anon_key: string }
 
+export const CHAT_LOAD_ERROR = 'Couldn’t load messages. Try again.'
+
+const isString = (value: unknown): value is string => typeof value === 'string'
+
+/** A message row with the fields the chat needs to place and render it. */
+export function isChatMessage(value: unknown): value is ChatMessage {
+  return isRecord(value)
+    && isString(value.id) && Boolean(value.id)
+    && isString(value.group_id)
+    && isString(value.sender_id)
+    && isString(value.created_at)
+    && (value.body === null || value.body === undefined || isString(value.body))
+}
+
+function isReadReceipt(value: unknown): value is ChatReadReceipt {
+  return isRecord(value) && isString(value.group_id) && isString(value.student_id) && isString(value.last_read_at)
+}
+
+function isTypingState(value: unknown): value is ChatTypingState {
+  return isRecord(value) && isString(value.group_id) && isString(value.student_id) && isString(value.typing_until)
+}
+
+function isUnreadRow(value: unknown): value is ChatUnread & { unread_count: number | string } {
+  return isRecord(value) && isString(value.group_id)
+}
+
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 const CHAT_BUCKET = 'study-group-images'
 let configPromise: Promise<SupabaseConfig> | null = null
@@ -67,7 +94,11 @@ function getConfig() {
   if (!configPromise) {
     const pending: Promise<SupabaseConfig> = fetch(`${API_URL}/api/auth/config`).then(async (response) => {
       if (!response.ok) throw new Error('Chat is not configured yet.')
-      return response.json() as Promise<SupabaseConfig>
+      const body: unknown = await response.json().catch(() => null)
+      if (!isRecord(body) || !isString(body.supabase_url) || !body.supabase_url || !isString(body.supabase_anon_key)) {
+        throw new Error('Chat is not configured yet.')
+      }
+      return { supabase_url: body.supabase_url, supabase_anon_key: body.supabase_anon_key }
     })
     configPromise = pending
     // Forget a failed fetch so the next call tries again instead of failing until reload.
@@ -97,8 +128,7 @@ export async function listGroupMessages(groupId: string, session: AuthSession): 
   if (!response.ok && response.status === 400) {
     response = await request('id,group_id,sender_id,body,created_at,sender:profiles!study_group_messages_sender_id_fkey(username,display_name,avatar_path)')
   }
-  if (!response.ok) throw new Error('Could not load this chat.')
-  const messages = await response.json() as ChatMessage[]
+  const messages = await readList(response, isChatMessage, CHAT_LOAD_ERROR)
   cacheGroupMessages(groupId, session, messages)
   return messages
 }
@@ -137,10 +167,12 @@ export async function sendGroupMessage(groupId: string, body: string, session: A
     if (response.status === 429 || /chat_rate_limited/i.test(text)) throw new Error(CHAT_RATE_LIMITED_MESSAGE)
     throw new Error(error?.message ?? 'Could not send that message.')
   }
-  const rows = await response.json() as ChatMessage[]
+  const rows = await readList(response, isChatMessage, 'Your message may not have been sent. Refresh to check.')
+  const sent = rows[0]
+  if (!sent) throw new Error('Your message may not have been sent. Refresh to check.')
   const cached = getCachedGroupMessages(groupId, session) ?? []
-  if (rows[0] && !cached.some((message) => message.id === rows[0].id)) cacheGroupMessages(groupId, session, [...cached, rows[0]])
-  return rows[0]
+  if (!cached.some((message) => message.id === sent.id)) cacheGroupMessages(groupId, session, [...cached, sent])
+  return sent
 }
 
 function storagePath(path: string) {
@@ -226,22 +258,23 @@ export async function getGroupImageUrl(path: string, owner: AttachmentOwner, ses
     body: JSON.stringify({ expiresIn: 3600 }),
   })
   if (!response.ok) throw new Error('Image unavailable')
-  const payload = await response.json() as { signedURL?: string; signedUrl?: string }
-  const signedPath = payload.signedURL || payload.signedUrl
-  if (!signedPath) throw new Error('Image unavailable')
+  const payload: unknown = await response.json().catch(() => null)
+  const signedPath = isRecord(payload) ? payload.signedURL || payload.signedUrl : null
+  if (!isString(signedPath) || !signedPath) throw new Error('Image unavailable')
   return signedPath.startsWith('http') ? signedPath : `${config.supabase_url}/storage/v1${signedPath}`
 }
 
 export async function deleteGroupImage(path: string, owner: AttachmentOwner, session: AuthSession) {
   if (!isSafeAttachmentPath(path, owner)) return
   const config = await getConfig()
-  await fetch(`${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`, {
+  const response = await fetch(`${config.supabase_url}/storage/v1/object/${CHAT_BUCKET}/${storagePath(path)}`, {
     method: 'DELETE',
     headers: {
       apikey: config.supabase_anon_key,
       Authorization: `Bearer ${session.access_token}`,
     },
   })
+  if (!response.ok && response.status !== 404) throw new Error('The image could not be removed.')
 }
 
 function authHeaders(config: SupabaseConfig, session: AuthSession) {
@@ -255,14 +288,17 @@ export async function listChatUnreads(session: AuthSession): Promise<ChatUnread[
     headers: { ...authHeaders(config, session), 'Content-Type': 'application/json' },
     body: '{}',
   })
-  if (!response.ok) return []
-  const rows = await response.json() as Array<ChatUnread & { unread_count: number | string }>
-  return rows.map((row) => ({ ...row, unread_count: Number(row.unread_count) || 0 }))
+  const rows = await readList(response, isUnreadRow, 'Could not load unread messages.')
+  return rows.map((row) => ({
+    group_id: row.group_id,
+    unread_count: Number(row.unread_count) || 0,
+    last_message_at: isString(row.last_message_at) ? row.last_message_at : null,
+  }))
 }
 
 export async function markGroupRead(groupId: string, session: AuthSession) {
   const config = await getConfig()
-  await fetch(`${config.supabase_url}/rest/v1/study_group_chat_reads?on_conflict=group_id,student_id`, {
+  const response = await fetch(`${config.supabase_url}/rest/v1/study_group_chat_reads?on_conflict=group_id,student_id`, {
     method: 'POST',
     headers: {
       ...authHeaders(config, session),
@@ -271,6 +307,7 @@ export async function markGroupRead(groupId: string, session: AuthSession) {
     },
     body: JSON.stringify({ group_id: groupId, student_id: session.user.id, last_read_at: new Date().toISOString() }),
   })
+  if (!response.ok) throw new Error('Could not mark this chat as read.')
 }
 
 export async function listGroupReadReceipts(groupId: string, session: AuthSession): Promise<ChatReadReceipt[]> {
@@ -279,8 +316,7 @@ export async function listGroupReadReceipts(groupId: string, session: AuthSessio
   url.searchParams.set('select', 'group_id,student_id,last_read_at')
   url.searchParams.set('group_id', `eq.${groupId}`)
   const response = await fetch(url, { headers: authHeaders(config, session) })
-  if (!response.ok) return []
-  return response.json() as Promise<ChatReadReceipt[]>
+  return readList(response, isReadReceipt, 'Could not load read receipts.')
 }
 
 // Typing signals last 5 seconds. Anything further out than this is not a real
@@ -299,16 +335,17 @@ export async function listGroupTyping(groupId: string, session: AuthSession): Pr
   url.searchParams.set('group_id', `eq.${groupId}`)
   url.searchParams.set('typing_until', `gt.${new Date().toISOString()}`)
   const response = await fetch(url, { headers: authHeaders(config, session) })
-  if (!response.ok) return []
-  const rows = await response.json() as ChatTypingState[]
+  const rows = await readList(response, isTypingState, 'Could not load who is typing.')
   const now = Date.now()
-  return rows.filter((row) => isTypingNow(row, now))
+  return rows
+    .filter((row) => isTypingNow(row, now))
+    .map((row) => ({ ...row, display_name: isString(row.display_name) && row.display_name.trim() ? row.display_name : 'Someone' }))
 }
 
 export async function setGroupTyping(groupId: string, displayName: string, typing: boolean, session: AuthSession) {
   const config = await getConfig()
   const typingUntil = new Date(Date.now() + (typing ? 5000 : -1000)).toISOString()
-  await fetch(`${config.supabase_url}/rest/v1/study_group_chat_typing?on_conflict=group_id,student_id`, {
+  const response = await fetch(`${config.supabase_url}/rest/v1/study_group_chat_typing?on_conflict=group_id,student_id`, {
     method: 'POST',
     headers: {
       ...authHeaders(config, session),
@@ -317,6 +354,7 @@ export async function setGroupTyping(groupId: string, displayName: string, typin
     },
     body: JSON.stringify({ group_id: groupId, student_id: session.user.id, display_name: displayName, typing_until: typingUntil }),
   })
+  if (!response.ok) throw new Error('Could not update typing status.')
 }
 
 const RECONNECT_MIN_MS = 1200
@@ -325,6 +363,9 @@ const RECONNECT_MAX_MS = 30_000
 const HEALTHY_RESET_MS = 30_000
 
 type RealtimeChange = { event: 'INSERT'; schema: 'public'; table: string; filter?: string }
+
+/** 'live' once the database subscription is confirmed; 'offline' while it is down or retrying. */
+export type RealtimeStatus = 'live' | 'offline'
 
 type RealtimePacket = {
   topic?: string
@@ -354,8 +395,15 @@ function openRealtimeChannel(
   topic: string,
   change: RealtimeChange,
   onRecord: (record: ChatMessage) => void,
+  onStatus?: (status: RealtimeStatus) => void,
 ) {
   let closed = false
+  let lastStatus: RealtimeStatus | null = null
+  const report = (status: RealtimeStatus) => {
+    if (closed || status === lastStatus) return
+    lastStatus = status
+    try { onStatus?.(status) } catch { /* a status listener never breaks the socket */ }
+  }
   let socket: WebSocket | null = null
   let heartbeat: number | null = null
   let retryTimer: number | null = null
@@ -396,7 +444,17 @@ function openRealtimeChannel(
     retryTimer = null
     if (closed) return
     const wsUrl = config.supabase_url.replace(/^http/, 'ws') + `/realtime/v1/websocket?apikey=${encodeURIComponent(config.supabase_anon_key)}&vsn=1.0.0`
-    const current = new WebSocket(wsUrl)
+    let current: WebSocket
+    try {
+      current = new WebSocket(wsUrl)
+    } catch {
+      // A bad URL or a blocked socket: stay offline and retry with the backoff.
+      socket = null
+      report('offline')
+      retryTimer = window.setTimeout(open, retryDelay)
+      retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
+      return
+    }
     socket = current
     joined = false
     const joinRef = nextRef()
@@ -422,12 +480,15 @@ function openRealtimeChannel(
     })
 
     current.addEventListener('message', (event) => {
-      let packet: RealtimePacket
+      let parsed: unknown
       try {
-        packet = JSON.parse(String(event.data)) as RealtimePacket
+        parsed = JSON.parse(String(event.data))
       } catch {
         return // Ignore malformed realtime frames.
       }
+      if (!isRecord(parsed)) return
+      const packet = parsed as RealtimePacket
+      if (packet.payload !== undefined && !isRecord(packet.payload)) return
       if (packet.topic !== topic) return
       const status = packet.payload?.status
       if (packet.event === 'phx_reply') {
@@ -456,15 +517,21 @@ function openRealtimeChannel(
       if (packet.event === 'system' && status === 'ok' && joined && (packet.payload?.extension ?? 'postgres_changes') === 'postgres_changes') {
         // The database subscription is confirmed: the connection is healthy.
         retryDelay = RECONNECT_MIN_MS
+        report('live')
         return
       }
       if (packet.event === 'system' && (status === 'error' || (status !== 'ok' && /token|expired|jwt/i.test(packet.payload?.message ?? '')))) {
         reconnect(current)
         return
       }
-      const record = packet.payload?.data?.record
-      if (packet.event === 'postgres_changes' && record) onRecord(record)
+      const record: unknown = packet.payload?.data?.record
+      if (packet.event === 'postgres_changes' && isChatMessage(record)) {
+        try { onRecord(record) } catch { /* one bad record never closes the channel */ }
+      }
     })
+
+    // An error is always followed by close, which schedules the retry.
+    current.addEventListener('error', () => report('offline'))
 
     current.addEventListener('close', () => {
       if (heartbeat) window.clearInterval(heartbeat)
@@ -472,6 +539,7 @@ function openRealtimeChannel(
       joined = false
       clearHealthyTimer()
       if (closed || socket !== current) return
+      report('offline')
       retryTimer = window.setTimeout(open, retryDelay)
       retryDelay = Math.min(RECONNECT_MAX_MS, retryDelay * 2)
     })
@@ -493,6 +561,7 @@ export async function subscribeToGroupMessages(
   groupId: string,
   session: AuthSession,
   onMessage: (message: ChatMessage) => void,
+  onStatus?: (status: RealtimeStatus) => void,
 ) {
   const config = await getConfig()
   return openRealtimeChannel(
@@ -503,6 +572,7 @@ export async function subscribeToGroupMessages(
     (record) => {
       if (record.group_id === groupId) onMessage(record)
     },
+    onStatus,
   )
 }
 
