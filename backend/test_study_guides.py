@@ -405,6 +405,25 @@ class FlashcardTests(GuideTestCase):
         same = self.call("POST", f"/api/study-guides/{guide['id']}/regenerate", json={}).json()
         self.assertEqual(same["source"], "unchanged")
 
+    def test_a_regenerated_guide_makes_flashcards_from_its_current_content(self):
+        guide = self.create().json()
+        first = self.call("POST", f"/api/study-guides/{guide['id']}/note", json={}).json()
+        # A rename keeps the same content, so the same note.
+        self.call("PATCH", f"/api/study-guides/{guide['id']}", json={"title": "Test prep"})
+        self.assertEqual(self.call("POST", f"/api/study-guides/{guide['id']}/note", json={}).json()["id"], first["id"])
+        # A fresh version with different content gets a new note; the old one stays.
+        self.model.sections = [GOOD[1]]
+        regenerated = self.call("POST", f"/api/study-guides/{guide['id']}/regenerate", json={"fresh": True}).json()
+        self.assertEqual(regenerated["source"], "regenerated")
+        second = self.call("POST", f"/api/study-guides/{guide['id']}/note", json={}).json()
+        self.assertTrue(second["created"])
+        self.assertNotEqual((second["id"], second["file_name"]), (first["id"], first["file_name"]))
+        self.assertTrue(second["file_name"].startswith(f"{study_guides.GUIDE_NOTE_PREFIX}{guide['id'][:8]} "))
+        self.assertNotIn("Calvin cycle happens in the stroma", note_store.get_note("alex", second["id"])["text"])
+        self.assertIn("Calvin cycle happens in the stroma", note_store.get_note("alex", first["id"])["text"])
+        again = self.call("POST", f"/api/study-guides/{guide['id']}/note", json={}).json()
+        self.assertEqual((again["id"], again["created"]), (second["id"], False))
+
     def test_a_whole_course_guide_needs_a_unit_for_its_flashcards(self):
         guide = self.create(unit=None).json()
         response = self.call("POST", f"/api/study-guides/{guide['id']}/note", json={})

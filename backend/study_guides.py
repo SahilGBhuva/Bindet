@@ -12,6 +12,8 @@ never read, rename, regenerate or delete another student's guide.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -363,6 +365,17 @@ def generate(*, kind: str, course: str, unit: str, note_text: str, instructions:
 
 
 # --- Plain text (notes for flashcards, Otto) ---------------------------------------------
+
+def content_hash(sections: list[dict[str, Any]]) -> str:
+    """A short hash of a guide's content (not its title, so a rename keeps the same note)."""
+    canonical = json.dumps(sections, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
+
+
+def guide_note_name(guide_id: str, kind: str, sections: list[dict[str, Any]]) -> str:
+    """The note "Make flashcards from this" saves: one per guide and content version."""
+    return f"{GUIDE_NOTE_PREFIX}{guide_id[:8]} – {label(kind)} {content_hash(sections)}.txt"
+
 
 def plain_text(title: str, sections: list[dict[str, Any]]) -> str:
     lines = [title, ""]

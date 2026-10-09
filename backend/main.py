@@ -3879,9 +3879,11 @@ def regenerate_study_guide(guide_id: GuideId, data: StudyGuideRegenerate, author
 
 @app.post("/api/study-guides/{guide_id}/note")
 def save_study_guide_as_note(guide_id: GuideId, data: StudyGuideNote, authorization: Annotated[str | None, Header()] = None):
-    """"Make flashcards from this": the guide is saved (once) as a text note in its unit, and the
-    app then asks for that note's flashcards through the normal path (POST /api/notes/{id}/flashcards),
-    so the usual flashcard limits and cache apply. Guide notes are never used to write guides."""
+    """"Make flashcards from this": the guide's current content is saved (once per version) as a text
+    note in its unit, and the app then asks for that note's flashcards through the normal path
+    (POST /api/notes/{id}/flashcards), so the usual flashcard limits and cache apply. The note name
+    carries a short hash of the content: the same content reuses its note, and a regenerated guide
+    gets a new note (the old one stays). Guide notes are never used to write guides."""
     owner = auth.authenticated_user(authorization)["id"]
     guide = study_guides.get_guide(owner, guide_id)
     if guide is None:
@@ -3890,7 +3892,7 @@ def save_study_guide_as_note(guide_id: GuideId, data: StudyGuideNote, authorizat
     unit = guide["unit"] or (data.unit.strip() if data.unit else "")
     if not unit:
         raise guide_error(400, "pick_unit")
-    file_name = f"{study_guides.GUIDE_NOTE_PREFIX}{guide_id[:8]} – {study_guides.label(guide['kind'])}.txt"
+    file_name = study_guides.guide_note_name(guide_id, guide["kind"], guide["sections"])
     existing = next((note for note in note_store.list_notes(owner, course, unit) if note["file_name"] == file_name), None)
     if existing is not None:
         return {"id": existing["id"], "course": course, "unit": unit, "file_name": file_name, "created": False}
