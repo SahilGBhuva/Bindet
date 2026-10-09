@@ -173,6 +173,33 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const listPanel = useRef<HTMLElement>(null)
   const closeList = useCallback(() => setListOpen(false), [])
   useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
+  // Phones: mode, course, unit and Personalize live in a small sheet under a one-row head.
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsChip = useRef<HTMLButtonElement>(null)
+  const settingsPanel = useRef<HTMLDivElement>(null)
+  const settingsSheet = phone && settingsOpen
+  const closeSettings = useCallback((restoreFocus = true) => {
+    setSettingsOpen(false)
+    if (restoreFocus) window.setTimeout(() => settingsChip.current?.focus(), 0)
+  }, [])
+  useEffect(() => {
+    if (!settingsSheet) return
+    settingsPanel.current?.querySelector<HTMLElement>('button, select')?.focus()
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closeSettings() }
+    }
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node
+      if (settingsPanel.current?.contains(target) || settingsChip.current?.contains(target)) return
+      closeSettings(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+    }
+  }, [settingsSheet, closeSettings])
   const [dragActive, setDragActive] = useState(false)
   const [notice, setNotice] = useState('')
   const stopRef = useRef<(() => void) | null>(null)
@@ -769,11 +796,38 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               </div>
             )}
           </div>
-          <div className="tutor__controls">
+          {phone ? (
+            <button
+              ref={settingsChip}
+              type="button"
+              className={`tutor__chip${settingsOpen ? ' is-open' : ''}`}
+              aria-haspopup="dialog"
+              aria-expanded={settingsOpen}
+              aria-controls={settingsOpen ? 'tutor-settings' : undefined}
+              aria-label={`Chat settings: ${studyMode === 'guide' ? 'Guide me' : 'Explain it'}, ${course ? `${course}${unit ? `, ${unit}` : ', whole course'}` : 'no course'}`}
+              onClick={() => (settingsOpen ? closeSettings(false) : setSettingsOpen(true))}
+              style={course && toneOf(course) ? { ['--course' as string]: toneOf(course) } : undefined}
+            >
+              {course ? <i className="tutor__chip-dot" aria-hidden="true" /> : <Icon name="tune" />}
+              <span className="tutor__chip-label">{course && unit ? <><span className="tutor__chip-course">{course} · </span>{unit}</> : course || 'No course'}</span>
+              {studyMode === 'guide' ? <span className="tutor__chip-mode">Guide</span> : null}
+              <svg className="tutor__chip-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+            </button>
+          ) : null}
+          {!phone || settingsOpen ? (
+          <div
+            ref={settingsPanel}
+            id="tutor-settings"
+            className={`tutor__controls${settingsSheet ? ' is-sheet' : ''}`}
+            role={settingsSheet ? 'dialog' : undefined}
+            aria-label={settingsSheet ? 'Chat settings' : undefined}
+          >
+            {settingsSheet ? <p className="tutor__sheet-label" aria-hidden="true">Study mode</p> : null}
             <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">
               <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'explain'} onClick={() => chooseMode('explain')}>Explain it</button>
               <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'guide'} onClick={() => chooseMode('guide')}>Guide me</button>
             </div>
+            {settingsSheet ? <p className="tutor__sheet-label" aria-hidden="true">Notes Otto should use</p> : null}
             <div className="tutor__context" role="group" aria-label="Notes Otto should use">
               <select className="ui-select" aria-label="Course" value={course} onChange={(event) => { setCourse(event.target.value); setUnit(notebook.courses.find((item) => item.name === event.target.value)?.units[0] ?? '') }}>
                 <option value="">No course</option>
@@ -786,10 +840,24 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                 </select>
               ) : null}
             </div>
-            <button type="button" className="tutor__head-icon tutor__personalize" onClick={() => setSheet('talk')} aria-label="Personalize Otto" title="Personalize Otto">
-              <Icon name="tune" />
-            </button>
+            {settingsSheet ? (
+              <div className="tutor__sheet-rows">
+                {active ? (
+                  <>
+                    <button type="button" className="tutor__sheet-row" onClick={() => { closeSettings(false); setRenaming(active.title) }}><Icon name="edit" />Rename chat</button>
+                    <button type="button" className="tutor__sheet-row" aria-pressed={Boolean(active.pinned)} onClick={() => void change(active, { pinned: !active.pinned }, 'That conversation could not be pinned. Try again.')}><Icon name={active.pinned ? 'pinned' : 'pin'} />{active.pinned ? 'Unpin chat' : 'Pin chat'}</button>
+                  </>
+                ) : null}
+                <button type="button" className="tutor__sheet-row" onClick={() => { closeSettings(false); setSheet('talk') }}><Icon name="tune" />Personalize Otto</button>
+                <button type="button" className="ui-button ui-button--sm tutor__sheet-done" onClick={() => closeSettings()}>Done</button>
+              </div>
+            ) : (
+              <button type="button" className="tutor__head-icon tutor__personalize" onClick={() => setSheet('talk')} aria-label="Personalize Otto" title="Personalize Otto">
+                <Icon name="tune" />
+              </button>
+            )}
           </div>
+          ) : null}
         </header>
 
         <div className="tutor__scroll" ref={scroller} onScroll={onThreadScroll}>

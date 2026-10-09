@@ -165,6 +165,57 @@
 .tutor__context { display: flex; gap: 6px; min-width: 0; }
 .tutor__context .ui-select { max-width: 150px; height: 32px; font-size: var(--text-xs); }
 
+/* Phones: one compact chip (course · unit) stands in for the controls and opens them in a sheet. */
+.tutor__chip {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 48%;
+  height: 36px;
+  padding: 0 8px 0 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.tutor__chip:hover,
+.tutor__chip.is-open { border-color: var(--color-border-strong); background: var(--color-surface-hover); }
+.tutor__chip:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.tutor__chip .tutor-icon { flex: none; width: 15px; height: 15px; color: var(--color-text-secondary); }
+.tutor__chip-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--course, var(--color-brand)); }
+.tutor__chip-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tutor__chip-mode { flex: none; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-brand-tint); color: var(--color-brand-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.tutor__chip-caret { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--color-text-secondary); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--duration-fast) var(--ease-standard); }
+.tutor__chip.is-open .tutor__chip-caret { transform: rotate(180deg); }
+.tutor__sheet-label { margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.tutor__sheet-rows { display: grid; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--color-border); }
+.tutor__sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.tutor__sheet-row:hover { background: var(--color-surface-hover); }
+.tutor__sheet-row:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -2px; }
+.tutor__sheet-row .tutor-icon { width: 18px; height: 18px; color: var(--color-text-secondary); }
+.tutor__sheet-row[aria-pressed='true'] .tutor-icon { color: var(--color-brand-text); }
+.tutor__sheet-done { justify-self: end; margin-top: 6px; }
+
 .tutor__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable both-edges; }
 .tutor__thread {
   display: grid;
@@ -615,16 +666,32 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .tutor__list-action { width: 44px; height: 44px; opacity: 1; }
   .tutor__search input { height: 40px; font-size: 16px; }
 
-  .tutor__head { position: relative; flex-wrap: wrap; gap: 6px 4px; min-height: 0; padding: 6px 8px 8px; border-bottom: 1px solid var(--color-border); }
+  /* One row, like a mobile chat app: menu, title, settings chip. */
+  .tutor__head { position: relative; flex-wrap: nowrap; gap: 4px; min-height: 52px; padding: 6px 10px 6px 6px; border-bottom: 1px solid var(--color-border); }
+  .tutor__head::after { display: none; }
   .tutor__title { flex: 1 1 0; }
-  .tutor__title-tools { opacity: 1; }
+  .tutor__title-tools { display: none; }
   .tutor__head-icon { width: 40px; height: 40px; }
-  .tutor__controls { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; }
-  .tutor__personalize { order: -1; position: absolute; top: 6px; right: 8px; }
-  .tutor__title { padding-right: 44px; }
-  .tutor__mode .ui-segmented__item { min-height: 40px; padding-inline: 10px; }
-  .tutor__context { flex: 1 1 170px; min-width: 0; }
-  .tutor__context .ui-select { flex: 1; min-width: 0; max-width: none; height: 40px; font-size: 16px; }
+  /* The sheet drops down from the head, over the thread. */
+  .tutor__controls.is-sheet {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 8px;
+    left: 8px;
+    z-index: 5;
+    display: grid;
+    gap: 8px;
+    padding: 14px 14px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-raised);
+    box-shadow: var(--shadow-popover);
+    animation: ui-pop var(--duration-base) var(--ease-out);
+  }
+  .tutor__controls.is-sheet .tutor__mode { display: flex; width: 100%; }
+  .tutor__controls.is-sheet .tutor__mode .ui-segmented__item { flex: 1; justify-content: center; min-height: 40px; padding-inline: 10px; font-size: var(--text-sm); }
+  .tutor__controls.is-sheet .tutor__context { display: grid; gap: 8px; }
+  .tutor__controls.is-sheet .tutor__context .ui-select { width: 100%; max-width: none; height: 44px; font-size: 16px; }
 
   .tutor__thread { gap: 22px; padding: 16px var(--otto-gutter) 32px; }
   .tutor-message { gap: 10px; }
@@ -656,25 +723,23 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .tutor-message__images img { width: 96px; height: 96px; }
 }
 
+/* Narrow phones: the chip shows just the unit (the dot carries the course color). */
+@media (max-width: 420px) {
+  .tutor__chip-course { display: none; }
+}
+
 /* Landscape phones: the head shrinks to one row so the thread keeps some height. */
 @media (max-width: 860px) and (orientation: landscape) {
-  .tutor__head { flex-wrap: nowrap; }
-  .tutor__controls { flex: 0 1 auto; flex-wrap: nowrap; }
-  .tutor__personalize { position: static; order: 0; }
-  .tutor__title { padding-right: 0; }
+  .tutor__head { min-height: 44px; padding-block: 2px; }
+  .tutor__controls.is-sheet { max-height: calc(100dvh - var(--phone-topbar) - 60px); overflow-y: auto; }
   .tutor__thread { padding-block: 12px 16px; }
   .tutor__welcome img { display: none; }
   .tutor__disclaimer { display: none; }
 }
 
-/* Narrow phones: mode and the pickers get full rows of their own. */
-@media (max-width: 420px) {
-  .tutor__mode { flex: 1 1 100%; }
-  .tutor__mode .ui-segmented__item { flex: 1; justify-content: center; }
-  .tutor__context { flex-basis: 100%; }
-}
-
 @media (prefers-reduced-motion: reduce) {
+  .tutor__controls.is-sheet { animation: none; }
+  .tutor__chip-caret { transition: none; }
   .otto-thinking__label { animation: none; background: none; color: var(--color-text-secondary); }
   .otto-rich.is-writing > :is(p, h3, h4):last-child::after,
   .otto-rich.is-writing > :is(ul, ol):last-child > li:last-child::after,
