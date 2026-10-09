@@ -161,15 +161,15 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --color-bg: #111113;
-  --color-surface: #18181b;
-  --color-surface-raised: #1e1e22;
-  --color-surface-sunken: #141416;
-  --color-surface-hover: #212125;
-  --color-surface-active: #2a2a2f;
+  --color-bg: #1b1c20;
+  --color-surface: #232429;
+  --color-surface-raised: #2a2b31;
+  --color-surface-sunken: #1f2024;
+  --color-surface-hover: #2c2d33;
+  --color-surface-active: #35363d;
 
-  --color-border: #2a2a2f;
-  --color-border-strong: #3a3a40;
+  --color-border: #33343b;
+  --color-border-strong: #45464e;
 
   --color-text: #ecebe7;
   --color-text-secondary: #a8a7a1;

@@ -21,13 +21,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #111113;
-    --surface: #18181b;
+    --ground: #1b1c20;
+    --surface: #232429;
     --ink: #ecebe7;
     --ink-2: #a8a7a1;
     --ink-3: #8e8d87;
-    --line: #2a2a2f;
-    --line-strong: #3a3a40;
+    --line: #33343b;
+    --line-strong: #45464e;
     --link: #8fb0ff;
     --bind: #a99ff6;
     --note: #1d1c19;

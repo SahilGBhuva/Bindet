@@ -7,7 +7,7 @@
   var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   var meta = document.querySelector('meta[name="theme-color"]')
-  if (dark && meta) meta.setAttribute('content', '#111113')
+  if (dark && meta) meta.setAttribute('content', '#1b1c20')
 })()
 
 // A Google sign-in comes back to /?flow=<id>&code=<one-time code> (or ?error=…).
