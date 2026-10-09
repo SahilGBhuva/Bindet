@@ -16,7 +16,8 @@ before spectacle everywhere except the public landing hero.
 - **Editorial type.** Instrument Serif (`--font-serif`) for page titles, empty-state titles and
   a few statements. Inter for everything else. Serif is never used below 22px.
 - **Quiet elevation.** Sheets use a 1px `--color-border` rule and no shadow. Only floating
-  layers (menus, dialogs, drawers, toasts) cast `--shadow-popover`.
+  layers (menus, dialogs, drawers, toasts) cast `--shadow-popover`; a docked control that floats
+  over scrolling content (the tutor composer) uses the lighter `--shadow-float`.
 - **Modest shapes.** Radii: `--radius-xs` 4, `--radius-sm` 6 (small controls), `--radius-md` 8
   (buttons, inputs), `--radius-lg` 12 (sheets). Pills only for counts and tiny status chips.
 - **Both themes.** Never hard-code a color in a component stylesheet; use tokens from

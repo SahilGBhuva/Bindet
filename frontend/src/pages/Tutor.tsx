@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
   deleteTutorConversation, generateNoteFlashcards, getCachedOttoProfile, getCachedProfile, getCachedTutorConversations, getCachedTutorMessages,
   getOttoProfile, getTutorConversations, getTutorMessages, OTTO_MEMORY_CHANGED_EVENT, parseServerTime, prepareTutorImage, rateTutorMessage,
@@ -9,8 +9,8 @@ import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
 import { withCourseTones } from '../lib/session'
 import { useReviewSummary } from '../lib/useReviewSummary'
-import { MathExpression, MathText } from '../components/math/Math'
 import { OttoSheet, type OttoSheetTab } from '../components/otto/OttoSheet'
+import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
 import './Tutor.css'
@@ -22,7 +22,7 @@ import './Tutor.css'
  */
 
 type Attachment = { id: string; name: string; preview: string; dataUrl?: string; size?: number; state: 'preparing' | 'ready' | 'failed'; error?: string }
-type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streaming' | 'failed' | 'stopped'; previews?: string[]; progress?: number; error?: string; tier?: string; grounded?: string[]; groundedIn?: { course: string; unit: string } }
+type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streaming' | 'failed' | 'stopped'; previews?: string[]; progress?: number; error?: string; tier?: string; grounded?: string[]; groundedIn?: { course: string; unit: string }; thinking?: ThinkingContext }
 
 const NEW = 'new'
 const MAX_IMAGES = 3
@@ -37,86 +37,6 @@ function toLocal(message: TutorMessage): LocalMessage {
   return { ...message, key: `m-${message.id}` }
 }
 
-/* A small, safe renderer for the tutor's plain-text formatting: paragraphs, lists, code, bold, italics and math. */
-function emphasis(text: string, keyPrefix: string): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g)
-  return parts.map((part, index) => {
-    const key = `${keyPrefix}-${index}`
-    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) return <strong key={key}>{part.slice(2, -2)}</strong>
-    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) return <em key={key}>{part.slice(1, -1)}</em>
-    return <Fragment key={key}>{part}</Fragment>
-  })
-}
-
-/* Code spans first (math is never read inside them), then math, then bold and italics. */
-function inline(text: string, keyPrefix: string): ReactNode[] {
-  const parts = text.split(/(`[^`]+`)/g)
-  return parts.map((part, index) => {
-    const key = `${keyPrefix}-${index}`
-    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) return <code key={key}>{part.slice(1, -1)}</code>
-    return <MathText key={key} text={part} renderText={(plain, textKey) => emphasis(plain, `${key}-${textKey}`)} />
-  })
-}
-
-/* A display equation on lines of its own: $$ … $$ or \[ … \]. Returns its end line, or -1. */
-function displayMathEnd(lines: string[], start: number): number {
-  const open = lines[start].trim()
-  const close = open.startsWith('$$') ? '$$' : open.startsWith('\\[') ? '\\]' : ''
-  if (!close) return -1
-  const rest = open.slice(2)
-  if (rest.includes(close)) return rest.trim().endsWith(close) ? start : -1
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (lines[index].trim().endsWith(close)) return index
-  }
-  return -1
-}
-
-/* Memoised: while a reply streams, only the message that is growing is parsed again. */
-const Rich = memo(function Rich({ text }: { text: string }) {
-  const blocks: ReactNode[] = []
-  const lines = text.replace(/\r\n/g, '\n').split('\n')
-  let index = 0
-  while (index < lines.length) {
-    const line = lines[index]
-    if (line.trim().startsWith('```')) {
-      const code: string[] = []
-      index += 1
-      while (index < lines.length && !lines[index].trim().startsWith('```')) { code.push(lines[index]); index += 1 }
-      index += 1
-      blocks.push(<pre key={`b${blocks.length}`}><code>{code.join('\n')}</code></pre>)
-      continue
-    }
-    const mathEnd = displayMathEnd(lines, index)
-    if (mathEnd >= 0) {
-      const source = lines.slice(index, mathEnd + 1).join('\n').trim()
-      const tex = source.slice(2, -2).trim()
-      blocks.push(tex
-        ? <MathExpression key={`b${blocks.length}`} tex={tex} display source={source} />
-        : <p key={`b${blocks.length}`}>{source}</p>)
-      index = mathEnd + 1
-      continue
-    }
-    if (/^\s*([-*•]|\d+[.)])\s+/.test(line)) {
-      const ordered = /^\s*\d+[.)]/.test(line)
-      const items: string[] = []
-      while (index < lines.length && /^\s*([-*•]|\d+[.)])\s+/.test(lines[index])) { items.push(lines[index].replace(/^\s*([-*•]|\d+[.)])\s+/, '')); index += 1 }
-      const List = ordered ? 'ol' : 'ul'
-      blocks.push(<List key={`b${blocks.length}`}>{items.map((item, itemIndex) => <li key={itemIndex}>{inline(item, `l${blocks.length}-${itemIndex}`)}</li>)}</List>)
-      continue
-    }
-    if (/^#{1,4}\s/.test(line)) {
-      blocks.push(<h4 key={`b${blocks.length}`}>{inline(line.replace(/^#{1,4}\s/, ''), `h${blocks.length}`)}</h4>)
-      index += 1
-      continue
-    }
-    if (!line.trim()) { index += 1; continue }
-    const paragraph: string[] = []
-    while (index < lines.length && lines[index].trim() && !/^\s*([-*•]|\d+[.)])\s+/.test(lines[index]) && !lines[index].trim().startsWith('```') && !/^#{1,4}\s/.test(lines[index]) && (!paragraph.length || displayMathEnd(lines, index) < 0)) { paragraph.push(lines[index]); index += 1 }
-    blocks.push(<p key={`b${blocks.length}`}>{paragraph.map((part, partIndex) => <Fragment key={partIndex}>{partIndex ? <br /> : null}{inline(part, `p${blocks.length}-${partIndex}`)}</Fragment>)}</p>)
-  }
-  return <>{blocks}</>
-})
-
 function readLastConversation(): string {
   try { return sessionStorage.getItem('bindit:tutor:active') || NEW } catch { return NEW }
 }
@@ -130,7 +50,7 @@ const FOLLOW_UPS = [
 
 const MASCOT = '/bindit-mascot-cutout.webp'
 
-type Starter = { key: string; label: string; prompt: string; course?: string; unit?: string; tone?: string }
+type Starter = { key: string; kicker: string; label: string; prompt: string; course?: string; unit?: string; tone?: string }
 
 /* "Just now", "5m ago", "3h ago", "Yesterday", "Mon", "Oct 3". */
 function relativeTime(iso: string, now: number): string {
@@ -189,7 +109,7 @@ function speechRecognition(): (new () => SpeechRecognitionLike) | null {
 
 const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window
 
-function Icon({ name }: { name: 'pin' | 'pinned' | 'edit' | 'trash' | 'copy' | 'speak' | 'stop' | 'up' | 'down' | 'regen' | 'cards' | 'mic' | 'tune' | 'search' }) {
+function Icon({ name }: { name: 'pin' | 'pinned' | 'edit' | 'trash' | 'copy' | 'speak' | 'stop' | 'up' | 'down' | 'regen' | 'cards' | 'mic' | 'tune' | 'search' | 'check' | 'book' }) {
   const paths: Record<string, ReactNode> = {
     pin: <path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7" />,
     pinned: <path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7" className="is-filled" />,
@@ -205,6 +125,8 @@ function Icon({ name }: { name: 'pin' | 'pinned' | 'edit' | 'trash' | 'copy' | '
     mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
     tune: <path d="M4 7h10M18 7h2M4 17h4M12 17h8M14 4v6M8 14v6" />,
     search: <><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></>,
+    check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+    book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3" />,
   }
   return <svg className="tutor-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>
 }
@@ -246,6 +168,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const review = useReviewSummary(token || undefined)
   // Under 1000px the conversation list is a drawer: inert while closed, modal while open.
   const narrow = useMediaQuery('(max-width: 1000px)')
+  // Phones keep the composer docked at the bottom, with the starters above it in the welcome.
+  const phone = useMediaQuery('(max-width: 860px)')
   const listPanel = useRef<HTMLElement>(null)
   const closeList = useCallback(() => setListOpen(false), [])
   useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
@@ -257,7 +181,12 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const cameraInput = useRef<HTMLInputElement>(null)
-  const stickToBottom = useRef(true)
+  const threadRef = useRef<HTMLDivElement>(null)
+  // Follow the reply only while the student is at the bottom; scrolling up stops following.
+  const pinned = useRef(true)
+  const lastScrollTop = useRef(0)
+  const [atBottom, setAtBottom] = useState(true)
+  const [announcement, setAnnouncement] = useState('')
   const Recognition = useMemo(() => speechRecognition(), [])
 
   const thread = threads[activeId] ?? []
@@ -343,8 +272,45 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     const node = scroller.current
     if (!node) return
     if ((threads[activeId] ?? []).length === 0) node.scrollTop = 0
-    else if (stickToBottom.current) node.scrollTop = node.scrollHeight
+    else if (pinned.current) node.scrollTop = node.scrollHeight
   }, [threads, activeId])
+
+  // Opening another conversation starts at its latest message.
+  useEffect(() => { pinned.current = true; setAtBottom(true) }, [activeId])
+
+  // The thread also grows between updates (the smooth reveal, math and images loading):
+  // stay at the bottom while pinned, so the newest line is never hidden under the composer.
+  useEffect(() => {
+    const node = scroller.current
+    const content = threadRef.current
+    if (!node || !content || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pinned.current && node.scrollHeight > node.clientHeight) { node.scrollTop = node.scrollHeight; lastScrollTop.current = node.scrollTop }
+    })
+    observer.observe(content)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  function onThreadScroll() {
+    const node = scroller.current
+    if (!node) return
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight
+    // Moving up (and not because the content shrank) means the student is reading: stop following.
+    if (node.scrollTop < lastScrollTop.current - 2 && distance > 4) pinned.current = false
+    if (distance < 40) pinned.current = true
+    lastScrollTop.current = node.scrollTop
+    setAtBottom(distance < 120)
+  }
+
+  function jumpToLatest() {
+    const node = scroller.current
+    if (!node) return
+    pinned.current = true
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    node.scrollTo({ top: node.scrollHeight, behavior: reduce ? 'auto' : 'smooth' })
+    setAtBottom(true)
+  }
 
   useEffect(() => {
     if (!notice) return
@@ -418,8 +384,11 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     const replyKey = `reply-${Date.now()}`
     const ready = images.filter((item) => item.state === 'ready' && item.dataUrl)
     const userMessage: LocalMessage = { id: 0, key: userKey, role: 'user', content, attachments: ready.map((item) => item.name), model_tier: '', created_at: stamp, status: 'sending', previews: ready.map((item) => item.preview), progress: ready.length ? 0 : undefined }
-    const reply: LocalMessage = { id: 0, key: replyKey, role: 'assistant', content: '', attachments: [], model_tier: '', created_at: stamp, status: 'streaming' }
-    stickToBottom.current = true
+    const thinking: ThinkingContext = ready.length ? 'photo' : useCourse ? 'notes' : 'plain'
+    const reply: LocalMessage = { id: 0, key: replyKey, role: 'assistant', content: '', attachments: [], model_tier: '', created_at: stamp, status: 'streaming', thinking }
+    pinned.current = true
+    setAtBottom(true)
+    setAnnouncement(thinking === 'photo' ? 'Otto is looking at your photo.' : thinking === 'notes' ? 'Otto is reading your notes.' : 'Otto is thinking.')
     setThreads((current) => {
       const existing = (current[threadId] ?? []).filter((message) => message.key !== userKey)
       if (options.regenerate) {
@@ -461,6 +430,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       },
       onDone: ({ message: saved }) => {
         updateMessage(liveThread, replyKey, (message) => ({ ...message, ...saved, key: replyKey, status: undefined }))
+        // Screen readers hear the reply once, when it is complete, not token by token.
+        setAnnouncement(`Otto replied: ${speakable(saved.content).slice(0, 1200)}`)
         stopRef.current = null
         setThreads((current) => { if (token && liveThread !== NEW) setCachedTutorMessages(token, liveThread, (current[liveThread] ?? []).filter((item) => !item.status)); return current })
       },
@@ -473,6 +444,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       },
       onError: (error) => {
         stopRef.current = null
+        setAnnouncement('')
         setThreads((current) => ({
           ...current,
           [liveThread]: (current[liveThread] ?? []).flatMap((message) => {
@@ -490,6 +462,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   /* Stop generating: the stream is closed (the server keeps what was written) and the partial reply stays. */
   function stop() {
+    if (stopRef.current) setAnnouncement('Stopped. What Otto wrote so far is kept.')
     stopRef.current?.()
     stopRef.current = null
     setThreads((current) => ({
@@ -664,24 +637,24 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const starters = useMemo<Starter[]>(() => {
     const list: Starter[] = []
     const due = [...(review?.by_unit ?? [])].filter((item) => item.due > 0).sort((a, b) => b.due - a.due)[0]
-    if (due) list.push({ key: 'due', label: `Quiz me on my ${due.due} due ${due.course} ${due.due === 1 ? 'card' : 'cards'}`, prompt: `Quiz me on ${due.unit} in ${due.course}. Ask 3 quick questions, one at a time.`, course: due.course, unit: due.unit, tone: toneOf(due.course) })
+    if (due) list.push({ key: 'due', kicker: 'Review', label: `Quiz me on my ${due.due} due ${due.course} ${due.due === 1 ? 'card' : 'cards'}`, prompt: `Quiz me on ${due.unit} in ${due.course}. Ask 3 quick questions, one at a time.`, course: due.course, unit: due.unit, tone: toneOf(due.course) })
     // One tap: Otto makes a saved study guide from the unit's notes (a card links to it).
-    if (notebook.activeCourse && notebook.activeUnit) list.push({ key: 'guide', label: `Make a study guide for ${notebook.activeUnit}`, prompt: `Make me a study guide for ${notebook.activeUnit}`, course: notebook.activeCourse, unit: notebook.activeUnit, tone: toneOf(notebook.activeCourse) })
+    if (notebook.activeCourse && notebook.activeUnit) list.push({ key: 'guide', kicker: 'Study guide', label: `Make a study guide for ${notebook.activeUnit}`, prompt: `Make me a study guide for ${notebook.activeUnit}`, course: notebook.activeCourse, unit: notebook.activeUnit, tone: toneOf(notebook.activeCourse) })
     const weak = stats?.weak_topics?.[0]
-    if (weak) list.push({ key: 'weak', label: `Help me get better at ${weak}`, prompt: `I keep missing questions on ${weak}. Explain the key idea and give me one practice question.` })
+    if (weak) list.push({ key: 'weak', kicker: 'Practice', label: `Help me get better at ${weak}`, prompt: `I keep missing questions on ${weak}. Explain the key idea and give me one practice question.` })
     const today = new Date(now)
     const soon = (tasks ?? []).filter((task) => task.status !== 'done' && task.due_date)
       .map((task) => ({ task, at: new Date(`${task.due_date}T00:00:00`).getTime() }))
       .filter(({ at }) => at >= new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() && at - now < 8 * 86_400_000)
       .sort((a, b) => a.at - b.at)[0]
-    if (soon) list.push({ key: 'task', label: `Prepare for “${soon.task.title}” (${weekdayFormat.format(new Date(soon.at))})`, prompt: `Help me prepare for “${soon.task.title}”${soon.task.course ? ` in ${soon.task.course}` : ''}. Make me a short plan and start with the most important topic.`, course: soon.task.course || undefined, tone: soon.task.course ? toneOf(soon.task.course) : undefined })
-    if (notebook.activeCourse && notebook.activeUnit) list.push({ key: 'unit', label: `Explain the key ideas of ${notebook.activeUnit}`, prompt: `Explain the key ideas of ${notebook.activeUnit} like I’m seeing them for the first time.`, course: notebook.activeCourse, unit: notebook.activeUnit, tone: toneOf(notebook.activeCourse) })
+    if (soon) list.push({ key: 'task', kicker: 'Plan ahead', label: `Prepare for “${soon.task.title}” (${weekdayFormat.format(new Date(soon.at))})`, prompt: `Help me prepare for “${soon.task.title}”${soon.task.course ? ` in ${soon.task.course}` : ''}. Make me a short plan and start with the most important topic.`, course: soon.task.course || undefined, tone: soon.task.course ? toneOf(soon.task.course) : undefined })
+    if (notebook.activeCourse && notebook.activeUnit) list.push({ key: 'unit', kicker: 'Explain', label: `Explain the key ideas of ${notebook.activeUnit}`, prompt: `Explain the key ideas of ${notebook.activeUnit} like I’m seeing them for the first time.`, course: notebook.activeCourse, unit: notebook.activeUnit, tone: toneOf(notebook.activeCourse) })
     return list.slice(0, 4)
   }, [review, stats, tasks, notebook, now, toneOf])
 
   const generic: Starter[] = unit
-    ? [{ key: 'g1', label: `Explain ${unit} like I'm seeing it for the first time`, prompt: `Explain ${unit} like I'm seeing it for the first time` }, { key: 'g4', label: `Make a study guide for ${unit}`, prompt: `Make me a study guide for ${unit}` }, { key: 'g2', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
-    : [{ key: 'g1', label: 'Help me make a study plan for this week', prompt: 'Help me make a study plan for this week' }, { key: 'g2', label: 'Explain a concept step by step', prompt: 'Explain a concept step by step' }, { key: 'g3', label: 'Check my understanding with a few questions', prompt: 'Check my understanding with a few questions' }]
+    ? [{ key: 'g1', kicker: 'Explain', label: `Explain ${unit} like I'm seeing it for the first time`, prompt: `Explain ${unit} like I'm seeing it for the first time` }, { key: 'g4', kicker: 'Study guide', label: `Make a study guide for ${unit}`, prompt: `Make me a study guide for ${unit}` }, { key: 'g2', kicker: 'Quiz', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', kicker: 'Avoid mistakes', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
+    : [{ key: 'g1', kicker: 'Plan', label: 'Help me make a study plan for this week', prompt: 'Help me make a study plan for this week' }, { key: 'g2', kicker: 'Explain', label: 'Explain a concept step by step', prompt: 'Explain a concept step by step' }, { key: 'g3', kicker: 'Check-in', label: 'Check my understanding with a few questions', prompt: 'Check my understanding with a few questions' }]
   const startersShown = (starters.length ? [...starters, ...generic] : generic)
     .filter((item, index, all) => all.findIndex((other) => other.label === item.label) === index)
     .slice(0, 4)
@@ -705,19 +678,22 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     <div className={`tutor__suggestions ${className}`}>
       {items.map((starter) => (
         <button key={starter.key} type="button" onClick={() => startFrom(starter)} disabled={streaming} style={starter.tone ? { ['--course' as string]: starter.tone } : undefined} className={starter.tone ? 'has-course' : ''}>
-          {starter.label}<span aria-hidden="true">→</span>
+          <span className="tutor__suggestion-kicker">{starter.kicker}{starter.course ? <i> · {starter.unit || starter.course}</i> : null}</span>
+          <span className="tutor__suggestion-label">{starter.label}</span>
         </button>
       ))}
     </div>
   )
 
+  const empty = !thread.length && loadingThread !== activeId
+
   return (
     <div className={`tutor${listOpen ? ' is-list-open' : ''}`}>
       <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
-          <span className="ui-eyebrow">Otto · your tutor</span>
-          <button type="button" className="ui-button ui-button--sm" onClick={newConversation}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>New
+          <span className="tutor__list-brand"><img src={MASCOT} alt="" width="24" height="24" decoding="async" />Otto</span>
+          <button type="button" className="tutor__new" onClick={newConversation}>
+            <Icon name="edit" /><span>New chat</span>
           </button>
         </div>
         <label className="tutor__search">
@@ -740,7 +716,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                         <button type="button" className="tutor__list-item" onClick={() => open(conversation)} aria-current={conversation.id === activeId ? 'true' : undefined}>
                           <span>{conversation.title}</span>
                           <small>
-                            {conversation.course ? <i className="ui-badge ui-badge--course tutor__tag" style={{ ['--course' as string]: tone ?? 'var(--color-brand)' }}>{conversation.unit || conversation.course}</i> : null}
+                            {conversation.course ? <i className="tutor__tag" style={{ ['--course' as string]: tone ?? 'var(--color-brand)' }}>{conversation.unit || conversation.course}</i> : null}
                             <time dateTime={conversation.updated_at}>{relativeTime(conversation.updated_at, now)}</time>
                           </small>
                         </button>
@@ -764,14 +740,14 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       {listOpen ? <button type="button" className="tutor__scrim" aria-label="Close conversations" onClick={() => setListOpen(false)} /> : null}
 
       <section
-        className={`tutor__room${dragActive ? ' is-dragging' : ''}`}
+        className={`tutor__room${dragActive ? ' is-dragging' : ''}${empty ? ' is-empty' : ''}`}
         aria-label={active?.title ?? 'New conversation'}
         onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); setDragActive(true) } }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }}
         onDrop={onDrop}
       >
         <header className="tutor__head">
-          <button type="button" className="tutor__list-toggle ui-button ui-button--ghost ui-button--sm" onClick={() => setListOpen(true)} aria-label="Show conversations">
+          <button type="button" className="tutor__list-toggle tutor__head-icon" onClick={() => setListOpen(true)} aria-label="Show conversations">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
           </button>
           <div className="tutor__title">
@@ -783,48 +759,49 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               </form>
             ) : (
               <div className="tutor__title-row">
-                <h1>{active?.title ?? 'New conversation'}</h1>
+                <h1>{active?.title ?? 'New chat'}</h1>
                 {active ? (
-                  <>
-                    <button type="button" className="tutor__head-icon" onClick={() => setRenaming(active.title)} aria-label="Rename conversation"><Icon name="edit" /></button>
-                    <button type="button" className={`tutor__head-icon${active.pinned ? ' is-on' : ''}`} aria-pressed={Boolean(active.pinned)} onClick={() => void change(active, { pinned: !active.pinned }, 'That conversation could not be pinned. Try again.')} aria-label={active.pinned ? 'Unpin conversation' : 'Pin conversation'}><Icon name={active.pinned ? 'pinned' : 'pin'} /></button>
-                  </>
+                  <span className="tutor__title-tools">
+                    <button type="button" className="tutor__head-icon" onClick={() => setRenaming(active.title)} aria-label="Rename conversation" title="Rename"><Icon name="edit" /></button>
+                    <button type="button" className={`tutor__head-icon${active.pinned ? ' is-on' : ''}`} aria-pressed={Boolean(active.pinned)} onClick={() => void change(active, { pinned: !active.pinned }, 'That conversation could not be pinned. Try again.')} aria-label={active.pinned ? 'Unpin conversation' : 'Pin conversation'} title={active.pinned ? 'Unpin' : 'Pin'}><Icon name={active.pinned ? 'pinned' : 'pin'} /></button>
+                  </span>
                 ) : null}
               </div>
             )}
-            <p>{course ? <>Grounded in your notes for <b>{unit || course}</b></> : 'General help · pick a course to use your notes'}</p>
           </div>
-          <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">
-            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'explain'} onClick={() => chooseMode('explain')}>Explain it</button>
-            <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'guide'} onClick={() => chooseMode('guide')}>Guide me</button>
-          </div>
-          <div className="tutor__context" role="group" aria-label="Notes Otto should use">
-            <select className="ui-select" aria-label="Course" value={course} onChange={(event) => { setCourse(event.target.value); setUnit(notebook.courses.find((item) => item.name === event.target.value)?.units[0] ?? '') }}>
-              <option value="">No course</option>
-              {notebook.courses.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-            </select>
-            {course ? (
-              <select className="ui-select" aria-label="Unit" value={unit} onChange={(event) => setUnit(event.target.value)}>
-                <option value="">Whole course</option>
-                {units.map((item) => <option key={item} value={item}>{item}</option>)}
+          <div className="tutor__controls">
+            <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">
+              <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'explain'} onClick={() => chooseMode('explain')}>Explain it</button>
+              <button type="button" className="ui-segmented__item" aria-pressed={studyMode === 'guide'} onClick={() => chooseMode('guide')}>Guide me</button>
+            </div>
+            <div className="tutor__context" role="group" aria-label="Notes Otto should use">
+              <select className="ui-select" aria-label="Course" value={course} onChange={(event) => { setCourse(event.target.value); setUnit(notebook.courses.find((item) => item.name === event.target.value)?.units[0] ?? '') }}>
+                <option value="">No course</option>
+                {notebook.courses.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
               </select>
-            ) : null}
+              {course ? (
+                <select className="ui-select" aria-label="Unit" value={unit} onChange={(event) => setUnit(event.target.value)}>
+                  <option value="">Whole course</option>
+                  {units.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              ) : null}
+            </div>
+            <button type="button" className="tutor__head-icon tutor__personalize" onClick={() => setSheet('talk')} aria-label="Personalize Otto" title="Personalize Otto">
+              <Icon name="tune" />
+            </button>
           </div>
-          <button type="button" className="ui-button ui-button--ghost ui-button--sm tutor__personalize" onClick={() => setSheet('talk')} aria-label="Personalize Otto" title="Personalize Otto">
-            <Icon name="tune" /><span>Personalize</span>
-          </button>
         </header>
 
-        <div className="tutor__scroll" ref={scroller} onScroll={(event) => { const node = event.currentTarget; stickToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80 }}>
-          <div className="tutor__thread" role="log" aria-live="polite" aria-relevant="additions text">
+        <div className="tutor__scroll" ref={scroller} onScroll={onThreadScroll}>
+          <div className="tutor__thread" ref={threadRef}>
             {loadingThread === activeId && !thread.length ? (
               <div className="tutor__thread-skeleton" aria-label="Loading conversation"><span className="ui-skeleton is-user" /><span className="ui-skeleton" /><span className="ui-skeleton is-short" /></div>
             ) : !thread.length ? (
               <div className="tutor__welcome">
                 <img src={MASCOT} alt="" width="240" height="288" decoding="async" />
-                <h2>{greetingName ? <>Hi {greetingName}, I’m Otto</> : <>Hi, I’m Otto</>}</h2>
-                <p>What are we working on? {course ? <>Answers use your notes for <b>{unit || course}</b> first.</> : 'Pick a course above and answers will use your own notes.'} {studyMode === 'guide' ? 'Guide me is on, so I’ll give hints instead of answers.' : 'Drop in a photo of a problem if it helps.'}</p>
-                {starterList(startersShown)}
+                <h2>{greetingName ? <>Hi {greetingName}, what are we studying?</> : <>Hi, what are we studying?</>}</h2>
+                <p>{course ? <>I’ll use your notes for <b>{unit || course}</b> first.</> : 'Pick a course above and I’ll use your own notes.'} {studyMode === 'guide' ? 'Guide me is on, so I’ll give hints instead of answers.' : 'Drop in a photo of a problem if it helps.'}</p>
+                {phone ? starterList(startersShown, 'tutor__starters') : null}
               </div>
             ) : thread.map((message, index) => {
               const isReply = message.role === 'assistant'
@@ -836,20 +813,20 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               // A study guide Otto made for this reply ("guide:<id>:<kind>"), shown as a card that opens it in Study.
               const guides = isReply ? message.attachments.map(guideFromAttachment).filter((item) => item !== null) : []
               const files = guides.length ? [] : message.attachments
+              const followUps = done && !smallTalk && last && message.model_tier !== 'study_guide'
               return (
-                <article key={message.key} className={`tutor-message is-${message.role}${message.status ? ` is-${message.status}` : ''}`}>
-                  {isReply ? <img className="tutor-message__avatar" src={MASCOT} alt="" width="32" height="32" decoding="async" loading="lazy" /> : null}
+                <article key={message.key} className={`tutor-message is-${message.role}${message.status ? ` is-${message.status}` : ''}${last ? ' is-latest' : ''}`} aria-busy={message.status === 'streaming' || undefined}>
+                  {isReply ? <img className="tutor-message__avatar" src={MASCOT} alt="" width="28" height="28" decoding="async" loading="lazy" /> : null}
                   <div className="tutor-message__body">
-                    {isReply ? <span className="sr-only">Otto said:</span> : null}
+                    <span className="sr-only">{isReply ? 'Otto said:' : 'You said:'}</span>
                     {message.previews?.length ? (
                       <div className="tutor-message__images">{message.previews.map((src, imageIndex) => <img key={src} src={src} alt={message.attachments[imageIndex] ?? 'Attached image'} width="120" height="120" loading="lazy" decoding="async" />)}</div>
                     ) : files.length ? (
                       <div className="tutor-message__files">{files.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
                     ) : null}
-                    {isReply ? (
-                      message.content ? <div className="tutor-rich"><Rich text={message.content} />{message.status === 'streaming' ? <span className="tutor-caret" aria-hidden="true" /> : null}</div>
-                        : <div className="tutor-thinking" role="status"><span /><span /><span /><span className="sr-only">Otto is thinking</span></div>
-                    ) : <p className="tutor-message__text">{message.content}</p>}
+                    {isReply
+                      ? <OttoReply content={message.content} streaming={message.status === 'streaming'} partial={message.status === 'stopped'} context={message.thinking} />
+                      : <p className="tutor-message__text">{message.content}</p>}
                     {guides.map((guide) => {
                       const kind = guideKind(guide.kind)
                       return (
@@ -874,7 +851,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     ) : null}
                     {isReply && !message.status && message.grounded?.length ? (
                       <div className="tutor-message__sources">
-                        <span>From your notes</span>
+                        <span className="tutor-message__sources-label"><Icon name="book" />From your notes</span>
                         {message.grounded.slice(0, 4).map((name) => sourceCourse && sourceUnit ? (
                           <button key={name} type="button" className="tutor-chip" style={{ ['--course' as string]: toneOf(sourceCourse) ?? 'var(--color-brand)' }} onClick={() => openUnit(sourceCourse, sourceUnit)} title={`Open ${sourceUnit} in Study`}>{name}</button>
                         ) : <span key={name} className="tutor-chip">{name}</span>)}
@@ -885,26 +862,28 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     {done && smallTalk && last ? starterList(startersShown, 'tutor__suggestions--inline') : null}
                     {done && !smallTalk ? (
                       <div className="tutor-actions" role="group" aria-label="Reply actions">
-                        {last && message.model_tier !== 'study_guide' ? FOLLOW_UPS.map((item) => (
-                          <button key={item.id} type="button" className="tutor-actions__chip" disabled={streaming} onClick={() => send(item.prompt, [])}>{item.label}</button>
-                        )) : null}
-                        {last && course && unit && message.id && message.model_tier !== 'study_guide' ? (
-                          <button type="button" className="tutor-actions__chip" disabled={streaming || cardState[message.key] === 'making' || cardState[message.key] === 'done'} onClick={() => void makeFlashcards(message)}>
+                        <button type="button" className="tutor-actions__icon" onClick={() => void copy(message)} aria-label={copied === message.key ? 'Copied' : 'Copy reply'} data-tip={copied === message.key ? 'Copied' : 'Copy'}><Icon name={copied === message.key ? 'check' : 'copy'} /></button>
+                        {copied === message.key ? <span className="sr-only" role="status">Copied</span> : null}
+                        {canSpeak ? <button type="button" className={`tutor-actions__icon${speaking === message.key ? ' is-on' : ''}`} onClick={() => readAloud(message)} aria-label={speaking === message.key ? 'Stop reading aloud' : 'Read aloud'} aria-pressed={speaking === message.key} data-tip={speaking === message.key ? 'Stop reading' : 'Read aloud'}><Icon name={speaking === message.key ? 'stop' : 'speak'} /></button> : null}
+                        {message.id ? (
+                          <>
+                            <button type="button" className={`tutor-actions__icon${message.rating === 1 ? ' is-on' : ''}`} onClick={() => void rate(message, 1)} aria-label="Good reply" aria-pressed={message.rating === 1} data-tip="Good reply"><Icon name="up" /></button>
+                            <button type="button" className={`tutor-actions__icon${message.rating === -1 ? ' is-on' : ''}`} onClick={() => void rate(message, -1)} aria-label="Bad reply" aria-pressed={message.rating === -1} data-tip="Bad reply"><Icon name="down" /></button>
+                          </>
+                        ) : null}
+                        {last && message.id && activeId !== NEW ? <button type="button" className="tutor-actions__icon" disabled={streaming} onClick={() => send(thread[index - 1]?.content || 'Answer again', [], undefined, { regenerate: true })} aria-label="Regenerate reply" data-tip="Regenerate"><Icon name="regen" /></button> : null}
+                      </div>
+                    ) : null}
+                    {followUps ? (
+                      <div className="tutor-followups" role="group" aria-label="Follow-ups">
+                        {FOLLOW_UPS.map((item) => (
+                          <button key={item.id} type="button" className="tutor-followups__chip" disabled={streaming} onClick={() => send(item.prompt, [])}>{item.label}</button>
+                        ))}
+                        {course && unit && message.id ? (
+                          <button type="button" className="tutor-followups__chip" disabled={streaming || cardState[message.key] === 'making' || cardState[message.key] === 'done'} onClick={() => void makeFlashcards(message)}>
                             <Icon name="cards" />{cardState[message.key] === 'making' ? 'Making flashcards…' : cardState[message.key] === 'done' ? 'Flashcards saved' : 'Make flashcards'}
                           </button>
                         ) : null}
-                        <span className="tutor-actions__tools">
-                          <button type="button" className="tutor-actions__icon" onClick={() => void copy(message)} aria-label={copied === message.key ? 'Copied' : 'Copy reply'} title="Copy"><Icon name="copy" /></button>
-                          {copied === message.key ? <span className="tutor-actions__flash" role="status">Copied</span> : null}
-                          {canSpeak ? <button type="button" className={`tutor-actions__icon${speaking === message.key ? ' is-on' : ''}`} onClick={() => readAloud(message)} aria-label={speaking === message.key ? 'Stop reading aloud' : 'Read aloud'} aria-pressed={speaking === message.key} title="Read aloud"><Icon name={speaking === message.key ? 'stop' : 'speak'} /></button> : null}
-                          {message.id ? (
-                            <>
-                              <button type="button" className={`tutor-actions__icon${message.rating === 1 ? ' is-on' : ''}`} onClick={() => void rate(message, 1)} aria-label="Good reply" aria-pressed={message.rating === 1} title="Good reply"><Icon name="up" /></button>
-                              <button type="button" className={`tutor-actions__icon${message.rating === -1 ? ' is-on' : ''}`} onClick={() => void rate(message, -1)} aria-label="Bad reply" aria-pressed={message.rating === -1} title="Bad reply"><Icon name="down" /></button>
-                            </>
-                          ) : null}
-                          {last && message.id && activeId !== NEW ? <button type="button" className="tutor-actions__icon" disabled={streaming} onClick={() => send(thread[index - 1]?.content || 'Answer again', [], undefined, { regenerate: true })} aria-label="Regenerate reply" title="Regenerate"><Icon name="regen" /></button> : null}
-                        </span>
                       </div>
                     ) : null}
                   </div>
@@ -914,58 +893,70 @@ export function Tutor({ session }: { session: AuthSession | null }) {
           </div>
         </div>
 
-        <form className="tutor__composer" onSubmit={submit}>
-          {attachments.length ? (
-            <ul className="tutor__attachments" aria-label="Attached images">
-              {attachments.map((item) => (
-                <li key={item.id} className={`is-${item.state}`}>
-                  <img src={item.preview} alt="" width="40" height="40" />
-                  <span><b>{item.name}</b><small>{item.state === 'preparing' ? 'Preparing…' : item.state === 'failed' ? item.error : `${Math.max(1, Math.round((item.size ?? 0) / 1024))} KB`}</small></span>
-                  <button type="button" onClick={() => removeAttachment(item.id)} aria-label={`Remove ${item.name}`}>×</button>
-                </li>
-              ))}
-            </ul>
+        <div className="tutor__dock">
+          {!atBottom && !empty ? (
+            <button type="button" className="tutor__jump" onClick={jumpToLatest}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>Jump to latest
+            </button>
           ) : null}
-          <div className="tutor__input">
-            <textarea
-              ref={textarea}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={onPaste}
-              onFocus={warmAI}
-              placeholder={listening ? 'Listening…' : course ? `Ask about ${unit || course}…` : 'Ask Otto anything…'}
-              aria-label="Message Otto"
-              enterKeyHint="send"
-              autoCapitalize="sentences"
-              rows={1}
-              maxLength={4000}
-            />
-            <div className="tutor__tools">
-              <button type="button" className="tutor__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" disabled={attachments.length >= MAX_IMAGES}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11-7.5 7.5a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7L10.2 16a1.7 1.7 0 0 1-2.4-2.4L14.5 7" /></svg>
-              </button>
-              <button type="button" className="tutor__tool tutor__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={attachments.length >= MAX_IMAGES}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
-              </button>
-              {Recognition ? (
-                <button type="button" className={`tutor__tool${listening ? ' is-listening' : ''}`} onClick={toggleDictation} aria-label={listening ? 'Stop dictation' : 'Dictate a message'} aria-pressed={listening} title="Dictate (uses your browser’s speech recognition)">
-                  <Icon name="mic" />
+
+          <form className="tutor__composer" onSubmit={submit}>
+            {attachments.length ? (
+              <ul className="tutor__attachments" aria-label="Attached images">
+                {attachments.map((item) => (
+                  <li key={item.id} className={`is-${item.state}`}>
+                    <img src={item.preview} alt="" width="40" height="40" />
+                    <span><b>{item.name}</b><small>{item.state === 'preparing' ? 'Preparing…' : item.state === 'failed' ? item.error : `${Math.max(1, Math.round((item.size ?? 0) / 1024))} KB`}</small></span>
+                    <button type="button" onClick={() => removeAttachment(item.id)} aria-label={`Remove ${item.name}`}>×</button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="tutor__input">
+              <textarea
+                ref={textarea}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={onKeyDown}
+                onPaste={onPaste}
+                onFocus={warmAI}
+                placeholder={listening ? 'Listening…' : course ? `Ask about ${unit || course}…` : 'Ask Otto anything…'}
+                aria-label="Message Otto"
+                aria-describedby="tutor-hint"
+                enterKeyHint="send"
+                autoCapitalize="sentences"
+                rows={1}
+                maxLength={4000}
+              />
+              <div className="tutor__tools">
+                <button type="button" className="tutor__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" title="Attach images" disabled={attachments.length >= MAX_IMAGES}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11-7.5 7.5a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7L10.2 16a1.7 1.7 0 0 1-2.4-2.4L14.5 7" /></svg>
                 </button>
-              ) : null}
-              <span className="tutor__hint">Enter to send · Shift+Enter for a new line</span>
-              {streaming ? (
-                <button type="button" className="tutor__send is-stop" onClick={stop} aria-label="Stop generating"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg></button>
-              ) : (
-                <button type="submit" className="tutor__send" disabled={!draft.trim() && !attachments.some((item) => item.state === 'ready')} aria-label="Send">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+                <button type="button" className="tutor__tool tutor__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={attachments.length >= MAX_IMAGES}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
                 </button>
-              )}
+                {Recognition ? (
+                  <button type="button" className={`tutor__tool${listening ? ' is-listening' : ''}`} onClick={toggleDictation} aria-label={listening ? 'Stop dictation' : 'Dictate a message'} aria-pressed={listening} title="Dictate (uses your browser’s speech recognition)">
+                    <Icon name="mic" />
+                  </button>
+                ) : null}
+                <span className="tutor__spacer" />
+                {streaming ? (
+                  <button type="button" className="tutor__send is-stop" onClick={stop} aria-label="Stop generating" title="Stop"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" /></svg></button>
+                ) : (
+                  <button type="submit" className="tutor__send" disabled={!draft.trim() && !attachments.some((item) => item.state === 'ready')} aria-label="Send" title="Send">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-          <input ref={fileInput} className="ui-file-input" type="file" accept={ACCEPTED.join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
-          <input ref={cameraInput} className="ui-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
-        </form>
+            <p className="tutor__disclaimer">Otto can make mistakes. Check important info.<span id="tutor-hint" className="sr-only"> Enter sends, Shift+Enter adds a new line.</span></p>
+            <input ref={fileInput} className="ui-file-input" type="file" accept={ACCEPTED.join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+            <input ref={cameraInput} className="ui-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+          </form>
+        </div>
+        {empty && !phone ? starterList(startersShown, 'tutor__starters') : null}
+        <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
         {dragActive ? <div className="tutor__drop" aria-hidden="true"><span>Drop images to attach</span></div> : null}
         {memoryNotice ? (
           <p className="app-toast otto-notice" role="status">
