@@ -386,6 +386,9 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     const userMessage: LocalMessage = { id: 0, key: userKey, role: 'user', content, attachments: ready.map((item) => item.name), model_tier: '', created_at: stamp, status: 'sending', previews: ready.map((item) => item.preview), progress: ready.length ? 0 : undefined }
     const thinking: ThinkingContext = ready.length ? 'photo' : useCourse ? 'notes' : 'plain'
     const reply: LocalMessage = { id: 0, key: replyKey, role: 'assistant', content: '', attachments: [], model_tier: '', created_at: stamp, status: 'streaming', thinking }
+    // Regenerate: the old reply comes back if the new one fails (the server keeps it until then).
+    const previousThread = threads[threadId] ?? []
+    const previousReply = options.regenerate ? previousThread[previousThread.map((message) => message.role).lastIndexOf('assistant')] : undefined
     pinned.current = true
     setAtBottom(true)
     setAnnouncement(thinking === 'photo' ? 'Otto is looking at your photo.' : thinking === 'notes' ? 'Otto is reading your notes.' : 'Otto is thinking.')
@@ -448,7 +451,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         setThreads((current) => ({
           ...current,
           [liveThread]: (current[liveThread] ?? []).flatMap((message) => {
-            if (message.key === replyKey) return message.content ? [{ ...message, status: undefined }] : []
+            if (message.key === replyKey) return previousReply ? [previousReply] : message.content ? [{ ...message, status: undefined }] : []
             // With no reply at all, the error and a Retry sit on the student's message. Resending
             // a turn the server already saved reuses it instead of storing it twice.
             if (message.key === userKey) return [answered ? { ...message, status: undefined, progress: undefined } : { ...message, status: 'failed' as const, error, progress: undefined }]

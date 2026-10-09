@@ -639,6 +639,55 @@ class ConversationToolsTests(OttoTestCase):
             self.send("alex", content="x", conversation_id=conversation_id, regenerate=True)
         self.assertEqual(len(tutor.list_messages("alex", conversation_id)), 2)  # nothing dropped when refused
 
+    def regenerate_with(self, student_id, conversation_id, stream):
+        with self.as_user(student_id), patch.object(ai_tutor, "stream_tutor_reply", side_effect=stream), \
+                patch.object(ai_tutor, "_post", side_effect=FakeModel()):
+            return parse_events(main.send_tutor_message(
+                main.TutorMessageRequest(content="x", conversation_id=conversation_id, regenerate=True), "Bearer t"))
+
+    def test_a_failed_regeneration_keeps_the_old_reply(self):
+        events, _ = self.send("alex", content="What is a cell?", reply=("The old ", "answer."))
+        conversation_id = events[0][1]["conversation"]["id"]
+        old = dict(events)["done"]["message"]
+        tutor.rate_message("alex", old["id"], 1)
+        before = [(item["id"], item["role"], item["content"]) for item in tutor.list_messages("alex", conversation_id)]
+
+        def failing(*, messages, route, session_id=None):
+            yield "A partial new "
+            raise ai_tutor.AITutorError("down")
+
+        def empty(*, messages, route, session_id=None):
+            yield "   "
+            return {"finish_reason": "stop", "done": True}
+
+        for stream in (failing, empty):
+            events = self.regenerate_with("alex", conversation_id, stream)
+            error = dict(events)["error"]
+            self.assertEqual(error["message"], main.TUTOR_REGENERATE_FAILED)
+            self.assertTrue(error["kept"])
+            self.assertNotIn("done", dict(events))
+            stored = tutor.list_messages("alex", conversation_id)
+            self.assertEqual([(item["id"], item["role"], item["content"]) for item in stored], before)
+            self.assertEqual(stored[-1]["rating"], 1)
+        # The global AI budget is used up: refused before anything changes.
+        with patch.object(main, "global_ai_available", return_value=False), self.assertRaises(HTTPException) as caught:
+            self.send("alex", content="x", conversation_id=conversation_id, regenerate=True)
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual([(item["id"], item["role"], item["content"]) for item in tutor.list_messages("alex", conversation_id)], before)
+
+    def test_a_successful_regeneration_replaces_the_reply_and_its_rating(self):
+        events, _ = self.send("alex", content="What is a cell?", reply=("The old ", "answer."))
+        conversation_id = events[0][1]["conversation"]["id"]
+        old = dict(events)["done"]["message"]
+        tutor.rate_message("alex", old["id"], -1)
+        events, captured = self.send("alex", content="x", conversation_id=conversation_id, regenerate=True, reply=("A new ", "answer."))
+        # The old reply is not sent back to the model as history.
+        self.assertNotIn("The old answer.", json.dumps(captured["messages"]))
+        new = dict(events)["done"]["message"]
+        stored = tutor.list_messages("alex", conversation_id)
+        self.assertEqual([(item["role"], item["content"]) for item in stored], [("user", "What is a cell?"), ("assistant", "A new answer.")])
+        self.assertEqual((stored[-1]["id"], stored[-1]["rating"]), (new["id"], 0))
+
     def test_pin_rename_and_mode_through_one_endpoint(self):
         events, _ = self.send("alex")
         conversation_id = events[0][1]["conversation"]["id"]

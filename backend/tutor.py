@@ -206,19 +206,39 @@ def get_reply(owner_id: str, message_id: int) -> dict:
     return _message(row)
 
 
-def drop_last_reply(owner_id: str, conversation_id: str) -> dict | None:
-    """For Regenerate: delete the conversation's last reply when it follows a student turn, and
-    return that turn ({"content", ...}) or None when there is nothing to regenerate."""
+def last_reply_turn(owner_id: str, conversation_id: str) -> tuple[dict, int] | None:
+    """For Regenerate: the student turn the conversation's last reply answers and that reply's id,
+    or None when there is nothing to regenerate. Nothing is deleted here: the old reply stays until
+    a new one is saved (replace_reply), so a refused or failed regeneration loses nothing.
+    Raises ValueError("conversation_not_found")."""
     init_tutor()
-    with database.engine().begin() as connection:
+    with database.engine().connect() as connection:
         _owned(connection, owner_id, conversation_id)
         last_two = connection.execute(select(messages).where(messages.c.conversation_id == conversation_id)
                                       .order_by(messages.c.id.desc()).limit(2)).mappings().all()
-        if len(last_two) < 2 or last_two[0]["role"] != "assistant" or last_two[1]["role"] != "user":
-            return None
-        connection.execute(delete(ratings).where(ratings.c.message_id == last_two[0]["id"]))
-        connection.execute(delete(messages).where(messages.c.id == last_two[0]["id"]))
-        return _message(last_two[1])
+    if len(last_two) < 2 or last_two[0]["role"] != "assistant" or last_two[1]["role"] != "user":
+        return None
+    return _message(last_two[1]), last_two[0]["id"]
+
+
+def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, content: str,
+                  attachments: list[str] | None = None, model_tier: str = "") -> dict:
+    """For Regenerate: save the new reply and remove the one it replaces (and its rating) in one
+    transaction, so the conversation always has exactly one answer to that turn."""
+    init_tutor()
+    now = datetime.now(timezone.utc)
+    with database.engine().begin() as connection:
+        _owned(connection, owner_id, conversation_id)
+        old = messages.c.id == old_reply_id
+        mine = (messages.c.conversation_id == conversation_id) & (messages.c.role == "assistant")
+        connection.execute(delete(ratings).where(ratings.c.message_id == old_reply_id, ratings.c.conversation_id == conversation_id))
+        connection.execute(delete(messages).where(old, mine))
+        message_id = connection.execute(messages.insert().values(
+            conversation_id=conversation_id, role="assistant", content=content,
+            attachments=json.dumps([name[:120] for name in (attachments or [])][:3]), model_tier=model_tier, created_at=now,
+        )).inserted_primary_key[0]
+        connection.execute(update(conversations).where(conversations.c.id == conversation_id).values(updated_at=now))
+    return {"id": message_id, "role": "assistant", "content": content, "attachments": attachments or [], "model_tier": model_tier, "created_at": now}
 
 
 def list_messages(owner_id: str, conversation_id: str, before_id: int | None = None, limit: int = 50) -> list[dict]:

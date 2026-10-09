@@ -1972,6 +1972,7 @@ TUTOR_DAILY_LIMITED = "You’ve reached today’s limit with Otto. It resets wit
 TUTOR_TOO_MANY_STREAMS = "Otto is still answering your other messages. Wait for one to finish, then try again."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
+TUTOR_REGENERATE_FAILED = "Otto couldn’t write a new answer right now, so your previous answer is still here. Try again in a moment."
 
 
 def tutor_limits(owner: str) -> None:
@@ -2035,13 +2036,17 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if str(error) == "day":
             raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED, headers={"Retry-After": "3600"}) from error
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
+    # Regenerate keeps the old reply until the new one is saved (tutor.replace_reply): a refusal,
+    # a used-up budget, an AI failure or an empty answer leaves the conversation as it was.
+    old_reply_id: int | None = None
     if regenerate:
         try:
-            last_turn = tutor.drop_last_reply(owner, data.conversation_id)
+            last = tutor.last_reply_turn(owner, data.conversation_id)
         except ValueError as error:
             raise HTTPException(status_code=404, detail="Conversation not found") from error
-        if last_turn is None:
+        if last is None:
             raise HTTPException(status_code=409, detail="There is no reply to regenerate")
+        last_turn, old_reply_id = last
         content = last_turn["content"]  # answered again exactly as it was asked
         existing = ai_prep.submit(tutor.conversation_with_history, owner, data.conversation_id)
     # Obvious attempts to extract or override the tutor's instructions get the fixed
@@ -2089,6 +2094,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
+    if old_reply_id is not None:
+        # The reply being regenerated is neither history for the model nor a "first reply" here.
+        recent = [item for item in recent if item["id"] != old_reply_id]
     # Retrying a message whose reply failed must not store (or send the model) the same turn twice.
     retry_of = recent[-1] if recent and recent[-1]["role"] == "user" and recent[-1]["content"] == content else None
     # The first real reply names the conversation; Otto's small-talk replies don't count.
@@ -2203,6 +2211,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 if ai_cache.store_tutor_reply(tutor_cache_key, owner, "".join(produced)):
                     ai_cache.add_ref("tutor_reply_cache", tutor_cache_key, owner, ai_cache.conversation_source(conversation["id"]))
 
+    def save_reply(text: str, attachments: list[str] | None = None) -> dict:
+        if old_reply_id is not None:
+            return tutor.replace_reply(owner, conversation["id"], old_reply_id, text, attachments, model_tier=route["tier"])
+        return tutor.add_message(owner, conversation["id"], "assistant", text, attachments, model_tier=route["tier"])
+
     def saved_user() -> bool:
         try:
             saving.result()
@@ -2213,6 +2226,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     def events():
         chunks: list[str] = []
         saved = False
+        failed = False  # a regeneration that failed keeps the old reply, not a partial new one
         user_sent = False
         try:
             # Inside the try, so a client that leaves at the very first event still
@@ -2241,8 +2255,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                     yield sse("user", {"user_message": saving.result()})
                 chunks.append(chunk)
                 yield sse("delta", {"text": chunk})
-            reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), guide_reply.get("attachments"),
-                                      model_tier=route["tier"])
+            if old_reply_id is not None and not "".join(chunks).strip():
+                failed = True
+                yield sse("error", {"message": TUTOR_REGENERATE_FAILED, "retry": True, "kept": True})
+                return
+            reply = save_reply("".join(chunks), guide_reply.get("attachments"))
             saved = True
             yield sse("done", {"message": reply})
             # The reply is complete: free the stream slot, then do Otto's housekeeping (a title
@@ -2262,7 +2279,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                     yield sse("error", {"message": TUTOR_NOT_SAVED, "retry": True})
                     return
                 yield sse("user", {"user_message": saving.result()})
-            if chunks:
+            if old_reply_id is not None:
+                failed = True
+                yield sse("error", {"message": TUTOR_REGENERATE_FAILED, "retry": True, "kept": True})
+            elif chunks:
                 reply = tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks) + "\n\n(The reply was cut off.)", model_tier=route["tier"])
                 saved = True
                 yield sse("done", {"message": reply, "partial": True})
@@ -2272,8 +2292,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             tutor_streams.release(owner, slot)
             # The student stopped the reply or left: keep what was already written,
             # after the question it answers.
-            if chunks and not saved and saved_user():
-                tutor.add_message(owner, conversation["id"], "assistant", "".join(chunks), model_tier=route["tier"])
+            # A stopped regeneration replaces the old reply with what was written, as the app shows.
+            if chunks and not saved and not failed and (old_reply_id is None or "".join(chunks).strip()) and saved_user():
+                save_reply("".join(chunks))
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
