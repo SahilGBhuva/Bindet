@@ -500,7 +500,8 @@
 
   .bindit-sheet__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
   .bindit-sheet__grid a,
-  .bindit-sheet__footer a {
+  .bindit-sheet__footer a,
+  .bindit-sheet__help {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -515,7 +516,8 @@
   }
   .bindit-sheet__grid a.is-active { border-color: var(--color-text); }
   .bindit-sheet__grid svg,
-  .bindit-sheet__footer svg { color: var(--color-text-tertiary); }
+  .bindit-sheet__footer svg,
+  .bindit-sheet__help svg { color: var(--color-text-tertiary); }
   /* My Groups in the phone menu: the rail's group list, one 44px row each. */
   .bindit-sheet__groups { display: grid; margin: 6px 0 0; padding: 0; list-style: none; }
   .bindit-sheet__groups li + li { border-top: 1px solid var(--color-border); }
@@ -537,10 +539,14 @@
   .bindit-sheet__glyph { display: grid; flex: none; place-items: center; width: 16px; color: var(--color-text-tertiary); }
   .bindit-sheet .bindit-sheet__glyph svg { width: 14px; height: 14px; stroke-width: 1.4; }
   .bindit-sheet__footer { display: flex; gap: 6px; padding-top: 12px; border-top: 1px solid var(--color-border); }
-  .bindit-sheet__footer a { flex: 1; }
+  .bindit-sheet__footer a,
+  .bindit-sheet__help { flex: 1; }
+  .bindit-sheet__help { background: none; font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer; }
+  .bindit-sheet__help:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
   .bindit-sheet__footer .bindit-rail__theme { width: 46px; height: 46px; border: 1px solid var(--color-border); }
   .bindit-sheet__grid a:active,
-  .bindit-sheet__footer a:active { background: var(--color-surface-hover); }
+  .bindit-sheet__footer a:active,
+  .bindit-sheet__help:active { background: var(--color-surface-hover); }
   .bindit-sheet .bindit-rail__badge { min-width: 20px; height: 20px; font-size: var(--text-xs); }
 }
 
