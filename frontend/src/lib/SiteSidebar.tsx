@@ -274,19 +274,20 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     let cancelled = false
     const refresh = () => {
       if (document.visibilityState === 'hidden') return
+      // Unread counts come from Supabase directly; a slow answer there must not hold up the rest.
+      void listChatUnreads(session).then((unread) => {
+        if (cancelled) return
+        const total = unread.reduce((sum, item) => sum + item.unread_count, 0)
+        setUnreadTotal(total)
+        onUnreadChange?.(total)
+      }).catch(() => undefined)
       void Promise.allSettled([
         data.getAccountProfile(session.access_token),
-        listChatUnreads(session),
         data.getTasks(session.access_token),
         data.getStudyGroups(session.access_token),
-      ]).then(([nextProfile, unread, nextTasks, nextGroups]) => {
+      ]).then(([nextProfile, nextTasks, nextGroups]) => {
         if (cancelled) return
         if (nextProfile.status === 'fulfilled') setProfile(nextProfile.value)
-        if (unread.status === 'fulfilled') {
-          const total = unread.value.reduce((sum, item) => sum + item.unread_count, 0)
-          setUnreadTotal(total)
-          onUnreadChange?.(total)
-        }
         if (nextTasks.status === 'fulfilled') setTasks(nextTasks.value)
         else setTasks((current) => current ?? [])
         if (nextGroups.status === 'fulfilled') setGroups(nextGroups.value)

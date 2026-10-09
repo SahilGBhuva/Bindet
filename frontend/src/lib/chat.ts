@@ -287,6 +287,7 @@ export async function listChatUnreads(session: AuthSession): Promise<ChatUnread[
     method: 'POST',
     headers: { ...authHeaders(config, session), 'Content-Type': 'application/json' },
     body: '{}',
+    signal: AbortSignal.timeout(10_000),
   })
   const rows = await readList(response, isUnreadRow, 'Could not load unread messages.')
   return rows.map((row) => ({

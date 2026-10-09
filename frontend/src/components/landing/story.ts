@@ -47,8 +47,8 @@ export function demoSocial() {
   return {
     leaderboard: hub?.leaderboard ?? [],
     quest: hub?.quests[0] ?? null,
-    accuracy: stats?.accuracy ?? 0,
-    streak: stats?.login_streak ?? 0,
+    accuracy: Math.round(stats?.accuracy ?? 0),
+    streak: stats?.streak ?? 0,
     xp: stats?.total_xp ?? 0,
   }
 }

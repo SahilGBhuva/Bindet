@@ -195,7 +195,7 @@ export const DEMO_COURSES: readonly { name: string; tone: string; units: Readonl
 export const DEMO_SUMMARY = {
   courses: COURSES.length,
   notes: COURSES.reduce((sum, course) => sum + Object.keys(course.units).length, 0),
-  streak: 12,
+  streak: 5,
   xp: 2480,
 }
 

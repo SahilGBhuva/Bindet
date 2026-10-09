@@ -459,10 +459,9 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   const groupDone = groupTasks.filter((task) => task.status === 'done').length
 
   const teamStats = group ? [
-    { label: 'Progress:', value: groupTasks.length ? `${Math.round((groupDone / groupTasks.length) * 100)}%` : '—' },
+    { label: 'Progress', value: groupTasks.length ? `${Math.round((groupDone / groupTasks.length) * 100)}%` : '—' },
     { label: 'Assigned workload', value: groupOpenTasks.length ? `${groupOpenTasks.length} open, ${assignedPeople.size} ${assignedPeople.size === 1 ? 'person' : 'people'}` : 'none open' },
     { label: 'Roles', value: `${leads} ${leads === 1 ? 'lead' : 'leads'}, ${group.members.length - leads} ${group.members.length - leads === 1 ? 'member' : 'members'}` },
-    { label: 'Budget', value: '—' },
     { label: 'Major milestones', value: milestones.size ? String(milestones.size) : '—' },
   ] : []
 
