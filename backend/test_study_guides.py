@@ -495,16 +495,30 @@ class IntentTests(unittest.TestCase):
             "make me a study guide for cells": ("study_guide", "cells"),
             "Cheat sheet for unit 2": ("cheat_sheet", "unit 2"),
             "can you make a vocab list for Genetics?": ("vocabulary", "Genetics"),
-            "give me practice problems on my derivatives notes": ("practice", "derivatives"),
-            "I need a timeline of the civil war please": ("timeline", "civil war"),
-            "make a summary of the whole course": ("summary", "whole course"),
+            "make a vocabulary list of the whole course": ("vocabulary", "whole course"),
             "study guide": ("study_guide", ""),
             "Otto, write me a one-page cheat sheet": ("cheat_sheet", ""),
+            "make me a review sheet for the civil war": ("study_guide", "civil war"),
+            "can you make a study sheet on cells?": ("study_guide", "cells"),
+            "cheatsheet for unit 2": ("cheat_sheet", "unit 2"),
+            # One typo per word is tolerated.
+            "make me a studdy guide for cells": ("study_guide", "cells"),
+            "make a stduy giude for cells": ("study_guide", "cells"),
+            "cheet sheet for unit 2": ("cheat_sheet", "unit 2"),
+            "vocabluary list for Genetics": ("vocabulary", "Genetics"),
         }
         for text, expected in cases.items():
             intent = study_guides.detect_intent(text)
             self.assertIsNotNone(intent, text)
             self.assertEqual((intent.kind, intent.target), expected, text)
+
+    def test_summaries_timelines_and_outlines_get_a_normal_answer(self):
+        for text in ("make a summary of the whole course", "give me a summary of photosynthesis", "summary of cells",
+                     "I need a timeline of the civil war please", "timeline of the french revolution",
+                     "make an outline of chapter 3", "outline the causes of WW1", "give me practice problems on derivatives",
+                     "make me a glossary", "make a vocabulary for cells", "make me a sheet for cells", "make me a guide for cells",
+                     "make me a steady guide"):
+            self.assertIsNone(study_guides.detect_intent(text), text)
 
     def test_ignores_questions_and_long_messages(self):
         for text in ("how do I make a study guide?", "what should go in a cheat sheet", "summarize this",

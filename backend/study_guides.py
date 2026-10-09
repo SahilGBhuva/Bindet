@@ -392,23 +392,56 @@ def plain_text(title: str, sections: list[dict[str, Any]]) -> str:
 
 # --- Otto: "make me a study guide for cells" ------------------------------------------------
 
-_KIND_WORDS = (
-    ("cheat_sheet", r"cheat\s*sheets?|crib\s+sheets?|formula\s+sheets?"),
-    ("vocabulary", r"vocab(?:ulary)?(?:\s+(?:lists?|sheets?))?|glossar(?:y|ies)|key\s+terms\s+list"),
-    ("practice", r"practice\s+(?:problems?|questions?\s+with\s+(?:worked\s+)?answers|sets?)|worked\s+problems?"),
-    ("timeline", r"time\s*lines?"),
-    ("summary", r"summary|summaries|outlines?"),
-    ("study_guide", r"study\s+guides?|review\s+(?:guides?|sheets?)|revision\s+(?:guides?|notes|sheets?)"),
+# Only an explicit ask for one of these makes a saved guide; "summary of…", "timeline of…",
+# "outline…" or "practice problems" get a normal chat answer. Each name is (first word, second
+# word, kind); a typo of one letter per word is tolerated ("studdy guide", "cheet sheet").
+_GUIDE_NAMES = (
+    ("study", "guide", "study_guide"),
+    ("study", "sheet", "study_guide"),
+    ("review", "sheet", "study_guide"),
+    ("cheat", "sheet", "cheat_sheet"),
+    ("vocab", "list", "vocabulary"),
+    ("vocabulary", "list", "vocabulary"),
 )
-_KIND_PATTERN = "|".join(f"(?P<{kind}>{pattern})" for kind, pattern in _KIND_WORDS)
 _ASK = r"(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+|otto,?\s+|i\s+(?:need|want|would\s+like)\s+|i'?d\s+like\s+|let'?s\s+)?(?:please\s+)?"
 _VERB = r"(?:make|create|build|generate|write|give|prepare|put\s+together|draft|do)(?:\s+(?:me|us))?"
 _INTENT = re.compile(
     rf"^\s*(?:{_ASK}{_VERB}\s+|{_ASK})(?:(?:a|an|my|the|some|me\s+a)\s+)?(?:(?:quick|short|full|detailed|one[- ]page|new|fresh)\s+)?"
-    rf"(?:{_KIND_PATTERN})"
+    r"(?P<name>[a-z]+(?:[\s-]+[a-z]+)?)"
     r"(?:\s+(?:for|on|about|of|from|covering)\s+(?P<target>[^?!.\n]{1,80}))?\s*[?!.]*\s*(?:please|thanks|thank\s+you)?[?!.]*\s*$",
     re.I,
 )
+
+
+def _near(word: str, wanted: str) -> bool:
+    """The same word, allowing one typo (a missing, extra, wrong or swapped letter) in words of 4+ letters."""
+    if word == wanted:
+        return True
+    if min(len(word), len(wanted)) < 4 or abs(len(word) - len(wanted)) > 1:
+        return False
+    if len(word) == len(wanted):
+        diff = [index for index, (a, b) in enumerate(zip(word, wanted)) if a != b]
+        return len(diff) == 1 or (len(diff) == 2 and diff[1] == diff[0] + 1
+                                  and word[diff[0]] == wanted[diff[1]] and word[diff[1]] == wanted[diff[0]])
+    short, long_ = sorted((word, wanted), key=len)
+    return any(long_[:index] + long_[index + 1:] == short for index in range(len(long_)))
+
+
+def _guide_kind(name: str) -> str | None:
+    """The kind of study material a name like "study guide", "cheatsheet" or "vocab lists" asks for."""
+    words = re.split(r"[\s-]+", name.casefold().strip())
+    if len(words) == 1:  # written as one word: "cheatsheet", "studyguide"
+        for first, second, kind in _GUIDE_NAMES:
+            compact = first + second
+            if any(_near(words[0], form) for form in (compact, compact + "s")):
+                return kind
+        return None
+    for first, second, kind in _GUIDE_NAMES:
+        if _near(words[0], first) and any(_near(words[1], form) for form in (second, second + "s")):
+            return kind
+    return None
+
+
 INTENT_MAX_CHARS = 160
 _TARGET_FILLER = re.compile(r"^(?:my|the|this|our)\s+|\s+(?:notes?|unit|chapter|please)$", re.I)
 
@@ -420,15 +453,18 @@ class GuideIntent:
 
 
 def detect_intent(text: str) -> GuideIntent | None:
-    """A request for study material ("make me a study guide for cells", "cheat sheet for unit 2").
-    A pattern, not a model: anything else (a question about study guides, a long message) is None."""
+    """An explicit request for a study guide, cheat sheet, study or review sheet, or vocab list
+    ("make me a study guide for cells", "cheat sheet for unit 2"). A pattern, not a model: anything
+    else (a summary, timeline or outline, a question about study guides, a long message) is None."""
     value = " ".join(ai_tutor._plain(text or "").replace("’", "'").split())
     if not value or len(value) > INTENT_MAX_CHARS:
         return None
     match = _INTENT.match(value)
     if match is None:
         return None
-    kind = next(name for name in KINDS if match.group(name))
+    kind = _guide_kind(match.group("name"))
+    if kind is None:
+        return None
     target = (match.group("target") or "").strip()
     for _ in range(3):
         target = _TARGET_FILLER.sub("", target).strip()
