@@ -4,6 +4,7 @@ import { InstallBindit } from '../components/AppPrompts'
 import { accountDisplayName } from './accountName'
 import type { AuthSession } from './auth'
 import { listChatUnreads } from './chat'
+import { openHelp } from './helpEvents'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
@@ -751,6 +752,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             <InstallBindit place="menu" />
             <div className="bindit-sheet__footer">
               <a href="#settings" onClick={() => setMenuOpen(false)}><NavIcon kind="settings" />Settings</a>
+              {/* The same help panel as the corner button, which narrow phones hide. Opens once the sheet has closed. */}
+              <button type="button" className="bindit-sheet__help" onClick={() => { setMenuOpen(false); window.setTimeout(openHelp, 0) }}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01" /></svg>Help
+              </button>
               <ThemeButton />
             </div>
           </div>

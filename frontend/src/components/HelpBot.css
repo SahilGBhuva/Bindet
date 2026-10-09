@@ -23,8 +23,17 @@
   font-weight: var(--weight-medium);
   box-shadow: var(--shadow-popover);
   cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-instant) var(--ease-standard);
+  transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-base) var(--ease-standard), opacity var(--duration-base) var(--ease-standard);
 }
+/* Tucked while the page scrolls down; keyboard focus always brings it back. */
+.helpbot__fab.is-tucked:not(:focus-visible),
+.app-shell:has(> .app-toast) > .helpbot__fab:not(:focus-visible) {
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+}
+/* The last controls on a page can always scroll clear of the corner button. */
+.app-shell:has(> .helpbot__fab) > .sheet { padding-bottom: 72px; }
 .helpbot__fab:hover { background: var(--color-surface-hover); }
 .helpbot__fab:active { transform: translateY(1px); }
 .helpbot__fab:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
@@ -156,17 +165,21 @@
 .helpbot__count { flex: none; font-variant-numeric: tabular-nums; }
 .helpbot__error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); }
 
-/* Phones: icon-only button above the tab bar; the panel is a sheet just above it (or the keyboard). */
+/* Phones: a small icon-only button above the tab bar (clear of the home bar and notch); the panel
+   is a sheet just above it (or the keyboard). Pages get room at the bottom to scroll clear of it. */
 @media (max-width: 860px) {
   .helpbot__fab {
-    right: calc(16px + env(safe-area-inset-right));
-    bottom: calc(var(--phone-tabbar) + 12px);
-    width: 44px;
-    height: 44px;
+    right: calc(12px + env(safe-area-inset-right));
+    bottom: calc(var(--phone-tabbar) + 10px);
+    width: 40px;
+    height: 40px;
     padding: 0;
     justify-content: center;
+    border-radius: var(--radius-md);
   }
+  .helpbot__fab svg { width: 18px; height: 18px; }
   .helpbot__fab-label { display: none; }
+  .app-shell:has(> .helpbot__fab) > .sheet { padding-bottom: calc(var(--phone-tabbar) + 60px); }
   /* The on-screen keyboard is open for some other field: keep the corner clear. */
   :root.is-typing .helpbot__fab { display: none; }
   .helpbot__panel {
@@ -181,4 +194,14 @@
   .helpbot__form { padding: var(--space-3) var(--space-4); }
   .helpbot__close { width: 44px; height: 44px; margin: -6px -6px 0 0; }
   .helpbot__chip { min-height: 44px; }
+}
+
+/* Narrow phones: no corner button at all; Help lives in the Menu sheet. */
+@media (max-width: 399px) {
+  .helpbot__fab { display: none; }
+  .app-shell:has(> .helpbot__fab) > .sheet { padding-bottom: var(--phone-tabbar); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .helpbot__fab { transition: none; }
 }

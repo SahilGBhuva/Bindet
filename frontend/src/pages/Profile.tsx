@@ -842,7 +842,7 @@ export function Profile({ session, onError }: ProfileProps) {
               {session ? (
                 <div className="profile__friend-forms">
                   <form className="profile__inline-form" onSubmit={findPeople} role="search">
-                    <input className="ui-input" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Search name or username" maxLength={40} aria-label="Search people" type="search" autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" />
+                    <input className="ui-input" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Search people" maxLength={40} aria-label="Search people by name or username" type="search" autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" />
                     <button className="ui-button" disabled={socialBusy || peopleQuery.trim().length < 2}>Search</button>
                   </form>
                   <form className="profile__inline-form" onSubmit={addFriend}>

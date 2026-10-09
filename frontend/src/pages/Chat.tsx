@@ -5,7 +5,7 @@ import type { AuthSession } from '../lib/auth'
 import {
   deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, isSafeAttachmentPath, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
-  isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages,
+  isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages, CHAT_LOAD_ERROR, type RealtimeStatus,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
@@ -287,22 +287,26 @@ export function Chat({ session }: { session: AuthSession | null }) {
         setSummaries((current) => ({ ...current, [activeId]: { unread: visible ? 0 : current[activeId]?.unread ?? 0, lastAt: last?.created_at ?? current[activeId]?.lastAt ?? null, last: last ?? current[activeId]?.last } }))
         if (visible) void markGroupRead(activeId, session).catch(() => undefined)
       })
-      .catch((error: unknown) => {
-        if (live) setThreadErrors((current) => ({ ...current, [activeId]: error instanceof Error ? error.message : 'Could not load this chat.' }))
+      .catch(() => {
+        // Whatever went wrong (network, an error object instead of a list, bad config), the room stays usable.
+        if (live) setThreadErrors((current) => ({ ...current, [activeId]: CHAT_LOAD_ERROR }))
       })
       .finally(() => { window.clearTimeout(timer); if (live) setLoadingThread((current) => current === activeId ? null : current) })
     return () => { live = false; window.clearTimeout(timer) }
   }, [session, activeId, threadAttempt])
 
-  // Live messages for the open room.
+  // Live messages for the open room. If the realtime channel can't be opened or drops,
+  // the room falls back to refreshing the latest page every so often until it is back.
+  const [realtime, setRealtime] = useState<{ groupId: string; status: RealtimeStatus } | null>(null)
   useEffect(() => {
     if (!session || !activeId) return
     let stop = () => {}
     let live = true
+    const onStatus = (status: RealtimeStatus) => { if (live) setRealtime({ groupId: activeId, status }) }
     void subscribeToGroupMessages(activeId, session, (message) => {
       setThreads((current) => ({ ...current, [activeId]: withMessage(current[activeId] ?? getCachedGroupMessages(activeId, session) ?? [], message) }))
       if (document.visibilityState === 'visible') void markGroupRead(activeId, session).catch(() => undefined)
-    }).then((unsubscribe) => { if (live) stop = unsubscribe; else unsubscribe() }).catch(() => undefined)
+    }, onStatus).then((unsubscribe) => { if (live) stop = unsubscribe; else unsubscribe() }).catch(() => onStatus('offline'))
     return () => {
       live = false
       stop()
@@ -310,6 +314,15 @@ export function Chat({ session }: { session: AuthSession | null }) {
       void setGroupTyping(activeId, ownNameRef.current, false, session).catch(() => undefined)
     }
   }, [session, activeId])
+
+  const realtimeOffline = realtime?.groupId === activeId && realtime.status === 'offline'
+  useEffect(() => {
+    if (!realtimeOffline) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') setThreadAttempt((value) => value + 1)
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [realtimeOffline])
 
   // Read receipts and who is typing, refreshed while the room is open.
   useEffect(() => {
@@ -394,7 +407,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   const serverMessages = useMemo(() => {
     if (!activeId || !session) return []
-    return threads[activeId] ?? getCachedGroupMessages(activeId, session) ?? []
+    const list = threads[activeId] ?? getCachedGroupMessages(activeId, session)
+    return Array.isArray(list) ? list : []
   }, [threads, activeId, session])
   // The open room failed to load and nothing is cached: sending would go nowhere useful, so the composer waits for a retry.
   const roomUnavailable = Boolean(threadErrors[activeId]) && !serverMessages.length
