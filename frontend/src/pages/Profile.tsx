@@ -1229,7 +1229,7 @@ function FriendStreakDetail({ id, friend, nudged, busy, onNudge }: {
       </table>
       <div className="profile__streak-foot">
         <span className="profile__streak-status">{streakStatusLine(friend)}</span>
-        {canNudge(friend) ? (
+        {canNudge(friend) && friend.accepts_nudges !== false ? (
           <button className="ui-button ui-button--sm profile__nudge" type="button" disabled={busy || nudged} onClick={onNudge}>
             {nudged ? 'Reminder sent' : `Remind ${name} to study`}
           </button>

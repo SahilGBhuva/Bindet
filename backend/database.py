@@ -61,6 +61,8 @@ profiles = Table(
     Column("daily_goal", Integer, nullable=False, default=20),
     Column("discoverable", Boolean, nullable=False, default=True),
     Column("allow_friend_requests", Boolean, nullable=False, default=True),
+    # "Let friends nudge me": when off, friends can't send this student study reminders.
+    Column("allow_nudges", Boolean, nullable=False, default=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
@@ -694,6 +696,7 @@ POSTGRES_ADDED_COLUMNS = (
     ("profiles.daily_goal", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS daily_goal integer NOT NULL DEFAULT 20"),
     ("profiles.discoverable", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS discoverable boolean NOT NULL DEFAULT true"),
     ("profiles.allow_friend_requests", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_friend_requests boolean NOT NULL DEFAULT true"),
+    ("profiles.allow_nudges", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS allow_nudges boolean NOT NULL DEFAULT true"),
     ("profiles.updated_at", "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())"),
     ("student_progress.login_streak", "ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS login_streak integer NOT NULL DEFAULT 0"),
     ("student_progress.best_login_streak", "ALTER TABLE student_progress ADD COLUMN IF NOT EXISTS best_login_streak integer NOT NULL DEFAULT 0"),
@@ -749,6 +752,8 @@ def init_db() -> None:
                 connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN discoverable BOOLEAN NOT NULL DEFAULT 1")
             if "allow_friend_requests" not in profile_columns:
                 connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN allow_friend_requests BOOLEAN NOT NULL DEFAULT 1")
+            if "allow_nudges" not in profile_columns:
+                connection.exec_driver_sql("ALTER TABLE profiles ADD COLUMN allow_nudges BOOLEAN NOT NULL DEFAULT 1")
         with active_engine.begin() as connection:
             _backfill_study_days(connection)
 
@@ -1183,11 +1188,37 @@ def _names(connection, student_ids) -> dict[str, str]:
     return dict(connection.execute(select(profiles.c.student_id, profiles.c.display_name).where(profiles.c.student_id.in_(ids))).all())
 
 
+# "At risk" notices and nudges a student receives, together, per local day. Milestones are
+# always delivered and don't count.
+REMINDERS_PER_RECIPIENT_PER_DAY = 5
+REMINDER_KINDS = ("streak_at_risk", "streak_nudge")
+
+
+def _local_day_start(today: date | None = None) -> datetime:
+    """The start (in UTC) of the requesting student's local day."""
+    day = today or local_today()
+    return datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc) + timedelta(minutes=client_tz_offset.get())
+
+
+def _reminders_received_today(connection, recipient_id: str) -> int:
+    """At-risk notices and nudges a student got since the start of the local day. Locks the
+    recipient's count until the transaction ends, so concurrent senders can't pass the cap."""
+    _advisory_lock(connection, f"streak_reminders:{recipient_id}")
+    return connection.execute(select(func.count()).select_from(social_notifications).where(
+        social_notifications.c.recipient_id == recipient_id, social_notifications.c.kind.in_(REMINDER_KINDS),
+        social_notifications.c.created_at >= _local_day_start(),
+    )).scalar_one()
+
+
 def _send_streak_notices(connection, notices: list[dict]) -> int:
-    """Insert each notice whose mark is new. notice: recipient, actor, kind, mark, message."""
+    """Insert each notice whose mark is new. notice: recipient, actor, kind, mark, message.
+    "At risk" notices stop once the recipient has had REMINDERS_PER_RECIPIENT_PER_DAY
+    reminders today; milestones always go out."""
     sent = 0
     now = datetime.now(timezone.utc)
     for notice in notices:
+        if notice["kind"] == "at_risk" and _reminders_received_today(connection, notice["recipient"]) >= REMINDERS_PER_RECIPIENT_PER_DAY:
+            continue
         if not _insert_ignore(connection, friend_streak_marks, [{
             "student_id": notice["recipient"], "friend_id": notice["actor"], "kind": notice["kind"],
             "mark": notice["mark"], "created_at": now,
@@ -1432,6 +1463,7 @@ def get_profile(student_id: str) -> dict | None:
         "daily_goal": row["daily_goal"] or 20,
         "discoverable": bool(row["discoverable"]),
         "allow_friend_requests": bool(row["allow_friend_requests"]),
+        "allow_nudges": bool(row["allow_nudges"]) if row.get("allow_nudges") is not None else True,
         "total_xp": row["total_xp"],
         "streak": live_streak(row["streak"], row["last_active_date"]),
         "best_streak": row["best_streak"],
@@ -1651,6 +1683,7 @@ def list_friends(student_id: str) -> list[dict]:
             select(
                 profiles.c.student_id, profiles.c.username, profiles.c.display_name, profiles.c.avatar_path,
                 student_progress.c.total_xp, student_progress.c.streak, student_progress.c.last_active_date,
+                profiles.c.allow_nudges.label("accepts_nudges"),
             ).join(student_progress, profiles.c.student_id == student_progress.c.student_id)
             .where(profiles.c.student_id.in_(friend_ids))
             .order_by(profiles.c.display_name.asc())
@@ -1671,7 +1704,8 @@ def list_friends(student_id: str) -> list[dict]:
             continue
         names[row["student_id"]] = row["display_name"]
         friends.append({
-            **dict(row), "streak": live_streak(row["streak"], row["last_active_date"], today),
+            **dict(row), "accepts_nudges": row["accepts_nudges"] is not False,
+            "streak": live_streak(row["streak"], row["last_active_date"], today),
             "active_today": row["last_active_date"] == today, "weekly_xp": weekly.get(row["student_id"], 0),
             **_streak_view(mine, days.get(row["student_id"], set()), today),
         })
@@ -1732,7 +1766,9 @@ def _shared_streak(first_days: set[date], second_days: set[date], today: date | 
 
 def nudge_friend(student_id: str, friend_id: str) -> dict:
     """Send a friend an in-app reminder to study today (no email or push). Only between
-    accepted, unblocked friends, and only while the friend hasn't studied today."""
+    accepted, unblocked friends, only while the friend hasn't studied today, only when the
+    friend lets friends nudge them ("nudges_off"), and only while the friend has had fewer than
+    REMINDERS_PER_RECIPIENT_PER_DAY reminders today ("reminders_full")."""
     init_db()
     today = local_today()
     with engine().begin() as connection:
@@ -1745,6 +1781,10 @@ def nudge_friend(student_id: str, friend_id: str) -> dict:
         name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == student_id)).scalar_one_or_none()
         if name is None:
             raise ValueError("profile_not_found")
+        if connection.execute(select(profiles.c.allow_nudges).where(profiles.c.student_id == friend_id)).scalar_one_or_none() is False:
+            raise ValueError("nudges_off")
+        if _reminders_received_today(connection, friend_id) >= REMINDERS_PER_RECIPIENT_PER_DAY:
+            raise ValueError("reminders_full")
         streak = _shared_streak(mine, theirs, today)
         message = (f"{name} reminded you to study today to keep your {streak}-day streak going."
                    if streak else f"{name} reminded you to study today. Study on the same days to start a streak.")
@@ -2295,15 +2335,18 @@ def mark_notifications_read(student_id: str) -> None:
         connection.execute(update(social_notifications).where(social_notifications.c.recipient_id == student_id).values(is_read=True))
 
 
-def update_social_privacy(student_id: str, discoverable: bool, allow_friend_requests: bool) -> dict:
+def update_social_privacy(student_id: str, discoverable: bool, allow_friend_requests: bool, allow_nudges: bool | None = None) -> dict:
+    """allow_nudges None leaves "Let friends nudge me" as it is (older clients don't send it)."""
     init_db()
+    values = {"discoverable": discoverable, "allow_friend_requests": allow_friend_requests}
+    if allow_nudges is not None:
+        values["allow_nudges"] = allow_nudges
     with engine().begin() as connection:
-        result = connection.execute(update(profiles).where(profiles.c.student_id == student_id).values(
-            discoverable=discoverable, allow_friend_requests=allow_friend_requests,
-        ))
+        result = connection.execute(update(profiles).where(profiles.c.student_id == student_id).values(**values))
         if not result.rowcount:
             raise ValueError("profile_not_found")
-    return {"discoverable": discoverable, "allow_friend_requests": allow_friend_requests}
+        stored = connection.execute(select(profiles.c.allow_nudges).where(profiles.c.student_id == student_id)).scalar_one()
+    return {"discoverable": discoverable, "allow_friend_requests": allow_friend_requests, "allow_nudges": bool(stored)}
 
 
 def block_person(student_id: str, blocked_id: str) -> None:

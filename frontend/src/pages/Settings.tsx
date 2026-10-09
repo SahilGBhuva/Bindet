@@ -210,15 +210,15 @@ export function Settings({ session, onSession }: SettingsProps) {
     }
   }
 
-  async function togglePrivacy(field: 'discoverable' | 'allow_friend_requests') {
+  async function togglePrivacy(field: 'discoverable' | 'allow_friend_requests' | 'allow_nudges') {
     if (!session || !profile) return
     const previous = profile
     const userId = session.user.id
-    const next = { ...profile, [field]: !profile[field] }
+    const next = { ...profile, [field]: !(profile[field] ?? true) }
     setLoaded({ userId, profile: next, ready: true })
     setPrivacyStatus('')
     try {
-      await saveSocialPrivacy(next.discoverable, next.allow_friend_requests, session.access_token)
+      await saveSocialPrivacy(next.discoverable, next.allow_friend_requests, session.access_token, next.allow_nudges ?? true)
     } catch {
       setLoaded((value) => value?.userId === userId ? { ...value, profile: previous } : value)
       setPrivacyStatus('Could not save that change. Try again.')
@@ -416,6 +416,13 @@ export function Settings({ session, onSession }: SettingsProps) {
                       <span className="settings__hint">Allow new people to add you.</span>
                     </span>
                     <input className="ui-checkbox" type="checkbox" checked={profile.allow_friend_requests} onChange={() => void togglePrivacy('allow_friend_requests')} />
+                  </label>
+                  <label className="settings__row settings__toggle">
+                    <span className="settings__row-text">
+                      <span className="settings__label">Let friends nudge me</span>
+                      <span className="settings__hint">Friends can send you a reminder to study when your streak is at risk.</span>
+                    </span>
+                    <input className="ui-checkbox" type="checkbox" checked={profile.allow_nudges ?? true} onChange={() => void togglePrivacy('allow_nudges')} />
                   </label>
                 </>
               ) : (

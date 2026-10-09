@@ -730,6 +730,7 @@ class StudyGroupJoin(BaseModel):
 class SocialPrivacyUpdate(BaseModel):
     discoverable: bool
     allow_friend_requests: bool
+    allow_nudges: bool | None = None  # "Let friends nudge me"; left as it is when not sent
 
 
 class SocialReportCreate(BaseModel):
@@ -2335,7 +2336,7 @@ def save_social_privacy(data: SocialPrivacyUpdate, authorization: Annotated[str 
     user = auth.authenticated_user(authorization)
     try:
         database.check_social_rate_limit(user["id"], "privacy", 20)
-        return database.update_social_privacy(user["id"], data.discoverable, data.allow_friend_requests)
+        return database.update_social_privacy(user["id"], data.discoverable, data.allow_friend_requests, data.allow_nudges)
     except ValueError as error:
         raise social_error(error) from error
 
@@ -2396,6 +2397,10 @@ def delete_friend(friend_id: str, authorization: Annotated[str | None, Header()]
 # Friend streak reminders: in-app notifications only (never email or push).
 NUDGES_PER_FRIEND_PER_DAY = 3
 NUDGES_PER_DAY = 20
+NUDGE_REFUSALS = {
+    "nudges_off": (403, "Your friend has turned off study reminders from friends."),
+    "reminders_full": (429, "Your friend has already had plenty of reminders today. Try again tomorrow."),
+}
 
 
 @app.post("/api/friend-streaks/{friend_id}/nudge")
@@ -2410,6 +2415,9 @@ def nudge_friend(friend_id: Annotated[str, PathParam(min_length=1, max_length=10
     except ValueError as error:
         if str(error) == "social_rate_limited":
             raise HTTPException(status_code=429, detail="You’ve sent enough reminders for today. Try again tomorrow.") from error
+        if str(error) in NUDGE_REFUSALS:
+            status, message = NUDGE_REFUSALS[str(error)]
+            raise HTTPException(status_code=status, detail={"code": str(error), "message": message}) from error
         raise social_error(error) from error
 
 

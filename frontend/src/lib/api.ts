@@ -83,6 +83,8 @@ export type Profile = {
   daily_goal: number
   discoverable: boolean
   allow_friend_requests: boolean
+  /* "Let friends nudge me"; missing from older servers, where it is on. */
+  allow_nudges?: boolean
   total_xp: number
   streak: number
   best_streak: number
@@ -114,6 +116,8 @@ export type Friend = LeaguePerson & {
   streak_status: FriendStreakStatus
   me_today: boolean
   friend_today: boolean
+  /* False when the friend has turned off reminders from friends: no Remind button. */
+  accepts_nudges?: boolean
   /* The last 14 days, oldest first, ending today. */
   streak_days: FriendStreakDay[]
 }
@@ -828,9 +832,10 @@ export function readSocialNotifications(accessToken: string) {
   return request<{ updated: boolean }>('/api/social/notifications/read', { method: 'POST' }, accessToken)
 }
 
-export function saveSocialPrivacy(discoverable: boolean, allowFriendRequests: boolean, accessToken: string) {
-  return request<{ discoverable: boolean; allow_friend_requests: boolean }>('/api/social/privacy', {
-    method: 'PUT', body: JSON.stringify({ discoverable, allow_friend_requests: allowFriendRequests }),
+/* allowNudges left out keeps "Let friends nudge me" as it is. */
+export function saveSocialPrivacy(discoverable: boolean, allowFriendRequests: boolean, accessToken: string, allowNudges?: boolean) {
+  return request<{ discoverable: boolean; allow_friend_requests: boolean; allow_nudges?: boolean }>('/api/social/privacy', {
+    method: 'PUT', body: JSON.stringify({ discoverable, allow_friend_requests: allowFriendRequests, allow_nudges: allowNudges }),
   }, accessToken)
 }
 

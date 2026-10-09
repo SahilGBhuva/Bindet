@@ -1,0 +1,22 @@
+-- "Let friends nudge me": profiles.allow_nudges, on by default.
+--
+-- HOW TO APPLY
+--   Paste this whole file into the Supabase SQL editor and run it. It is not
+--   applied by the backend. It is idempotent and non-destructive: no rows are
+--   deleted, no tables or columns are dropped, and re-running it is safe.
+--   The backend also adds the column at startup when it is missing
+--   (backend/database.py, POSTGRES_ADDED_COLUMNS), so this file only lets the
+--   schema be prepared before the deploy.
+--
+-- WHAT
+--   allow_nudges: when false, friends can't send this student a study reminder
+--   (POST /api/friend-streaks/{id}/nudge answers 403 "nudges_off") and the app hides
+--   the Remind button for them. Existing students keep receiving nudges (default true).
+--   The student changes it in Settings -> Privacy (PUT /api/social/privacy).
+--
+-- VERIFY AFTERWARDS
+--   select column_name, data_type, is_nullable, column_default from information_schema.columns
+--   where table_schema = 'public' and table_name = 'profiles' and column_name = 'allow_nudges';
+--   should show boolean, NO, true.
+
+alter table public.profiles add column if not exists allow_nudges boolean not null default true;

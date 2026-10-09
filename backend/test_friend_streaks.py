@@ -213,6 +213,62 @@ class FriendStreakTests(unittest.TestCase):
         self.assertEqual(self.nudge("sam-id")[0], 409)
         self.assertEqual(self.notices("eve-id"), [])
 
+    # --- reminder cap and "Let friends nudge me" ---------------------------------------
+
+    def befriend(self, *names):
+        for name in names:
+            database.onboard_account(f"{name}-id", name, name.title(), None)
+            request = database.send_friend_request(f"{name}-id", self.alex["friend_code"])
+            database.respond_to_friend_request(request["request_id"], "alex-id", True)
+            self.add_days(f"{name}-id", 1)
+        self.add_days("alex-id", 1)
+
+    def test_at_risk_notices_and_nudges_are_capped_per_recipient_per_day(self):
+        friends = ["ana", "ben", "cal", "dee", "eli", "fay", "gus"]
+        self.befriend(*friends)
+        # Three friends study first: three "at risk" notices.
+        for name in friends[:3]:
+            database.mark_study_day(f"{name}-id")
+        self.assertEqual(len(self.notices("alex-id", "streak_at_risk")), 3)
+        # Two nudges fill the day's five reminders; the next nudge is refused.
+        for name in friends[3:5]:
+            self.assertEqual(self.nudge("alex-id", user=f"{name}-id"), (200, {"nudged": True}))
+        status, detail = self.nudge("alex-id", user=f"{friends[5]}-id")
+        self.assertEqual((status, detail["code"]), (429, "reminders_full"))
+        # More friends studying first send no more "at risk" notices today.
+        database.mark_study_day(f"{friends[6]}-id")
+        database.list_friends("alex-id")
+        reminders = self.notices("alex-id", "streak_at_risk") + self.notices("alex-id", "streak_nudge")
+        self.assertEqual(len(reminders), database.REMINDERS_PER_RECIPIENT_PER_DAY)
+        # Milestones are always delivered.
+        self.add_days("alex-id", 0, 2, 3, 4, 5, 6)
+        self.add_days("sam-id", 0, 1, 2, 3, 4, 5, 6)
+        database.list_friends("alex-id")
+        self.assertEqual([item["message"] for item in self.notices("alex-id", "streak_milestone")], ["You and Sam hit a 7-day streak!"])
+        # Tomorrow starts a new count.
+        with at(datetime.now(timezone.utc) + timedelta(days=1)):
+            self.assertEqual(self.nudge("alex-id", user="fay-id"), (200, {"nudged": True}))
+
+    def test_students_can_turn_off_nudges_from_friends(self):
+        self.add_days("alex-id", 1)
+        self.add_days("sam-id", 1)
+        self.assertTrue(self.friend("alex-id")["accepts_nudges"])
+        self.assertTrue(database.get_profile("sam-id")["allow_nudges"])
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id"}):
+            saved = main.save_social_privacy(main.SocialPrivacyUpdate(discoverable=True, allow_friend_requests=True, allow_nudges=False), "Bearer t")
+            self.assertFalse(saved["allow_nudges"])
+            # An older client that doesn't send the setting leaves it as it is.
+            saved = main.save_social_privacy(main.SocialPrivacyUpdate(discoverable=False, allow_friend_requests=True), "Bearer t")
+            self.assertEqual((saved["discoverable"], saved["allow_nudges"]), (False, False))
+        self.assertFalse(database.get_profile("sam-id")["allow_nudges"])
+        self.assertFalse(self.friend("alex-id")["accepts_nudges"])
+        status, detail = self.nudge("sam-id")
+        self.assertEqual((status, detail["code"]), (403, "nudges_off"))
+        self.assertIn("turned off", detail["message"])
+        self.assertEqual(self.notices("sam-id", "streak_nudge"), [])
+        database.update_social_privacy("sam-id", True, True, True)
+        self.assertEqual(self.nudge("sam-id"), (200, {"nudged": True}))
+
 
 class StudyDayBackfillTests(unittest.TestCase):
     def setUp(self):
