@@ -1712,7 +1712,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           <div className="ui-empty">
             <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
             <h2 className="ui-empty__title" id="tools-first-run-title">Start with your first course</h2>
-            <p className="ui-empty__copy">Courses hold units, and each unit holds the notes your flashcards and quizzes are built from.</p>
+            <p className="ui-empty__copy">Name a class, then add your notes. bindet builds flashcards and quizzes from them.</p>
             <form className="tools__empty-form" onSubmit={addCourse}>
               <input
                 className="ui-input"
