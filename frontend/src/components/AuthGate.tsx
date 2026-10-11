@@ -94,7 +94,7 @@ function AuthAside({ mode }: { mode: 'login' | 'signup' | 'confirm' }) {
       <ol className="auth-aside__steps">
         <li><b>01</b>Add notes and materials</li>
         <li><b>02</b>Bind them into courses and units</li>
-        <li><b>03</b>Generate grounded study sets</li>
+        <li><b>03</b>Generate grounded study material</li>
         <li><b>04</b>Practice and track mastery</li>
       </ol>
     </aside>
