@@ -77,6 +77,8 @@ const ALLOWED = [
   '.tools__review-grade',
   '.tools__review-more',
   '.tools__review-dismiss',
+  // "Quiz yourself on …" after a unit's review only switches to the Quiz view.
+  '.tools__review-next',
   '.tools__review-all',
   '.tools__review-back',
 ].join(', ')

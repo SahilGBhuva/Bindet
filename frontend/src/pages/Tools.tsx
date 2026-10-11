@@ -2015,9 +2015,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       {!data.sandboxed && (!online || offlineCopy?.key === unitKey) ? (
         <p className="ui-alert ui-alert--info tools__offline" role="status">
           <span>
-            <strong>You’re offline — showing saved flashcards.</strong>{' '}
-            Units you’ve opened before can be studied here. Adding notes, quizzes and the tutor need a connection.
+            {online ? (
+              // Online, but bindet didn't answer: a saved copy is showing until a retry gets through.
+              <><strong>bindet can’t be reached right now — showing saved flashcards.</strong>{' '}Adding notes, quizzes and the tutor will work again once it’s back.</>
+            ) : (
+              <><strong>You’re offline — showing saved flashcards.</strong>{' '}Units you’ve opened before can be studied here. Adding notes, quizzes and the tutor need a connection.</>
+            )}
           </span>
+          {online ? <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Try again</button> : null}
         </p>
       ) : null}
 
@@ -2230,7 +2235,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                   <h2 className="tools__unit-title">{activeUnit}</h2>
                   {renamingUnit ? null : (
                     <button className="ui-button ui-button--ghost ui-button--sm tools__unit-rename" type="button" onClick={() => startRename(activeUnit)} aria-label={`Rename ${activeUnit}`}>
-                      Rename<span className="tools__unit-rename-more"> unit</span>
+                      Rename<span className="tools__unit-rename-more">unit</span>
                     </button>
                   )}
                 </div>
@@ -2486,7 +2491,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </div>
                   ) : null}
                   {cardMode === 'review' ? (
-                    <ReviewSession key={unitKey} scope={{ course: activeCourse, unit: activeUnit }} accessToken={accessToken} summary={reviewSummary} focusControls={focusControls} />
+                    <ReviewSession
+                      key={unitKey}
+                      scope={{ course: activeCourse, unit: activeUnit }}
+                      accessToken={accessToken}
+                      summary={reviewSummary}
+                      focusControls={focusControls}
+                      next={{ label: `Quiz yourself on ${activeUnit}`, onClick: () => setPanelFn('quiz') }}
+                    />
                   ) : null}
                   {cardMode === 'browse' && card ? <div className="tools__focus-bar">{focusControls}</div> : null}
                   {cardMode === 'review' ? null : card ? (

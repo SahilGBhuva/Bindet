@@ -29,6 +29,8 @@ type Props = {
   focusControls: ReactNode
   /* Course color for a card (cross-unit review marks each card with its course). */
   toneFor?: (course: string) => string | undefined
+  /* What to do once nothing is left to review (e.g. quiz the unit), so the session isn't a dead end. */
+  next?: { label: string; onClick: () => void }
 }
 
 const QUEUE_SIZE = 20
@@ -37,7 +39,7 @@ function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
-export function ReviewSession({ scope, accessToken, summary, focusControls, toneFor }: Props) {
+export function ReviewSession({ scope, accessToken, summary, focusControls, toneFor, next }: Props) {
   const data = useData()
   const crossUnit = !scope.course && !scope.unit
   const [queue, setQueue] = useState<ReviewCard[]>([])
@@ -203,6 +205,8 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
           <button className="ui-button ui-button--primary tools__review-more" type="button" onClick={again}>Review {plural(moreDue, 'more due card')}</button>
         ) : moreNew ? (
           <button className={`ui-button${done ? '' : ' ui-button--primary'} tools__review-more`} type="button" onClick={again}>Review {moreNew} more new {moreNew === 1 ? 'card' : 'cards'}</button>
+        ) : next ? (
+          <button className="ui-button ui-button--primary tools__review-next" type="button" onClick={next.onClick}>{next.label}</button>
         ) : null}
       </div>
     )
