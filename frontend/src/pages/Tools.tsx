@@ -62,6 +62,26 @@ function nameRejected(error: unknown) {
   return error instanceof ApiError && error.status === 422
 }
 
+/*
+ * Why a note couldn't be added, in words a student can act on. The server rejects a file it
+ * can't use with a 400 and a short reason (wrong type, empty, unreadable, no text); sending
+ * the same file again won't help, so those get no "Try again".
+ */
+function uploadFailure(error: unknown, source: NoteSource): { message: string; retry: boolean } {
+  if (nameRejected(error)) return { message: NAME_TOO_LONG_MESSAGE, retry: false }
+  const what = source === 'paste' ? 'Those notes' : source === 'photo' ? 'That photo' : 'That file'
+  if (error instanceof ApiError && error.status === 413) return { message: 'Notes must be 4 MB or smaller. Try a smaller file, or split it into parts.', retry: false }
+  if (error instanceof ApiError && error.status === 400) {
+    const reason = error.message
+    if (/^Use a /.test(reason)) return { message: 'bindet can’t read that kind of file. Use a PDF, Word document (DOCX), text file (TXT, Markdown, CSV or JSON), or a photo (PNG, JPG or WebP).', retry: false }
+    if (/empty/i.test(reason)) return { message: `${what} ${source === 'paste' ? 'are' : 'is'} empty. Pick a file with your notes in it.`, retry: false }
+    if (/no readable text/i.test(reason)) return { message: `bindet couldn’t find any text in ${what.toLowerCase()}. If it’s a scan, try Take a photo of your notes, or paste the text instead.`, retry: false }
+    if (/could not read/i.test(reason)) return { message: `bindet couldn’t open ${what.toLowerCase()}. It may be damaged or password-protected. Try saving or exporting it again.`, retry: false }
+    return { message: /[.!?]$/.test(reason) ? reason : `${reason}.`, retry: false }
+  }
+  return { message: error instanceof Error && error.message ? error.message : `${what} couldn’t be added. Try again.`, retry: true }
+}
+
 /* Where a note filed under `place` is now, after the renames made since. */
 function placeAfter(place: Place, renames: Rename[]): Place {
   let { course, unit } = place
@@ -1538,12 +1558,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       void makeFlashcards(deposit)
       return true
     } catch (error) {
-      // Too large (413) or a name too long (422): sending the same thing again won't help.
-      const tooLarge = error instanceof ApiError && error.status === 413
-      const message = nameRejected(error) ? NAME_TOO_LONG_MESSAGE
-        : tooLarge ? error.message || 'Notes must be 4 MB or smaller.'
-          : error instanceof Error ? error.message : 'Could not read that note.'
-      setUploadError({ source, message, retry: !tooLarge && !nameRejected(error) })
+      setUploadError({ source, ...uploadFailure(error, source) })
       return false
     } finally {
       setUploading('')
@@ -2267,7 +2282,15 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </button>
                     {photo && photo.course === activeCourse && photo.unit === activeUnit ? (
                       <div className={`tools__photo-job is-${photo.stage}`}>
-                        <img src={photo.preview} alt={`Photo: ${photo.name}`} width="56" height="56" decoding="async" />
+                        <img
+                          src={photo.preview}
+                          alt={`Photo: ${photo.name}`}
+                          width="56"
+                          height="56"
+                          decoding="async"
+                          // A file the browser can't show (the reason it failed) leaves an empty frame, not a broken image.
+                          onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+                        />
                         <div className="tools__photo-text">
                           <b>{photo.name}</b>
                           <span>
@@ -2275,12 +2298,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                               : photo.stage === 'uploading' ? 'Uploading…'
                                 : photo.stage === 'reading' ? 'Reading your notes…'
                                   : photo.stage === 'added' ? 'Added. Flashcards are on the way.'
-                                    : 'Not added yet.'}
+                                    : 'Not added.'}
                           </span>
                         </div>
                         {photo.stage === 'preparing' || photo.stage === 'uploading' || photo.stage === 'reading' ? <span className="ui-spinner" aria-hidden="true" /> : null}
-                        {photo.stage === 'added' ? (
-                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>Add another page</button>
+                        {photo.stage === 'added' || photo.stage === 'failed' ? (
+                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>
+                            {photo.stage === 'added' ? 'Add another page' : 'Take it again'}
+                          </button>
                         ) : null}
                       </div>
                     ) : null}

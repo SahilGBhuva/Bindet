@@ -36,7 +36,11 @@ function encode(canvas: HTMLCanvasElement, quality: number) {
 }
 
 export async function prepareNotePhoto(file: File, name: string): Promise<File> {
-  const image = await decode(file)
+  // The browser's own decode errors ("The source image cannot be decoded.") mean nothing to a
+  // student: a file that isn't a photo it can read gets a plain answer and a next step.
+  const image = await decode(file).catch(() => {
+    throw new Error('That photo couldn’t be opened. Try taking it again, or use Upload a file for a PDF or document.')
+  })
   const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width
   const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height
   if (!width || !height) throw new Error('That photo could not be opened. Try taking it again.')
