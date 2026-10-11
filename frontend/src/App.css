@@ -1,6 +1,6 @@
 /*
  * The signed-in frame, as in the sketches: a thin rail on the left (or its merged icon strip),
- * and in the main area a bar with tiny page icons on the left and "Merge ↔" on the right,
+ * and in the main area a bar with tiny page icons on the left and the sidebar pill and "↔" on the right,
  * above one focused sheet.
  */
 
@@ -70,7 +70,6 @@
   transition: background-color var(--duration-fast) var(--ease-standard), transform var(--duration-instant) var(--ease-standard);
 }
 .app-bar__merge:hover { background: var(--color-surface-hover); }
-.app-bar__merge[aria-pressed="true"] { background: var(--color-surface-active); }
 .app-bar__merge:active,
 .app-bar__expand:active,
 .app-bar__page:active { transform: translateY(1px); }

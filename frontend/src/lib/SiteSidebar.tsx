@@ -209,7 +209,7 @@ type SiteSidebarProps = {
   active: Screen
   session?: AuthSession | null
   onOpenCommand?: () => void
-  /* Collapse state is owned by the app shell (the handle, "Merge" and "↔" share it). Without it the rail stays open. */
+  /* Collapse state is owned by the app shell (the handle, the "Collapse sidebar" pill and "↔" share it). Without it the rail stays open. */
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
   /* Lets the shell's top bar show the Messages unread dot without a second request. */
