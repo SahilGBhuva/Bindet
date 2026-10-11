@@ -28,6 +28,7 @@ const LEGEND = [
   { verdict: 'seeded' as const, fill: 0 },
   { verdict: 'steady' as const, fill: 58 },
   { verdict: 'sharp' as const, fill: 86 },
+  { verdict: 'stuck' as const, fill: 38 },
 ]
 
 function Ring({ fill }: { fill?: number }) {
@@ -116,7 +117,7 @@ export function Together() {
       <div className="lp-together__copy">
         <h2 className="lp-serif lp-together__title" id="lp-together-title" data-reveal>Better with<br /><em>your people.</em></h2>
         <p className="lp-together__lead" data-reveal>
-          Keep a daily streak, climb a weekly league with friends, team up on 100 XP quests, and start a study group with an invite code.
+          Keep a daily streak, build a friend streak on days you both study, climb a weekly league, team up on friend quests, and start a study group with an invite code.
         </p>
       </div>
 

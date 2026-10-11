@@ -102,7 +102,7 @@ function HeroProduct({ onLocked }: { onLocked: (action: string) => void }) {
 const STEPS = [
   { id: 'capture', number: '01', title: 'Add notes and materials', copy: 'PDFs, photos of your notebook, typed notes. Scanned pages are read for you.' },
   { id: 'connected', number: '02', title: 'Bind them into courses and units', copy: 'Every note lives in a unit, every unit in a course. Nothing floats loose.' },
-  { id: 'practice', number: '03', title: 'Generate grounded study material', copy: 'Flashcards and questions are written from your own notes, not the open web.' },
+  { id: 'practice', number: '03', title: 'Generate grounded study material', copy: 'Flashcards, quizzes and study guides are written from your own notes, not the open web.' },
   { id: 'mastery', number: '04', title: 'Practice and track mastery', copy: 'Adaptive quizzes, instant feedback, and a clear view of what has stuck.' },
 ]
 
@@ -129,7 +129,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
         <nav className="lp-nav__links" aria-label="Page sections">
           <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
           <button type="button" onClick={() => scrollTo('product')}>The app</button>
-          <button type="button" onClick={() => scrollTo('tutor-story')}>Tutor</button>
+          <button type="button" onClick={() => scrollTo('tutor-story')}>Otto</button>
           <button type="button" onClick={() => scrollTo('together')}>Study groups</button>
         </nav>
         <div className="lp-nav__actions">
@@ -146,7 +146,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
               Everything you’re learning, <em>bound together.</em>
             </h1>
             <p className="lp-hero__lead">
-              Upload your notes and bindet organizes them into courses and units, writes flashcards and quizzes from your own material, keeps your assignments in order, and shows what you have actually mastered.
+              File your notes into courses and units, and bindet turns them into flashcards, quizzes and study guides, keeps your assignments in order, and shows what you have actually mastered.
             </p>
             <div className="lp-hero__cta">
               <button className="lp-btn lp-btn--primary lp-btn--lg" type="button" onClick={() => onSignUp()}>Create an account</button>
@@ -219,7 +219,7 @@ export function Landing({ onSignUp, onLogIn }: LandingProps) {
         <nav aria-label="Footer">
           <button type="button" onClick={() => scrollTo('workflow')}>How it works</button>
           <button type="button" onClick={() => scrollTo('product')}>The app</button>
-          <button type="button" onClick={() => scrollTo('tutor-story')}>Tutor</button>
+          <button type="button" onClick={() => scrollTo('tutor-story')}>Otto</button>
           <button type="button" onClick={onLogIn}>Log in</button>
           <button type="button" onClick={() => onSignUp()}>Create an account</button>
           <a href="/privacy">Privacy</a>

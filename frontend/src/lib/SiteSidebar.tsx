@@ -103,9 +103,9 @@ const SECTION_IDS: SectionId[] = ['highlighted', 'study', 'directory', 'importan
 const SECTION_TITLES: Record<SectionId, string> = {
   highlighted: 'Highlighted',
   study: 'Study',
-  directory: 'Directory',
+  directory: 'Courses',
   important: 'Important groups',
-  groups: 'My Groups',
+  groups: 'My groups',
   tasks: 'Tasks',
 }
 const DEFAULT_LAYOUT: Layout = { order: SECTION_IDS, hidden: [], collapsed: [] }
@@ -209,7 +209,7 @@ type SiteSidebarProps = {
   active: Screen
   session?: AuthSession | null
   onOpenCommand?: () => void
-  /* Collapse state is owned by the app shell (the handle, "Merge" and "↔" share it). Without it the rail stays open. */
+  /* Collapse state is owned by the app shell (the handle, the "Collapse sidebar" pill and "↔" share it). Without it the rail stays open. */
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
   /* Lets the shell's top bar show the Messages unread dot without a second request. */
@@ -524,7 +524,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         <ul className="bindit-rail__entries">
           {importantGroups.map((group) => <li key={group.id}>{groupLink(group, glyphs.triangle)}</li>)}
         </ul>
-      ) : failed.groups ? offline : empty(<a className="ui-link" href="#profile">Join a study group</a>),
+      ) : failed.groups ? offline : empty('Your main groups show here once you join one.'),
     },
     groups: {
       count: failed.groups && !groups?.length ? undefined : groups?.length,
@@ -673,9 +673,9 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             {editing ? <p className="bindit-rail__hint">Drag <span aria-hidden="true">⋮⋮</span> to move a section, or use the arrows. The eye hides one.</p> : null}
 
             <div className="bindit-rail__footer">
-              <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} aria-pressed={editing} onClick={() => setEditing((value) => !value)} aria-label={editing ? 'Done editing panel' : 'Edit panel'}>
+              <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} aria-pressed={editing} onClick={() => setEditing((value) => !value)} aria-label={editing ? 'Done editing the sidebar' : 'Edit the sidebar'}>
                 <span className="bindit-rail__lock-state">
-                  <small>{editing ? 'editing' : 'locked'}</small>
+                  <small>{editing ? 'Editing' : 'Locked'}</small>
                   <span className="bindit-rail__lock-box">
                     <svg viewBox="0 0 16 16" aria-hidden="true">
                       <rect x="4" y="7.5" width="8" height="5.5" rx="1" />
@@ -683,10 +683,10 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                     </svg>
                   </span>
                 </span>
-                <span className="bindit-rail__lock-action">{editing ? 'done' : 'edit panel'}</span>
+                <span className="bindit-rail__lock-action">{editing ? 'Done' : 'Edit sidebar'}</span>
               </button>
               {editing ? (
-                <button type="button" className="bindit-rail__mini" onClick={() => updateLayout(() => DEFAULT_LAYOUT)} aria-label="Reset panel layout" title="Reset layout">
+                <button type="button" className="bindit-rail__mini" onClick={() => updateLayout(() => DEFAULT_LAYOUT)} aria-label="Reset sidebar layout" title="Reset layout">
                   {svg(<><path d="M3.5 8a4.5 4.5 0 1 0 1.4-3.3" /><path d="M3.5 2.8v2.4h2.4" /></>)}
                 </button>
               ) : null}
@@ -734,7 +734,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             ))}
             {groups?.length ? (
               <div>
-                <span className="bindit-sheet__section">My Groups</span>
+                <span className="bindit-sheet__section">My groups</span>
                 <ul className="bindit-sheet__groups">
                   {nestGroups(groups).map(({ group, child }) => {
                     const current = active === 'stats' && groupParam === group.id

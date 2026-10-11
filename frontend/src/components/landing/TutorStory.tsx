@@ -23,11 +23,12 @@ export function TutorStory() {
         <p className="lp-eyebrow" data-reveal>Otto, the tutor</p>
         <h2 className="lp-serif lp-tutor__title" id="lp-tutor-title" data-reveal>A tutor that has read <em>your notes.</em></h2>
         <p className="lp-tutor__lead" data-reveal>
-          Ask anything. Answers start streaming in a moment, use your own notes first and say which file they came from.
+          Ask Otto anything. Answers start streaming in a moment, use your own notes first and say which file they came from.
           Drop in a photo of a problem when words are not enough.
         </p>
         <ul className="lp-tutor__facts" data-reveal>
           <li>Grounded in the course and unit you choose</li>
+          <li>Turns a unit’s notes into a study guide, cheat sheet or vocabulary list</li>
           <li>Guides you through homework instead of handing over answers</li>
           <li>Photos are sent only when you attach them and are never stored</li>
         </ul>

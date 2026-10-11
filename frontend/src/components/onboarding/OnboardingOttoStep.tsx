@@ -13,9 +13,8 @@ export function OnboardingOttoStep({ headingRef, onNext, onSkip, token, defaultN
       <h1 className="onb-title" id="onb-otto-title" ref={headingRef} tabIndex={-1}>Meet Otto, your tutor</h1>
       <p className="onb-lead">Otto is the bindet otter. Ask about anything you’re studying and Otto answers from your notes first. Make Otto yours, or skip this.</p>
       <OttoPreferencesCompact token={token} defaultName={defaultName} onSaved={() => onNext()} />
-      <div className="onb-actions">
-        <button type="button" className="ui-button ui-button--ghost onb-actions__skip" onClick={onSkip}>Skip</button>
-        <button type="button" className="ui-button onb-actions__next" onClick={onNext}>Continue without saving</button>
+      <div className="onb-actions onb-actions--single">
+        <button type="button" className="ui-button onb-actions__next" onClick={onSkip}>Skip for now</button>
       </div>
     </section>
   )

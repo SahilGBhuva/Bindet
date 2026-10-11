@@ -182,6 +182,8 @@
 .onb-ways b { display: block; font-size: var(--text-base); font-weight: var(--weight-semibold); }
 .onb-ways small { display: block; color: var(--color-text-secondary); font-size: var(--text-sm); }
 .onb-actions--done { border-top: 0; padding-top: 4px; }
+/* Meet Otto: the form saves on its own, so the only other way on is one quiet button. */
+.onb-actions--single { justify-content: flex-end; }
 .onb-done__where { margin-top: -4px; text-align: right; }
 
 @media (max-width: 640px) {
@@ -196,14 +198,14 @@
   /* The primary action sits on the right edge of a thumb-sized row; both buttons are full height. */
   .onb-actions { flex-wrap: wrap-reverse; }
   .onb-actions .ui-button { flex: 1; height: 48px; min-width: 0; }
-  /* Skip takes only what it needs, so a long label ("Continue without saving") fits its button. */
+  /* Skip takes only what it needs, so a long label fits its button. */
   .onb-actions .onb-actions__skip { flex: 0 1 auto; }
   .onb-actions .onb-actions__next { flex: 1 1 auto; white-space: normal; line-height: 1.2; }
   .onb-actions--done .ui-button { flex-basis: 100%; }
   .onb-done__where { text-align: left; }
   /* Long steps (the class chips, Meet Otto): Skip and Continue stay pinned to the bottom of
      the screen while the student scrolls, instead of waiting below the last chip. */
-  .onb-actions:not(.onb-actions--done) {
+  .onb-actions:not(.onb-actions--done, .onb-actions--single) {
     position: sticky;
     bottom: 0;
     z-index: 1;
@@ -212,7 +214,8 @@
     flex-wrap: nowrap;
     background: var(--color-surface);
   }
-  .onb-actions:not(.onb-actions--done) .onb-actions__next { padding-inline: 14px; }
+  .onb-actions:not(.onb-actions--done, .onb-actions--single) .onb-actions__next { padding-inline: 14px; }
+  .onb-actions--single .ui-button { flex-basis: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

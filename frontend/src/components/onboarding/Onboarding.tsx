@@ -112,7 +112,7 @@ function NameStep({ session, headingRef, onNext, onSkip, onSaved }: OnboardingSt
 
   return (
     <form className="onb-step" aria-labelledby="onb-name-title" onSubmit={submit} noValidate>
-      <p className="onb-eyebrow">Welcome to bindet</p>
+      <p className="onb-eyebrow">Welcome</p>
       <h1 className="onb-title" id="onb-name-title" ref={headingRef} tabIndex={-1}>What should we call you?</h1>
       <p className="onb-lead">Your name shows on your profile and to friends you add. You can change it any time.</p>
       <label className="onb-field">
@@ -294,8 +294,8 @@ function DoneStep({ headingRef, firstName, classes, returnTo, onOpen }: { headin
       <h1 className="onb-title" id="onb-done-title" ref={headingRef} tabIndex={-1}>You’re all set{firstName ? `, ${firstName}` : ''}</h1>
       <p className="onb-lead">
         {classes.length
-          ? <>Your binder has {listNames(classes)}. Add notes and bindet turns them into flashcards and quizzes.</>
-          : <>Next, add some notes. bindet turns them into flashcards and quizzes for you.</>}
+          ? <>Your binder has {listNames(classes)}. Add notes and bindet turns them into flashcards, quizzes and study guides.</>
+          : <>Next, add some notes. bindet turns them into flashcards, quizzes and study guides for you.</>}
       </p>
       <ul className="onb-ways" aria-label="Ways to add notes">
         <li className="ui-tone--blue"><span className="ui-icon"><CameraIcon /></span><span><b>Snap a photo</b><small>Handwritten or printed pages</small></span></li>

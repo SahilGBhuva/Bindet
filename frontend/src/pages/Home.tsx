@@ -18,10 +18,10 @@ import './Home.css'
  *  - a wide line landscape (date top-left, "Change themes" on the ground line, the otter on the
  *    hill line, a hatched field on the right) with "Hello, <name>" and the clock across its bottom;
  *  - the notification box at the top right;
- *  - "Project navigation": two cube-stack filters, then a folded accordion of project cards;
+ *  - "Courses and groups": two cube-stack filters, then a folded accordion of cards;
  *  - "Recent and upcoming" deadlines;
  *  - at the right, behind a hairline, the busiest group's team and statistics.
- * The page-icon row and the Merge pill above it belong to the app shell, not to Home.
+ * The page-icon row and the sidebar pill above it belong to the app shell, not to Home.
  */
 
 const DAY = 86_400_000
@@ -405,7 +405,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
         type: 'group',
         name: group.name,
         href: `#stats?group=${encodeURIComponent(group.id)}`,
-        caption: group.description.trim() || `group project, ${group.members.length} ${group.members.length === 1 ? 'member' : 'members'}`,
+        caption: group.description.trim() || `study group, ${group.members.length} ${group.members.length === 1 ? 'member' : 'members'}`,
         due: next ? shortDay(dueAt(next)) : 'No due date',
         done: related.filter((task) => task.status === 'done').length,
         total: related.length,
@@ -462,7 +462,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
     { label: 'Progress', value: groupTasks.length ? `${Math.round((groupDone / groupTasks.length) * 100)}%` : '—' },
     { label: 'Assigned workload', value: groupOpenTasks.length ? `${groupOpenTasks.length} open, ${assignedPeople.size} ${assignedPeople.size === 1 ? 'person' : 'people'}` : 'none open' },
     { label: 'Roles', value: `${leads} ${leads === 1 ? 'lead' : 'leads'}, ${group.members.length - leads} ${group.members.length - leads === 1 ? 'member' : 'members'}` },
-    { label: 'Major milestones', value: milestones.size ? String(milestones.size) : '—' },
+    { label: 'Milestones', value: milestones.size ? String(milestones.size) : '—' },
   ] : []
 
   const teamMembers = group?.members.slice(0, 6) ?? []
@@ -493,7 +493,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
     return mine.find((task) => task.status === 'in_progress') ?? mine[0]
   }
 
-  const filterLabel = filter === 'none' ? 'none' : filter === 'courses' ? 'Courses' : 'Groups'
+  const filterLabel = filter === 'none' ? 'Showing all' : filter === 'courses' ? 'Courses only' : 'Groups only'
 
   return (
     <div className="ui-page home">
@@ -525,7 +525,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
 
           <section className="home-notice" aria-labelledby="home-notice-title">
             <span className="home-notice__corner" aria-hidden="true"><Icon name="bell" /></span>
-            <h2 className="home-notice__title" id="home-notice-title"><a href="#profile">View notifications:</a></h2>
+            <h2 className="home-notice__title" id="home-notice-title"><a href="#profile">Notifications</a></h2>
             {reviewDue ? (
               <a className="home-notice__row home-notice__review" href={REVIEW_ALL_HASH} data-review-link="">
                 <span className="home-badge home-badge--review">Review</span>
@@ -600,11 +600,11 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
           <div className="home__main">
             <section className="home-projects" aria-labelledby="home-projects-title">
               <h2 className="home-heading" id="home-projects-title">
-                Project navigation <span className="home-heading__chevrons" aria-hidden="true">⟩ ⟩</span>
+                Courses and groups
               </h2>
 
               <div className="home-projects__box">
-                <div className="home-cubes" role="group" aria-label="Filter projects">
+                <div className="home-cubes" role="group" aria-label="Show courses or groups">
                   {/* home-filter__select: the landing demo lets controls with this class work. */}
                   <button type="button" className="home-cubes__button home-filter__select" aria-pressed={filter === 'courses'} aria-label="Show courses only" title="Courses" onClick={() => toggleFilter('courses')}>
                     <CubeStack tall />
@@ -616,18 +616,18 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
 
                 <div className="home-carousel">
                   <div className="home-carousel__top">
-                    <span className="home-carousel__filters" aria-live="polite">Filters: {filterLabel}</span>
-                    <span className="home-carousel__count">{projectsLoading ? '' : <>{shown.length}<span className="sr-only"> projects</span></>}</span>
+                    <span className="home-carousel__filters" aria-live="polite">{filterLabel}</span>
+                    <span className="home-carousel__count">{projectsLoading ? '' : <>{shown.length}<span className="sr-only"> shown</span></>}</span>
                   </div>
                   <div className="home-carousel__rule-row">
                     <span className="home-rule" aria-hidden="true">
-                      <span className="home-rule__track" style={{ '--p': markerAt } as CSSProperties}><span className="home-rule__m">M</span></span>
+                      <span className="home-rule__track" style={{ '--p': markerAt } as CSSProperties}><span className="home-rule__m" /></span>
                     </span>
                     <a className="home-carousel__all ui-link" href={filter === 'groups' ? '#profile' : '#tools'}>See all <span aria-hidden="true">⟩</span></a>
                   </div>
 
                   {projectsLoading ? (
-                    <div className="home-fold is-loading" aria-busy="true" aria-label="Loading projects">
+                    <div className="home-fold is-loading" aria-busy="true" aria-label="Loading courses and groups">
                       <span className="ui-skeleton home-fold__skeleton" />
                       <span className="ui-skeleton home-fold__skeleton is-slices" />
                     </div>
@@ -636,7 +636,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                       <ul
                         className={`home-fold${compact ? ' is-compact' : ''}`}
                         style={{ '--count': visible } as CSSProperties}
-                        aria-label="Projects. Use the left and right arrow keys to open the next card."
+                        aria-label="Courses and groups. Use the left and right arrow keys to open the next card."
                         onKeyDown={onAccordionKey}
                       >
                         {shown.map((project, index) => {
@@ -691,7 +691,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                     </>
                   ) : (
                     <div className="home-fold__empty">
-                      <p>{filter === 'groups' ? 'No group projects yet.' : 'No projects yet.'}</p>
+                      <p>{filter === 'groups' ? 'No groups yet.' : filter === 'courses' ? 'No courses yet.' : 'No courses or groups yet.'}</p>
                       <a className="ui-link" href={filter === 'groups' ? '#profile' : '#tools'}>{filter === 'groups' ? 'Find a group' : 'Create a course'}</a>
                     </div>
                   )}
@@ -780,12 +780,12 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                 <div className="home-team__head">
                   <h2 className="home-team__name" id="home-team-title">{group.name}</h2>
                   <a className="home-team__icon" href="#profile" aria-label={`Group settings for ${group.name}`} title="Group settings"><Icon name="gear" /></a>
-                  <a className="home-team__icon" href={statsHref} aria-label={`Project statistics for ${group.name}`} title="Project statistics"><Icon name="chart" /></a>
+                  <a className="home-team__icon" href={statsHref} aria-label={`Progress for ${group.name}`} title="Group progress"><Icon name="chart" /></a>
                 </div>
 
                 <table className="home-members">
                   <thead>
-                    <tr><th scope="col">Team member</th><th scope="col">Currently on</th></tr>
+                    <tr><th scope="col">Member</th><th scope="col">Working on</th></tr>
                   </thead>
                   <tbody>
                     {teamMembers.map((member, index) => {
@@ -801,7 +801,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                   </tbody>
                 </table>
 
-                <h3 className="home-team__label" id="home-team-stats">Team statistics:</h3>
+                <h3 className="home-team__label" id="home-team-stats">Group stats</h3>
                 <ul className="home-stats" aria-labelledby="home-team-stats">
                   {teamStats.map((item) => (
                     <li key={item.label}>
@@ -819,7 +819,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
             ) : (
               <div className="home-team__empty">
                 <h2 className="home-team__name" id="home-team-title">No group yet</h2>
-                <p>Members, what each is on, and team statistics show here.</p>
+                <p>Join or start a study group to see who’s working on what.</p>
                 <a className="ui-link" href="#profile">Find or start a group</a>
               </div>
             )}

@@ -68,7 +68,7 @@
   text-underline-offset: 4px;
 }
 
-/* Latest task notification: under the shell's Merge pill, icon on its top-left corner. */
+/* Latest task notification: under the shell's sidebar pill, icon on its top-left corner. */
 .tasks-notice {
   position: relative;
   grid-area: notice;
