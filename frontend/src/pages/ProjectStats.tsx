@@ -160,8 +160,12 @@ export function ProjectStats({ session }: { session: AuthSession | null }) {
   }
 
   const header = (
-    <header className="pst-head">
-      <h1 className="pst-title">Project statistics</h1>
+    <header className="ui-page-header pst-head">
+      <div>
+        <span className="ui-eyebrow">Study groups</span>
+        <h1 className="ui-page-title">Project statistics</h1>
+        <p className="ui-page-subtitle">How your group is doing on its shared tasks.</p>
+      </div>
       {groups && groups.length > 0 ? (
         <label className="pst-group">
           <span>Group</span>
