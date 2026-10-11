@@ -190,9 +190,8 @@
 .home__main { min-width: 0; padding-right: 28px; }
 
 .home-heading { margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: var(--weight-medium); text-decoration: underline; text-decoration-color: var(--ink-soft); text-decoration-thickness: 1px; text-underline-offset: 5px; }
-.home-heading__chevrons { margin-left: 6px; color: var(--color-text-tertiary); font-weight: var(--weight-regular); letter-spacing: .2em; text-decoration: none; display: inline-block; }
 
-/* Project navigation: cube filters | hairline | carousel */
+/* Courses and groups: cube filters | hairline | carousel */
 
 .home-projects__box {
   display: grid;
@@ -241,7 +240,7 @@
 .home-carousel__rule-row { display: flex; align-items: flex-end; gap: 12px; margin-top: 2px; }
 .home-carousel__all { flex: none; font-size: var(--text-sm); color: var(--color-text); }
 
-/* The thin rule with an "M" marker that tracks the open card. */
+/* The thin rule with a dot that tracks the open card. */
 .home-rule { position: relative; flex: 1; height: 20px; }
 .home-rule::before { content: ""; position: absolute; right: 2px; bottom: 5px; left: 0; border-top: 1px solid var(--ink-soft); }
 .home-rule::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 6px; height: 6px; border-top: 1px solid var(--ink-soft); border-right: 1px solid var(--ink-soft); transform: rotate(45deg); }
@@ -254,7 +253,7 @@
   transform: translateX(calc(var(--p, 0) * 100%));
   transition: transform var(--fold-time) var(--ease-out);
 }
-.home-rule__m { position: absolute; bottom: 0; left: 0; color: var(--color-text-secondary); font-size: 11px; font-weight: var(--weight-semibold); line-height: 1; }
+.home-rule__m { position: absolute; bottom: -4px; left: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--color-brand); }
 
 /* ---------- The folded accordion of project cards ---------- */
 
@@ -586,12 +585,17 @@
 .home-next__text span { overflow: hidden; color: var(--color-text-secondary); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
 .home-next__arrow { margin-left: auto; color: var(--tone-text); font-size: 20px; line-height: 1; }
 
+/* Five stats in two even rows: three across, then two wider, so no cell is left empty. */
 @container home (max-width: 1100px) {
-  .home-today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .home-today { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .home-today__card { grid-column: span 2; }
+  .home-today__card:nth-child(n+4) { grid-column: span 3; }
 }
 
 @container home (max-width: 780px) {
   .home-today { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+  .home-today__card,
+  .home-today__card:nth-child(n+4) { grid-column: auto; }
   .home-today__value { font-size: 22px; }
   .home-today__card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 }
@@ -686,8 +690,7 @@
   .home-notice__title a { display: inline-block; padding-block: 12px; margin-block: -12px; }
   .home-row { min-height: 44px; }
   /* No text under 12px on a phone. */
-  .home-badge,
-  .home-rule__m { font-size: var(--text-xs); }
+  .home-badge { font-size: var(--text-xs); }
 }
 
 @container home (max-width: 420px) {
