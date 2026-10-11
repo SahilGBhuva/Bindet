@@ -1048,7 +1048,10 @@ def _overview(total: int, done: int, overdue: int, no_response: int, pace: str, 
         lines.append("Nothing has been completed yet, so a finish date can't be projected yet.")
     elif pace in ("on_track", "done"):
         lines.append("The group is on pace.")
-    lines.append(f"{active} of {members} members were active this week.")
+    if members == 1:
+        lines.append("You were active this week." if active else "No one was active this week.")
+    else:
+        lines.append(f"{active} of {members} members were active this week.")
     return lines
 
 
