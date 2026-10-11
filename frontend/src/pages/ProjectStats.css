@@ -480,6 +480,7 @@
 }
 
 .pst-fan { width: 100%; max-width: 620px; margin: -4px 0 0; }
+.pst-fan__empty { max-width: 420px; margin: var(--space-4) auto 0; text-align: center; }
 
 .pst-fan__svg { display: block; width: 100%; height: auto; overflow: visible; }
 

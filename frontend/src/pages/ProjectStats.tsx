@@ -27,7 +27,7 @@ type Member = GroupAnalytics['members'][number]
 const PACE_LABEL: Record<Pace, string> = {
   on_track: 'On track',
   at_risk: 'At risk',
-  behind: 'Unacceptable',
+  behind: 'Behind',
   stalled: 'Stalled',
   done: 'Done',
   not_started: 'Not started',
@@ -249,7 +249,7 @@ function StatsBody({ data, groupId, token, myId, profile, onChanged }: {
       </div>
 
       <p className="pst-line">
-        Projected finish date: {data.projected_finish ? `${longDate(data.projected_finish)}.` : '—'}
+        Expected finish date: {data.projected_finish ? `${longDate(data.projected_finish)}.` : '—'}
       </p>
 
       <PaceLine data={data} groupId={groupId} token={token} isOwner={isOwner} onChanged={onChanged} />
@@ -416,8 +416,8 @@ function ProjectProgress({ data, groupId, token, isOwner, onChanged }: { data: G
             <tr>
               <td className="pst-ptable__tick" />
               <th scope="col">Section</th>
-              <th scope="col" className="pst-c">Percentage finished</th>
-              <th scope="col" className="pst-c">Check status</th>
+              <th scope="col" className="pst-c">Finished</th>
+              <th scope="col" className="pst-c">Tasks done</th>
               {isOwner ? <td className="pst-ptable__act" /> : null}
             </tr>
           </thead>
@@ -546,9 +546,9 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
         <span className={`pst-chip pst-chip--static pst-pill ${PACE_TONE[data.pace] ?? ''}`}>{PACE_LABEL[data.pace] ?? 'Not started'}</span>
         {isOwner ? (
           <span className="pst-pace__actions">
-            <button type="button" className="pst-link" aria-expanded={mode === 'notify'} onClick={() => open('notify')}>Notify all members</button>,{' '}
-            <button type="button" className="pst-link" aria-expanded={mode === 'urgent'} onClick={planUrgent}>set urgent precedence</button>,{' '}
-            <button type="button" className="pst-link" aria-expanded={mode === 'workrate'} onClick={() => open('workrate')}>increase workrate</button>
+            <button type="button" className="pst-link" aria-expanded={mode === 'notify'} onClick={() => open('notify')}>Message the group</button>,{' '}
+            <button type="button" className="pst-link" aria-expanded={mode === 'urgent'} onClick={planUrgent}>mark due-soon tasks urgent</button>,{' '}
+            <button type="button" className="pst-link" aria-expanded={mode === 'workrate'} onClick={() => open('workrate')}>ask everyone to speed up</button>
           </span>
         ) : null}
       </p>
@@ -651,11 +651,11 @@ function ReportsArea({ data }: { data: GroupAnalytics }) {
       </div>
 
       <aside className="pst-bottom__right" aria-labelledby={overviewId}>
-        <h2 id={overviewId} className="pst-h">AI overview</h2>
+        <h2 id={overviewId} className="pst-h">Summary</h2>
         {data.overview.length ? (
           <ul className="pst-overview">{data.overview.map((line, index) => <li key={index}>{line}</li>)}</ul>
         ) : <p className="pst-muted">Nothing to summarize yet.</p>}
-        <p className="pst-note">(summary from task data)</p>
+        <p className="pst-note">Worked out from your group’s tasks.</p>
       </aside>
 
       <div id={reportsId} className="pst-reports" hidden={!reportsOpen}>
@@ -696,6 +696,7 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
   const figure = useRef<HTMLElement>(null)
   const titleId = useId()
   const total = wedges.reduce((sum, wedge) => sum + wedge.value, 0)
+  const hasData = total > 0
 
   useEffect(() => {
     const node = figure.current
@@ -706,7 +707,7 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
     })
     observer.observe(node)
     return () => observer.disconnect()
-  }, [])
+  }, [hasData])
 
   const laid = useMemo(() => {
     const shares = wedges.map((wedge) => (total > 0 ? wedge.value / total : 0))
@@ -723,6 +724,10 @@ function FanChart({ wedges, title, unit }: { wedges: Wedge[]; title: string; uni
   }, [wedges, total, font])
 
   const active = laid.find((wedge) => wedge.key === activeKey) ?? null
+
+  if (total === 0) {
+    return <p className="pst-muted pst-fan__empty">No group tasks yet. Add some under Tasks → Group Tasks and this chart shows how the work is split.</p>
+  }
 
   return (
     <figure className="pst-fan" aria-labelledby={titleId} ref={figure}>
