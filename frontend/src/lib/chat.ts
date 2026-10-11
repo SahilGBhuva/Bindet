@@ -46,7 +46,7 @@ export type ChatUnread = {
 
 type SupabaseConfig = { supabase_url: string; supabase_anon_key: string }
 
-export const CHAT_LOAD_ERROR = 'Couldn’t load messages. Try again.'
+export const CHAT_LOAD_ERROR = 'Couldn’t load messages.'
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 

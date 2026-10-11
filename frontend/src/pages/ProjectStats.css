@@ -11,21 +11,7 @@
 
 /* Header row: "Project statistics   Group [name]" */
 
-.pst-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2) clamp(40px, 9vw, 120px);
-  margin-bottom: var(--space-6);
-}
-
-.pst-title {
-  margin: 0;
-  color: var(--pst-ink);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-tight);
-}
+.pst-head { flex-wrap: wrap; }
 
 .pst-group {
   display: inline-flex;
@@ -494,6 +480,7 @@
 }
 
 .pst-fan { width: 100%; max-width: 620px; margin: -4px 0 0; }
+.pst-fan__empty { max-width: 420px; margin: var(--space-4) auto 0; text-align: center; }
 
 .pst-fan__svg { display: block; width: 100%; height: auto; overflow: visible; }
 
@@ -588,7 +575,6 @@
 /* Phones and narrow windows: same order, stacked */
 
 @media (max-width: 860px) {
-  .pst-head { gap: var(--space-2) var(--space-6); margin-bottom: var(--space-5); }
 
   .pst-top { grid-template-columns: minmax(0, 1fr); }
   .pst-members,

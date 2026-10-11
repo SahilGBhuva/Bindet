@@ -755,7 +755,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
               ))}
             </ul>
           ) : null}
-          {roomUnavailable ? <p className="chat__composer-note" id="chat-composer-note" role="status">This chat didn’t load, so messages can’t be sent yet. Use Try again above.</p> : null}
+          {roomUnavailable ? <p className="chat__composer-note" id="chat-composer-note" role="status">Messages can’t be sent until this chat loads.</p> : null}
           <div className="chat__input">
             <textarea
               ref={textarea}

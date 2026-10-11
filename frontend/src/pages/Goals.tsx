@@ -14,7 +14,7 @@ import './Goals.css'
 /*
  * Tasks, drawn after the owner's sketch: a small "Tasks" title, three tiny tools
  * (settings, list/board, show completed), today's date, the My Tasks / Group Tasks /
- * Calendar tabs, two compact boxes (To-Do and Assigned) on the left and the selected
+ * Calendar tabs, two compact boxes (To do and Assigned) on the left and the selected
  * task's details card on the right. Everything is server data: the server checks
  * ownership and group permissions (can_edit / can_manage / can_delete) and the UI follows them.
  * Cached lists render first and refresh in the background; edits apply optimistically
@@ -35,7 +35,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
 const STATUSES: { id: TaskStatus; label: string }[] = [
   { id: 'todo', label: 'To do' },
   { id: 'in_progress', label: 'In progress' },
-  { id: 'review', label: 'Review' },
+  { id: 'review', label: 'Final check' },
   { id: 'done', label: 'Done' },
 ]
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
@@ -622,7 +622,12 @@ export function Goals({ session }: { session: AuthSession | null }) {
           <>
             {drawerOpen ? <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} /> : null}
             <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} role={drawerOpen ? 'dialog' : undefined} aria-modal={drawerOpen || undefined} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
-              {panel ?? <p className="tasks-panel__empty">{tasks.length ? 'Pick a task to see its details.' : 'No tasks yet. Use ⊞ to add one.'}</p>}
+              {panel ?? (
+                <div className="tasks-panel__empty">
+                  <p>{tasks.length ? 'Pick a task to see its details.' : 'No tasks yet. Add homework, a test date or a group project step.'}</p>
+                  {tasks.length ? null : <button type="button" className="ui-button ui-button--sm ui-button--primary" onClick={() => compose({ group_id: defaultGroup })}>Add a task</button>}
+                </div>
+              )}
             </aside>
           </>
         ) : null}
@@ -683,13 +688,13 @@ function TaskBox({ kind, id, tasks, card, onCompose, composeLabel = 'New task' }
       <header className="tasks-box__head">
         <h2 id={id}>
           <Icon name={kind === 'todo' ? 'triangle' : 'rect'} />
-          {kind === 'todo' ? 'To-Do' : 'Assigned'}
+          {kind === 'todo' ? 'To do' : 'Assigned'}
           {kind === 'todo' ? <span className="tasks-box__count" aria-label={`${open} open`}>{open}</span> : null}
         </h2>
         {onCompose ? <button type="button" className="tasks-icon-button" onClick={onCompose} aria-label={composeLabel} title={composeLabel}><Icon name="edit" /></button> : null}
       </header>
       {tasks.length ? <ul className="task-cards">{tasks.map((task) => <TaskCard key={task.id} task={task} card={card} />)}</ul>
-        : <p className="tasks-box__empty">{kind === 'assigned' ? 'None! Good work.' : 'Nothing to do.'}</p>}
+        : <p className="tasks-box__empty">{kind === 'assigned' ? 'Nothing assigned to you.' : 'Nothing to do.'}</p>}
     </section>
   )
 }

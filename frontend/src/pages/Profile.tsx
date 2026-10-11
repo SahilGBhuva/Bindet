@@ -745,7 +745,7 @@ export function Profile({ session, onError }: ProfileProps) {
                       key={friend.student_id}
                       name={friend.display_name}
                       label={friend.student_id === studentId ? 'You' : friend.display_name}
-                      meta={friend.active_today ? 'Active today' : `${friend.streak} day study streak`}
+                      meta={friend.active_today ? 'Active today' : friend.streak > 0 ? `${friend.streak}-day study streak` : 'No study streak yet'}
                       rank={index + 1}
                       me={friend.student_id === studentId}
                     >

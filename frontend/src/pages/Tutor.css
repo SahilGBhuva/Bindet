@@ -133,7 +133,7 @@
 /* The thread fades out under the head instead of being cut by a hard edge. */
 .tutor__head { position: relative; z-index: 2; }
 .tutor__head::after { content: ''; position: absolute; top: 100%; right: 0; left: 0; height: 16px; background: linear-gradient(to bottom, var(--color-bg), transparent); pointer-events: none; }
-.tutor__list-toggle { display: none; }
+.tutor__list-toggle.tutor__head-icon { display: none; }
 .tutor__list-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .tutor__title { flex: 1 1 160px; min-width: 0; }
 .tutor__title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
@@ -647,7 +647,7 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .tutor__group-title,
   .tutor__list-item small { color: var(--color-text-secondary); }
   .tutor__scrim { position: fixed; inset: 0; z-index: 39; display: block; border: 0; background: rgba(14, 13, 10, .3); }
-  .tutor__list-toggle { display: grid; }
+  .tutor__list-toggle.tutor__head-icon { display: grid; }
   .tutor__head { padding-left: 10px; }
 }
 
