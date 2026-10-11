@@ -23,6 +23,7 @@ import { PracticeTest } from '../components/practice/PracticeTest'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
 import type { StudyGuide } from '../lib/studyGuides'
 import { prepareNotePhoto } from '../lib/notePhoto'
+import { FIRST_UNIT } from '../lib/onboarding'
 import {
   FOCUS_SIZES,
   INSTRUCTIONS_MAX,
@@ -59,6 +60,26 @@ const SCOPES_REFRESH_MS = 30_000
 /* A name the server rejected for its length (422), or the request otherwise invalid. */
 function nameRejected(error: unknown) {
   return error instanceof ApiError && error.status === 422
+}
+
+/*
+ * Why a note couldn't be added, in words a student can act on. The server rejects a file it
+ * can't use with a 400 and a short reason (wrong type, empty, unreadable, no text); sending
+ * the same file again won't help, so those get no "Try again".
+ */
+function uploadFailure(error: unknown, source: NoteSource): { message: string; retry: boolean } {
+  if (nameRejected(error)) return { message: NAME_TOO_LONG_MESSAGE, retry: false }
+  const what = source === 'paste' ? 'Those notes' : source === 'photo' ? 'That photo' : 'That file'
+  if (error instanceof ApiError && error.status === 413) return { message: 'Notes must be 4 MB or smaller. Try a smaller file, or split it into parts.', retry: false }
+  if (error instanceof ApiError && error.status === 400) {
+    const reason = error.message
+    if (/^Use a /.test(reason)) return { message: 'bindet can’t read that kind of file. Use a PDF, Word document (DOCX), text file (TXT, Markdown, CSV or JSON), or a photo (PNG, JPG or WebP).', retry: false }
+    if (/empty/i.test(reason)) return { message: `${what} ${source === 'paste' ? 'are' : 'is'} empty. Pick a file with your notes in it.`, retry: false }
+    if (/no readable text/i.test(reason)) return { message: `bindet couldn’t find any text in ${what.toLowerCase()}. If it’s a scan, try Take a photo of your notes, or paste the text instead.`, retry: false }
+    if (/could not read/i.test(reason)) return { message: `bindet couldn’t open ${what.toLowerCase()}. It may be damaged or password-protected. Try saving or exporting it again.`, retry: false }
+    return { message: /[.!?]$/.test(reason) ? reason : `${reason}.`, retry: false }
+  }
+  return { message: error instanceof Error && error.message ? error.message : `${what} couldn’t be added. Try again.`, retry: true }
 }
 
 /* Where a note filed under `place` is now, after the renames made since. */
@@ -952,11 +973,29 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       if (current.courses.some((course) => course.name === name)) {
         return { ...current, activeCourse: name, activeUnit: unitsFor(current.courses, name)[0] ?? '' }
       }
-      const courses: Course[] = [...current.courses, { name, units: [], tone: pickCourseTone(current.courses) }]
-      return { ...current, courses, activeCourse: name, activeUnit: '' }
+      // A new course starts with "Unit 1" open on its Notes tab, so notes can go in right away.
+      // The unit can be renamed any time (Rename next to its title, or double-click its tab).
+      const courses: Course[] = [...current.courses, { name, units: [FIRST_UNIT], tone: pickCourseTone(current.courses) }]
+      return { ...current, courses, activeCourse: name, activeUnit: FIRST_UNIT }
     })
+    setPanelFn('scan')
     setNewCourse('')
     setAddingCourse(false)
+  }
+
+  /* A course with no units: start its first one ("Unit 1", or the next free number) and open its Notes. */
+  function startFirstUnit() {
+    setNotebook((current) => {
+      const taken = unitsFor(current.courses, current.activeCourse)
+      let n = 1
+      while (taken.some((item) => sameName(item, `Unit ${n}`))) n += 1
+      const name = `Unit ${n}`
+      const courses = current.courses.map((course) =>
+        course.name === current.activeCourse ? { ...course, units: [...course.units, name] } : course,
+      )
+      return { ...current, courses, activeUnit: name }
+    })
+    setPanelFn('scan')
   }
 
   function closeAddCourse() {
@@ -1519,12 +1558,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       void makeFlashcards(deposit)
       return true
     } catch (error) {
-      // Too large (413) or a name too long (422): sending the same thing again won't help.
-      const tooLarge = error instanceof ApiError && error.status === 413
-      const message = nameRejected(error) ? NAME_TOO_LONG_MESSAGE
-        : tooLarge ? error.message || 'Notes must be 4 MB or smaller.'
-          : error instanceof Error ? error.message : 'Could not read that note.'
-      setUploadError({ source, message, retry: !tooLarge && !nameRejected(error) })
+      setUploadError({ source, ...uploadFailure(error, source) })
       return false
     } finally {
       setUploading('')
@@ -1678,7 +1712,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           <div className="ui-empty">
             <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
             <h2 className="ui-empty__title" id="tools-first-run-title">Start with your first course</h2>
-            <p className="ui-empty__copy">Courses hold units, and each unit holds the notes your flashcards and quizzes are built from.</p>
+            <p className="ui-empty__copy">Name a class, then add your notes. bindet builds flashcards and quizzes from them.</p>
             <form className="tools__empty-form" onSubmit={addCourse}>
               <input
                 className="ui-input"
@@ -1981,9 +2015,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       {!data.sandboxed && (!online || offlineCopy?.key === unitKey) ? (
         <p className="ui-alert ui-alert--info tools__offline" role="status">
           <span>
-            <strong>You’re offline — showing saved flashcards.</strong>{' '}
-            Units you’ve opened before can be studied here. Adding notes, quizzes and the tutor need a connection.
+            {online ? (
+              // Online, but bindet didn't answer: a saved copy is showing until a retry gets through.
+              <><strong>bindet can’t be reached right now — showing saved flashcards.</strong>{' '}Adding notes, quizzes and the tutor will work again once it’s back.</>
+            ) : (
+              <><strong>You’re offline — showing saved flashcards.</strong>{' '}Units you’ve opened before can be studied here. Adding notes, quizzes and the tutor need a connection.</>
+            )}
           </span>
+          {online ? <button className="ui-button ui-button--sm" type="button" onClick={reloadLibrary}>Try again</button> : null}
         </p>
       ) : null}
 
@@ -2183,16 +2222,23 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
 
           {!activeUnit ? (
             <div className="ui-empty tools__unit-empty">
-              <h2 className="ui-empty__title">{units.length ? 'Pick a unit' : `No units in ${activeCourse} yet`}</h2>
+              <h2 className="ui-empty__title">{units.length ? 'Pick a unit' : `Add your first notes to ${activeCourse}`}</h2>
               <p className="ui-empty__copy">
-                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : 'Units group your notes by topic, like chapters in a textbook. Add one to start collecting notes.'}
+                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : `Notes go into units, like chapters in a textbook. They’ll start in “${FIRST_UNIT}”, which you can rename any time.`}
               </p>
-              {units.length ? null : <button className="ui-button ui-button--primary" type="button" onClick={() => setAddingUnit(true)}>Add a unit</button>}
+              {units.length ? null : <button className="ui-button ui-button--primary" type="button" onClick={startFirstUnit}>Add notes</button>}
             </div>
           ) : (
             <>
               <div className="tools__toolbar">
-                <h2 className="tools__unit-title">{activeUnit}</h2>
+                <div className="tools__unit-heading">
+                  <h2 className="tools__unit-title">{activeUnit}</h2>
+                  {renamingUnit ? null : (
+                    <button className="ui-button ui-button--ghost ui-button--sm tools__unit-rename" type="button" onClick={() => startRename(activeUnit)} aria-label={`Rename ${activeUnit}`}>
+                      Rename<span className="tools__unit-rename-more">unit</span>
+                    </button>
+                  )}
+                </div>
                 <div className="ui-segmented tools__views" role="tablist" aria-label="Study view">
                   {VIEWS.map((view) => (
                     <button
@@ -2241,7 +2287,15 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </button>
                     {photo && photo.course === activeCourse && photo.unit === activeUnit ? (
                       <div className={`tools__photo-job is-${photo.stage}`}>
-                        <img src={photo.preview} alt={`Photo: ${photo.name}`} width="56" height="56" decoding="async" />
+                        <img
+                          src={photo.preview}
+                          alt={`Photo: ${photo.name}`}
+                          width="56"
+                          height="56"
+                          decoding="async"
+                          // A file the browser can't show (the reason it failed) leaves an empty frame, not a broken image.
+                          onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+                        />
                         <div className="tools__photo-text">
                           <b>{photo.name}</b>
                           <span>
@@ -2249,12 +2303,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                               : photo.stage === 'uploading' ? 'Uploading…'
                                 : photo.stage === 'reading' ? 'Reading your notes…'
                                   : photo.stage === 'added' ? 'Added. Flashcards are on the way.'
-                                    : 'Not added yet.'}
+                                    : 'Not added.'}
                           </span>
                         </div>
                         {photo.stage === 'preparing' || photo.stage === 'uploading' || photo.stage === 'reading' ? <span className="ui-spinner" aria-hidden="true" /> : null}
-                        {photo.stage === 'added' ? (
-                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>Add another page</button>
+                        {photo.stage === 'added' || photo.stage === 'failed' ? (
+                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>
+                            {photo.stage === 'added' ? 'Add another page' : 'Take it again'}
+                          </button>
                         ) : null}
                       </div>
                     ) : null}
@@ -2435,7 +2491,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </div>
                   ) : null}
                   {cardMode === 'review' ? (
-                    <ReviewSession key={unitKey} scope={{ course: activeCourse, unit: activeUnit }} accessToken={accessToken} summary={reviewSummary} focusControls={focusControls} />
+                    <ReviewSession
+                      key={unitKey}
+                      scope={{ course: activeCourse, unit: activeUnit }}
+                      accessToken={accessToken}
+                      summary={reviewSummary}
+                      focusControls={focusControls}
+                      next={{ label: `Quiz yourself on ${activeUnit}`, onClick: () => setPanelFn('quiz') }}
+                    />
                   ) : null}
                   {cardMode === 'browse' && card ? <div className="tools__focus-bar">{focusControls}</div> : null}
                   {cardMode === 'review' ? null : card ? (

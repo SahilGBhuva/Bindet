@@ -53,7 +53,7 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'courses',
     question: 'How do I add a course or a unit?',
-    answer: 'Open Study (#tools) and choose Add course, then + Add unit for each topic or chapter. Manage courses lets you reorder them, rename one (double-click its name) or give it a cover image; each course gets its own color automatically.',
+    answer: 'Open Study (#tools) and choose Add course. A new course opens on Unit 1, ready for notes; choose Rename next to a unit’s title to name it, and + Add unit for each new topic or chapter. Manage courses lets you reorder them, rename one (double-click its name) or give it a cover image; each course gets its own color automatically.',
     terms: ['course', 'unit', 'add course', 'add unit', 'new course', 'chapter', 'subject', 'class', 'rename', 'manage courses', 'cover', 'color', 'reorder'],
   },
   {

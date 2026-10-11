@@ -86,8 +86,10 @@
   position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
   grid-template-areas: "icon name" "icon blurb";
-  align-items: center;
+  /* Cards in a row stretch to the tallest one: keep each name and blurb together at the top. */
+  align-items: start;
   gap: 2px var(--space-3);
   padding: var(--space-3);
   border: 1px solid var(--color-border);
