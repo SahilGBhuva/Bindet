@@ -434,7 +434,7 @@ export function Settings({ session, onSession }: SettingsProps) {
             </div>
           </Section>
 
-          <Section id="settings-account" title="Account" copy="Your sign-in and the code friends use to add you.">
+          <Section id="settings-account" title="Account" copy="Your sign-in and the friend ID people use to add you.">
             <div className="ui-panel">
               <div className="settings__row">
                 <div className="settings__row-text">
@@ -445,7 +445,7 @@ export function Settings({ session, onSession }: SettingsProps) {
               {profile ? (
                 <div className="settings__row">
                   <div className="settings__row-text">
-                    <span className="settings__label">Friend code</span>
+                    <span className="settings__label">Friend ID</span>
                     <span className="settings__hint">Share it so friends can add you.</span>
                   </div>
                   <div className="settings__code-wrap">
@@ -479,7 +479,7 @@ export function Settings({ session, onSession }: SettingsProps) {
               <div className="settings__row settings__row--stack">
                 <p className="settings__danger-lead">Deleting your account removes, right away:</p>
                 <ul className="settings__danger-list">
-                  <li>Your profile, XP, streaks, progress and friend code</li>
+                  <li>Your profile, XP, streaks, progress and friend ID</li>
                   <li>Your notes, flashcards, quiz questions, tutor conversations and what Otto remembers about you</li>
                   <li>Your personal tasks, plus your comments, attachments and assignments on group tasks</li>
                   <li>Your friends, friend quests and notifications, and the messages and images you sent in group chats</li>
