@@ -23,6 +23,7 @@ import { PracticeTest } from '../components/practice/PracticeTest'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
 import type { StudyGuide } from '../lib/studyGuides'
 import { prepareNotePhoto } from '../lib/notePhoto'
+import { FIRST_UNIT } from '../lib/onboarding'
 import {
   FOCUS_SIZES,
   INSTRUCTIONS_MAX,
@@ -952,11 +953,29 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       if (current.courses.some((course) => course.name === name)) {
         return { ...current, activeCourse: name, activeUnit: unitsFor(current.courses, name)[0] ?? '' }
       }
-      const courses: Course[] = [...current.courses, { name, units: [], tone: pickCourseTone(current.courses) }]
-      return { ...current, courses, activeCourse: name, activeUnit: '' }
+      // A new course starts with "Unit 1" open on its Notes tab, so notes can go in right away.
+      // The unit can be renamed any time (Rename next to its title, or double-click its tab).
+      const courses: Course[] = [...current.courses, { name, units: [FIRST_UNIT], tone: pickCourseTone(current.courses) }]
+      return { ...current, courses, activeCourse: name, activeUnit: FIRST_UNIT }
     })
+    setPanelFn('scan')
     setNewCourse('')
     setAddingCourse(false)
+  }
+
+  /* A course with no units: start its first one ("Unit 1", or the next free number) and open its Notes. */
+  function startFirstUnit() {
+    setNotebook((current) => {
+      const taken = unitsFor(current.courses, current.activeCourse)
+      let n = 1
+      while (taken.some((item) => sameName(item, `Unit ${n}`))) n += 1
+      const name = `Unit ${n}`
+      const courses = current.courses.map((course) =>
+        course.name === current.activeCourse ? { ...course, units: [...course.units, name] } : course,
+      )
+      return { ...current, courses, activeUnit: name }
+    })
+    setPanelFn('scan')
   }
 
   function closeAddCourse() {
@@ -2183,16 +2202,23 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
 
           {!activeUnit ? (
             <div className="ui-empty tools__unit-empty">
-              <h2 className="ui-empty__title">{units.length ? 'Pick a unit' : `No units in ${activeCourse} yet`}</h2>
+              <h2 className="ui-empty__title">{units.length ? 'Pick a unit' : `Add your first notes to ${activeCourse}`}</h2>
               <p className="ui-empty__copy">
-                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : 'Units group your notes by topic, like chapters in a textbook. Add one to start collecting notes.'}
+                {units.length ? 'Choose a unit above to see its notes, flashcards, and quiz.' : `Notes go into units, like chapters in a textbook. They’ll start in “${FIRST_UNIT}”, which you can rename any time.`}
               </p>
-              {units.length ? null : <button className="ui-button ui-button--primary" type="button" onClick={() => setAddingUnit(true)}>Add a unit</button>}
+              {units.length ? null : <button className="ui-button ui-button--primary" type="button" onClick={startFirstUnit}>Add notes</button>}
             </div>
           ) : (
             <>
               <div className="tools__toolbar">
-                <h2 className="tools__unit-title">{activeUnit}</h2>
+                <div className="tools__unit-heading">
+                  <h2 className="tools__unit-title">{activeUnit}</h2>
+                  {renamingUnit ? null : (
+                    <button className="ui-button ui-button--ghost ui-button--sm tools__unit-rename" type="button" onClick={() => startRename(activeUnit)} aria-label={`Rename ${activeUnit}`}>
+                      Rename<span className="tools__unit-rename-more"> unit</span>
+                    </button>
+                  )}
+                </div>
                 <div className="ui-segmented tools__views" role="tablist" aria-label="Study view">
                   {VIEWS.map((view) => (
                     <button
