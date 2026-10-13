@@ -99,10 +99,21 @@ class HelpBotTests(unittest.TestCase):
     def test_global_budget_is_spent_and_enforced(self):
         self.ask("How do I change the color of a course?")
         self.assertEqual(help_bot._used(main.GLOBAL_AI_BUDGET_ID, "ai_call", 1440), 1)
-        with patch.object(main, "ai_daily_global_limit", return_value=1):
+        with patch.object(main, "ai_daily_global_limit", return_value=1), patch.object(main, "ai_account_daily_limit", return_value=100):
             error = self.status_of("How do I rename a unit in my course?")
         self.assertEqual(error.status_code, 503)
         self.assertEqual(len(self.sent), 1)
+
+    def test_one_account_can_only_use_its_share_of_the_global_budget(self):
+        self.assertEqual(main.ai_account_daily_limit(), main.ai_daily_global_limit() * 2 // 100)
+        with patch.object(main, "ai_account_daily_limit", return_value=1):
+            self.ask("How do I change the color of a course?")
+            error = self.status_of("How do I rename a unit in my course?")
+            self.assertEqual(error.status_code, 429)
+            self.assertEqual(error.detail, main.AI_ACCOUNT_SHARE_USED)
+            self.assertEqual(len(self.sent), 1)
+            self.ask("How do I rename a unit in my course?", student="sam")  # others are unaffected
+        self.assertEqual(help_bot._used(main.GLOBAL_AI_BUDGET_ID, "ai_call", 1440), 2)
 
     # --- cache -------------------------------------------------------------------------
 

@@ -1173,12 +1173,37 @@ def ai_daily_global_limit() -> int:
         return AI_DAILY_GLOBAL_LIMIT_DEFAULT
 
 
-def global_ai_available() -> bool:
-    """Spend one call from the shared daily AI budget. False once it is used up.
+# One account may use at most this share of the shared daily AI budget (owners are exempt),
+# so a single account can't pause AI for everyone else.
+AI_ACCOUNT_SHARE_PERCENT = 2
+AI_ACCOUNT_SHARE_USED = "You’ve used a lot of AI help today, so it’s taking a break until tomorrow. Your notes, flashcards and saved answers still work."
+
+
+def ai_account_daily_limit() -> int:
+    return max(1, ai_daily_global_limit() * AI_ACCOUNT_SHARE_PERCENT // 100)
+
+
+def account_ai_share_available(student_id: str | None) -> bool:
+    """Spend one call from this account's share of the shared daily budget. False once it is
+    used up. Owners are never limited (check_social_rate_limit skips them)."""
+    if not student_id:
+        return True
+    try:
+        database.check_social_rate_limit(student_id, "ai_global_share", ai_account_daily_limit(), 1440)
+    except ValueError:
+        return False
+    return True
+
+
+def global_ai_available(student_id: str | None) -> bool:
+    """Spend one call from the shared daily AI budget. False once it is used up, or once this
+    account has used its share of it (AI_ACCOUNT_SHARE_PERCENT).
 
     Counted in the database, so the budget holds across every server instance.
     Callers check their per-student limits first, so refused requests cost nothing here.
     """
+    if not account_ai_share_available(student_id):
+        return False
     try:
         database.check_social_rate_limit(GLOBAL_AI_BUDGET_ID, "ai_call", ai_daily_global_limit(), 1440)
     except ValueError:
@@ -1186,9 +1211,12 @@ def global_ai_available() -> bool:
     return True
 
 
-def spend_global_ai_call() -> None:
-    """Like global_ai_available, but answers a friendly 503 when the budget is used up."""
-    if not global_ai_available():
+def spend_global_ai_call(student_id: str | None) -> None:
+    """Like global_ai_available, but answers a friendly 429 when this account's share is used
+    up and a friendly 503 when the shared budget is."""
+    if not account_ai_share_available(student_id):
+        raise HTTPException(status_code=429, detail=AI_ACCOUNT_SHARE_USED, headers={"Retry-After": "3600"})
+    if not global_ai_available(None):  # the share was counted just above
         raise HTTPException(status_code=503, detail=AI_PAUSED, headers={"Retry-After": "3600"})
 
 
@@ -1404,7 +1432,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             text = cached_ocr_text(owner, cache_key)
             if text is None:
                 limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-                spend_global_ai_call()
+                spend_global_ai_call(owner)
                 ai_tutor.warm_connection()
                 # The image goes to the vision model only; it is never stored.
                 text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
@@ -1421,7 +1449,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
                     text = cached_ocr_text(owner, cache_key)
                     if text is None:
                         limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-                        spend_global_ai_call()
+                        spend_global_ai_call(owner)
                         ai_tutor.warm_connection()
                         text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                         ai_cache.store_extraction(cache_key, text)
@@ -1850,7 +1878,7 @@ def conversation_title(owner: str, conversation: dict, first_message: str, reply
     except ValueError:
         ai_tutor.log_ai_event("title_conversation", outcome="limited", student_id=owner)
         return fallback()
-    if not global_ai_available():
+    if not global_ai_available(owner):
         ai_tutor.log_ai_event("title_conversation", outcome="budget", student_id=owner)
         return fallback()
     try:
@@ -1896,7 +1924,7 @@ def update_memory_after(owner: str, conversation_id: str) -> dict | None:
     except ValueError:
         ai_tutor.log_ai_event("update_memory", outcome="limited", student_id=owner)
         return None
-    if not global_ai_available():
+    if not global_ai_available(owner):
         ai_tutor.log_ai_event("update_memory", outcome="budget", student_id=owner)
         return None
     try:
@@ -2113,7 +2141,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
     if fixed_reply is None and cached_reply is None and guide_intent is None:
-        spend_global_ai_call()
+        spend_global_ai_call(owner)
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
@@ -2840,7 +2868,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
     avoid = quiz_avoid_list(questions.banked_among(cache_key, latest) if shared else latest) if latest else []
     repeats: list[dict] = []
     for _ in range(QUIZ_ATTEMPTS):
-        spend_global_ai_call()
+        spend_global_ai_call(student_id)
         try:
             result = ai_tutor.generate_question(avoid=avoid, **request)
         except ai_tutor.AITutorError as exc:
@@ -3002,8 +3030,10 @@ def flashcard_rate_limit(student_id: str, action: str, limit: int, window_minute
         raise ai_error(429, "rate_limited", f"You’ve made a lot of flashcards today. Try again {_wait_phrase(wait)}.", retry_after=wait) from error
 
 
-def flashcard_budget() -> None:
-    if not global_ai_available():
+def flashcard_budget(student_id: str) -> None:
+    if not account_ai_share_available(student_id):
+        raise ai_error(429, "ai_daily_limit", AI_ACCOUNT_SHARE_USED, retry_after=3600)
+    if not global_ai_available(None):
         raise ai_error(503, "ai_daily_limit", retry_after=3600)
 
 
@@ -3068,7 +3098,7 @@ def make_note_flashcards(
     except HTTPException:
         log("rate_limited")
         raise
-    flashcard_budget()
+    flashcard_budget(owner)
     outcome, attempt = flashcards.claim(owner, note_id, retry=retry)
     if outcome == "ready":
         return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
@@ -3153,7 +3183,7 @@ def remake_note_flashcards(
     try:
         flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
         if not reused:
-            flashcard_budget()
+            flashcard_budget(owner)
     except BaseException:
         flashcards.cancel_regeneration(owner, note_id, attempt, state["status"], state["error"])
         raise
@@ -3292,7 +3322,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             return FlashcardResponse(course=course, unit=unit, personalized=personalized,
                                      cards=[Flashcard(front=card["front"], back=card["back"], topic=card["topic"]) for card in stored[:data.count]])
     flashcard_rate_limit(student_id, "ai_flashcards", LEGACY_FLASHCARD_DECKS_PER_DAY)
-    flashcard_budget()
+    flashcard_budget(student_id)
     ai_tutor.warm_connection()
     try:
         cards = ai_tutor.generate_flashcards(
@@ -3373,7 +3403,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                     database.check_social_rate_limit(student_id, "ai_grading", 120, 1440)
                 except ValueError as error:
                     raise social_error(error) from error
-            if authorization and not global_ai_available():
+            if authorization and not global_ai_available(student_id):
                 # The shared AI budget is used up. Grading offline would mark answers the
                 # AI might accept as wrong, so don't grade at all: the student can resubmit.
                 raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"})
@@ -3550,7 +3580,7 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         except HTTPException:
             log("rate_limited")
             raise
-        if not global_ai_available():
+        if not global_ai_available(owner):
             raise practice_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
         try:
             ai_tutor.warm_connection()
@@ -3621,7 +3651,7 @@ def grade_practice_items(owner: str, rows: list[dict], answers: dict[int, str]) 
         return results
     started = time.perf_counter()
     practice_rate_limit(owner, "ai_grading", PRACTICE_GRADING_PER_DAY, "You’ve had a lot of answers checked today.")
-    if not global_ai_available():
+    if not global_ai_available(owner):
         raise practice_error(503, "grading_unavailable", retry_after=30)
     try:
         graded = ai_tutor.grade_practice_answers(pending, session_id=ai_session_id(owner, "practice-grading"))
@@ -3782,7 +3812,7 @@ def write_guide(owner: str, *, course: str, unit: str | None, kind: str, text: s
     except HTTPException:
         log("rate_limited")
         raise
-    if not global_ai_available():
+    if not global_ai_available(owner):
         raise guide_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
     try:
         ai_tutor.warm_connection()
@@ -4167,7 +4197,7 @@ def ask_help_bot(data: HelpBotQuestion, authorization: Annotated[str | None, Hea
         return help_bot.blocked(student_id, data.question)
     if not question:
         raise HTTPException(status_code=400, detail={"code": "empty_question", "message": "Type a question first."})
-    return help_bot.answer(student_id, question, spend_global_ai_call)
+    return help_bot.answer(student_id, question, lambda: spend_global_ai_call(student_id))
 
 
 def admin_emails() -> set[str]:
