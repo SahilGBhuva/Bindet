@@ -269,12 +269,20 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       if (!live) return
       setThreads((current) => {
         const local = current[activeId] ?? []
-        // Keep anything still in flight that the server has not returned yet.
-        const inFlight = local.filter((message) => message.status)
+        // Keep anything still in flight that the server has not returned yet, including a just-sent
+        // question the server accepted but is still saving (no id yet). If the server already has
+        // it, its copy gives way to the local one so the question shows once.
+        const inFlight = local.filter((message) => message.status || message.id === 0)
+        const unsaved = inFlight.filter((message) => message.role === 'user').map((message) => message.content)
         // The server doesn't keep which notes a reply drew on (a fast or replayed reply can
         // finish before this page loads): keep the sources this page was told while it streamed.
         const grounded = new Map(local.filter((message) => message.grounded?.length).map((message) => [message.id, message.grounded]))
-        const merged = items.map((item) => {
+        const serverItems = [...items]
+        for (const content of unsaved) {
+          const index = serverItems.map((item) => item.role === 'user' && item.content === content).lastIndexOf(true)
+          if (index >= 0) serverItems.splice(index, 1)
+        }
+        const merged = serverItems.map((item) => {
           const message = toLocal(item)
           const sources = grounded.get(item.id)
           return sources ? { ...message, grounded: sources } : message
@@ -505,6 +513,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   function submit(event?: FormEvent) {
     event?.preventDefault()
+    // While Otto is still answering, Enter must not throw away the next question being typed.
+    if (streaming) return
     if (attachments.some((item) => item.state === 'preparing')) { setNotice('Images are still being prepared. One moment.'); return }
     const total = attachments.reduce((sum, item) => sum + (item.state === 'ready' ? item.size ?? 0 : 0), 0)
     if (total > MAX_TOTAL_IMAGE_BYTES) { setNotice('These images are too large to send together. Remove one and try again.'); return }
