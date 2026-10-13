@@ -1087,6 +1087,19 @@ def _insert_ignore(connection, table, rows: list[dict], keys: list[str]) -> int:
     return connection.execute(insert(table).values(rows).on_conflict_do_nothing(index_elements=keys)).rowcount or 0
 
 
+def _upsert(connection, table, row: dict, keys: list[str], update_columns: list[str]) -> None:
+    """INSERT ... ON CONFLICT (keys) DO UPDATE SET update_columns (DO NOTHING when empty)."""
+    insert = postgres_insert if connection.dialect.name == "postgresql" else sqlite_insert
+    statement = insert(table).values(row)
+    if update_columns:
+        statement = statement.on_conflict_do_update(
+            index_elements=keys, set_={column: statement.excluded[column] for column in update_columns},
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(index_elements=keys)
+    connection.execute(statement)
+
+
 def record_study_day(connection, student_id: str, day: date | None = None) -> bool:
     """Mark `day` (default: the student's local today) as a study day, inside the caller's
     transaction. Idempotent. The student_progress row must already exist.

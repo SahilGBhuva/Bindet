@@ -167,9 +167,12 @@ def update_settings(owner_id: str, conversation_id: str, *, pinned: bool | None 
         current = _settings_for(connection, owner_id, [conversation_id]).get(conversation_id)
         values = {key: value for key, value in (("pinned", pinned), ("study_mode", study_mode)) if value is not None}
         if current is None:
-            connection.execute(settings.insert().values(conversation_id=conversation_id, owner_id=owner_id,
-                                                        pinned=bool(values.get("pinned", False)),
-                                                        study_mode=values.get("study_mode", "explain"), updated_at=now))
+            # Upsert: a parallel first write (pin and study mode at once) must not hit the primary key.
+            database._upsert(connection, settings, {
+                "conversation_id": conversation_id, "owner_id": owner_id,
+                "pinned": bool(values.get("pinned", False)), "study_mode": values.get("study_mode", "explain"),
+                "updated_at": now,
+            }, ["conversation_id"], [*values, "updated_at"] if values else [])
         elif values:
             connection.execute(update(settings).where(settings.c.conversation_id == conversation_id).values(**values, updated_at=now))
         return _conversation(row, _settings_for(connection, owner_id, [conversation_id]).get(conversation_id))
@@ -186,10 +189,14 @@ def rate_message(owner_id: str, message_id: int, rating: int) -> dict:
         )).first()
         if row is None:
             raise ValueError("message_not_found")
-        connection.execute(delete(ratings).where(ratings.c.message_id == message_id))
         if rating:
-            connection.execute(ratings.insert().values(message_id=message_id, owner_id=owner_id, conversation_id=row.conversation_id,
-                                                       rating=1 if rating > 0 else -1, created_at=datetime.now(timezone.utc)))
+            # Upsert, so a double tap (two requests at once) can't hit the primary key.
+            database._upsert(connection, ratings, {
+                "message_id": message_id, "owner_id": owner_id, "conversation_id": row.conversation_id,
+                "rating": 1 if rating > 0 else -1, "created_at": datetime.now(timezone.utc),
+            }, ["message_id"], ["rating", "created_at"])
+        else:
+            connection.execute(delete(ratings).where(ratings.c.message_id == message_id))
     return {"message_id": message_id, "rating": (1 if rating > 0 else -1) if rating else 0}
 
 

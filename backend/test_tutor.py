@@ -11,6 +11,7 @@ TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
 from fastapi import HTTPException
+from sqlalchemy import delete, false
 
 import ai_tutor
 import database
@@ -210,6 +211,26 @@ class TutorTests(unittest.TestCase):
         self.assertEqual(events[-1][1]["message"], main.TUTOR_ALREADY_REGENERATED)
         replies = [item["content"] for item in tutor.list_messages("alex", conversation_id) if item["role"] == "assistant"]
         self.assertEqual(replies, ["The other tab's answer."])
+
+    def test_double_tapped_rating_and_first_settings_write_do_not_fail(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        reply_id = next(data for name, data in events if name == "done")["message"]["id"]
+        tutor.rate_message("alex", reply_id, 1)
+        # The second tap runs as if the first one's row appeared after any check it made.
+        with patch.object(tutor, "delete", side_effect=lambda table: delete(table).where(false())):
+            self.assertEqual(tutor.rate_message("alex", reply_id, -1)["rating"], -1)
+        self.assertEqual(tutor.list_messages("alex", conversation_id)[-1]["rating"], -1)
+        self.assertEqual(tutor.rate_message("alex", reply_id, 0)["rating"], 0)
+        self.assertEqual(tutor.list_messages("alex", conversation_id)[-1]["rating"], 0)
+
+        tutor.update_settings("alex", conversation_id, pinned=True)
+        # A parallel first write: this request saw no settings row, but one exists by now.
+        with patch.object(tutor, "_settings_for", side_effect=[{}, {conversation_id: {"pinned": True, "study_mode": "guide"}}]):
+            tutor.update_settings("alex", conversation_id, study_mode="guide")
+        stored = tutor.get_conversation("alex", conversation_id)
+        self.assertTrue(stored["pinned"])
+        self.assertEqual(stored["study_mode"], "guide")
 
     def test_history_sent_to_the_model_is_capped_by_characters(self):
         events, _ = self.send("alex")
