@@ -1698,20 +1698,16 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   .tools__header-actions .tools__course-guide { min-height: 44px; }
 }
 
-/* Phones: the page actions are one swipeable row instead of three stacked rows. */
+/* Course header buttons carry a long label and a short one; phones show the short one. */
+.tools__label-short { display: none; }
+
+/* Phones: the page actions use short labels and wrap to fill the width, so nothing scrolls
+   sideways or gets cut off. */
 @media (max-width: 560px) {
-  .tools__header-actions {
-    flex-wrap: nowrap;
-    width: calc(100% + 2 * var(--space-4));
-    margin-inline: calc(-1 * var(--space-4));
-    padding: 2px var(--space-4) 6px;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .tools__header-actions::-webkit-scrollbar { display: none; }
-  .tools__header-actions > * { flex: none; white-space: nowrap; }
+  .tools__header-actions { width: 100%; }
+  .tools__header-actions > * { flex: 1 1 auto; white-space: nowrap; }
+  .tools__header-actions .tools__label-long { display: none; }
+  .tools__header-actions .tools__label-short { display: inline; }
   /* The selected unit tab already names the unit: its heading stays for screen readers only,
      so the card or notes start higher on the screen. */
   .tools__toolbar .tools__unit-title {

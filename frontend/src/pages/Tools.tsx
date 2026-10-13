@@ -1994,7 +1994,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               title={courseNoteCount ? `A timed test from every unit in ${activeCourse}` : 'Add notes to this course first'}
               onClick={() => openPractice(null)}
             >
-              Test the whole course
+              <span className="tools__label-long">Test the whole course</span>
+              <span className="tools__label-short">Course test</span>
             </button>
           ) : null}
           {current ? (
@@ -2005,10 +2006,14 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               title={courseNoteCount ? `Otto writes a study guide from every unit in ${activeCourse}` : 'Add notes to this course first'}
               onClick={() => { setPractice(null); setReviewAll(false); setGuideView({ course: activeCourse, key: Date.now() }) }}
             >
-              Study guide for the whole course
+              <span className="tools__label-long">Study guide for the whole course</span>
+              <span className="tools__label-short">Course guide</span>
             </button>
           ) : null}
-          <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>Manage courses</button>
+          <button className="ui-button" type="button" onClick={() => openCustomize(activeCourse)}>
+            <span className="tools__label-long">Manage courses</span>
+            <span className="tools__label-short">Manage</span>
+          </button>
         </div>
       </header>
 
