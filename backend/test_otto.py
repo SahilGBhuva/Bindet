@@ -73,7 +73,7 @@ class OttoTestCase(unittest.TestCase):
         main.tutor_streams.reset()
 
     def as_user(self, student_id):
-        return patch.object(auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def send(self, student_id, content="What is photosynthesis?", model=None, reply=("Photosynthesis ", "stores energy."), **fields):
         captured = {}

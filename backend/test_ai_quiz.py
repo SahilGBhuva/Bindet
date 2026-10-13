@@ -32,7 +32,7 @@ class PersonalizedQuizTests(unittest.TestCase):
             'correct_answer': 'It uses energy from electron transfers to pump protons across the inner mitochondrial membrane, storing potential energy for ATP synthase.',
             'topic': 'Cellular Respiration',
         }
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'biology-student'}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'biology-student', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
             response = main.generate_question(request, 'Bearer test')
 
         self.assertEqual(response.topic, 'Cellular Respiration')
@@ -61,7 +61,7 @@ class PersonalizedQuizTests(unittest.TestCase):
             'correct_answer': 'A positive discriminant gives two real roots, zero gives one repeated real root, and a negative discriminant gives no real roots.',
             'topic': 'Quadratic Functions',
         }
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': student}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': student, 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
             response = main.generate_question(request, 'Bearer test')
 
         self.assertEqual(response.difficulty, 3)
@@ -86,7 +86,7 @@ class PersonalizedQuizTests(unittest.TestCase):
             'correct_answer': 'To use light energy to make chemical energy stored in glucose.',
             'topic': 'Photosynthesis',
         }
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': student}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': student, 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked:
             response = main.generate_question(request, 'Bearer test')
 
         self.assertEqual(response.difficulty, 1)
@@ -98,7 +98,7 @@ class PersonalizedQuizTests(unittest.TestCase):
         main.database.update_progress(student, 'Photosynthesis', False, 0)
         request = main.QuestionRequest(topic='mixed', difficulty=2, notes=main.NoteContext(course='Biology', unit='Photosynthesis'))
         generated = {'question': 'What gas do plants take in?', 'correct_answer': 'Carbon dioxide', 'topic': 'Photosynthesis'}
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': student}), \
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': student, 'email_confirmed_at': '2026-01-01T00:00:00Z'}), \
                 patch.object(main.note_store, 'context_for', return_value=(['leaf.pdf'], 'Plants take in carbon dioxide.')), \
                 patch.object(main.ai_tutor, 'generate_question', return_value=generated) as mocked, \
                 patch.object(main.questions, 'save_to_bank') as banked:
@@ -113,7 +113,7 @@ class PersonalizedQuizTests(unittest.TestCase):
             student_id='history-student',
             notes=main.NoteContext(course='World History', unit='Industrial Revolution'),
         )
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'history-student'}), patch.object(main.ai_tutor, 'generate_question', side_effect=main.ai_tutor.AITutorError('offline')):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'history-student', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_question', side_effect=main.ai_tutor.AITutorError('offline')):
             with self.assertRaises(main.HTTPException) as context:
                 main.generate_question(request, 'Bearer test')
         self.assertEqual(context.exception.status_code, 503)
@@ -129,7 +129,7 @@ class PersonalizedQuizTests(unittest.TestCase):
             'correct_answer': 'ATP',
             'topic': 'Cellular Respiration',
         }
-        with patch.object(main.auth, 'authenticated_user', side_effect=[{'id': 'student-a'}, {'id': 'student-b'}]), patch.object(
+        with patch.object(main.auth, 'authenticated_user', side_effect=[{'id': 'student-a', 'email_confirmed_at': '2026-01-01T00:00:00Z'}, {'id': 'student-b', 'email_confirmed_at': '2026-01-01T00:00:00Z'}]), patch.object(
             main.ai_tutor, 'generate_question', return_value=generated
         ) as ai:
             first = main.generate_question(request, 'Bearer first')
@@ -149,7 +149,7 @@ class PersonalizedQuizTests(unittest.TestCase):
 
     def _ask(self, student, unit='Cell Cycle', ai=None):
         request = main.QuestionRequest(topic='mixed', difficulty=1, notes=main.NoteContext(course='Biology', unit=unit))
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': student}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': student, 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             return main.generate_question(request, 'Bearer test')
 
     @staticmethod

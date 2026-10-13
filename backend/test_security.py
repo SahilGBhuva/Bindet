@@ -152,7 +152,7 @@ class XpFarmingTests(unittest.TestCase):
 
     def test_signed_in_math_questions_have_a_daily_limit(self):
         request = main.QuestionRequest(topic="addition", difficulty=1)
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "math-student"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "math-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(main, "MATH_QUESTIONS_PER_DAY", 2):
             main.generate_question(request, "Bearer test")
             main.generate_question(request, "Bearer test")
@@ -214,7 +214,7 @@ class RequestBoundsTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         client = TestClient(main.app)
         headers = {"Authorization": "Bearer test"}
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "bounds-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "bounds-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             cases = [
                 ("get", "/api/notes?course=" + "c" * 121 + "&unit=u"),
                 ("get", "/api/notes?course=c&unit=" + "u" * 161),
@@ -239,7 +239,7 @@ class RequestBoundsTests(unittest.TestCase):
         database.reset_db()
         mine = "alex-id/0b7c2c9e-1111-4000-8000-000000000000.png"
         theirs = "sam-id/0b7c2c9e-1111-4000-8000-000000000000.png"
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             saved = main.update_account_profile(main.AccountProfileUpdate(username="alex", display_name="Alex", avatar_path=mine), "Bearer t")
             self.assertEqual(saved["avatar_path"], mine)
             with self.assertRaises(main.HTTPException) as caught:
@@ -331,7 +331,7 @@ class StoredLengthTests(unittest.TestCase):
     def test_ai_question_fields_are_clipped_to_their_columns(self):
         generated = {"question": "q" * 900, "correct_answer": "a" * 400, "topic": "t" * 120}
         request = main.QuestionRequest(notes={"course": "Biology", "unit": "Cells"})
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "long-ai"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "long-ai", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(main.ai_tutor, "generate_question", return_value=generated):
             response = main.generate_question(request, "Bearer test")
         stored = questions.get_question("long-ai", response.question_id)
@@ -647,7 +647,7 @@ class RequestBodyLimitTests(unittest.TestCase):
         from fastapi import UploadFile
         self.assertEqual(main.note_ingestion.MAX_NOTE_BYTES, 4 * 1024 * 1024)
         big = b"a" * (main.note_ingestion.MAX_NOTE_BYTES + 1)
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "big-uploader"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "big-uploader", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(main, "limit_action"):
             with self.assertRaises(main.HTTPException) as caught:
                 asyncio.run(main.upload_note("Bio", "Cells", UploadFile(filename="notes.txt", file=BytesIO(big)), "Bearer t"))
@@ -720,3 +720,45 @@ class ProductionHardeningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AiAccessTests(unittest.TestCase):
+    """AI routes need a real account: not anonymous, with a confirmed email."""
+
+    def setUp(self):
+        database.reset_db()
+
+    def refused(self, user):
+        with patch.object(main.auth, "authenticated_user", return_value=user), \
+                patch.object(main.help_bot, "answer", return_value={"answer": "ok"}) as answer, \
+                self.assertRaises(main.HTTPException) as caught:
+            main.ask_help_bot(main.HelpBotQuestion(question="How do I add a course?"), "Bearer t")
+        answer.assert_not_called()
+        return caught.exception
+
+    def test_anonymous_and_unconfirmed_accounts_get_403(self):
+        for user in ({"id": "anon", "is_anonymous": True, "email_confirmed_at": None},
+                     {"id": "anon2", "is_anonymous": True, "email": "", "email_confirmed_at": "2026-01-01T00:00:00Z"},
+                     {"id": "new", "email": "new@example.com"},
+                     {"id": "new2", "email": "new@example.com", "email_confirmed_at": None}):
+            with self.subTest(user=user["id"]):
+                error = self.refused(user)
+                self.assertEqual(error.status_code, 403)
+                self.assertEqual(error.detail, {"code": "email_unconfirmed", "message": "Confirm your email to use AI features."})
+
+    def test_google_and_confirmed_accounts_pass(self):
+        google = {"id": "google-1", "email": "ada@example.com", "email_confirmed_at": "2026-01-01T00:00:00Z",
+                  "app_metadata": {"provider": "google"}, "is_anonymous": False}
+        self.assertTrue(auth.may_use_ai(google))
+        with patch.object(main.auth, "authenticated_user", return_value=google), \
+                patch.object(main.help_bot, "answer", return_value={"answer": "ok"}):
+            self.assertEqual(main.ask_help_bot(main.HelpBotQuestion(question="How do I add a course?"), "Bearer t"), {"answer": "ok"})
+
+    def test_every_ai_route_checks_access(self):
+        import inspect
+        for handler in (main.upload_note, main.send_tutor_message, main.make_note_flashcards, main.remake_note_flashcards,
+                        main.generate_flashcards, main.create_practice_test, main.submit_practice_test,
+                        main.create_study_guide, main.regenerate_study_guide, main.ask_help_bot, main.generate_question):
+            with self.subTest(handler=handler.__name__):
+                self.assertIn("ai_user", inspect.getsource(handler))
+        self.assertIn("ai=True", inspect.getsource(main.analyze_answer))

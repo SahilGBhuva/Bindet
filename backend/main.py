@@ -1016,11 +1016,25 @@ def guest_student_id(claimed_id: str) -> str:
     return f"{GUEST_ID_PREFIX}{claimed_id}"
 
 
-def verified_student_id(claimed_id: str, authorization: str | None) -> str:
-    """Authenticated callers are their token's subject; anyone else is a namespaced guest."""
+def verified_student_id(claimed_id: str, authorization: str | None, ai: bool = False) -> str:
+    """Authenticated callers are their token's subject; anyone else is a namespaced guest.
+    ai=True: a signed-in caller must also be allowed AI features (ai_user)."""
     if authorization:
-        return auth.authenticated_user(authorization)["id"]
+        return (ai_user(authorization) if ai else auth.authenticated_user(authorization))["id"]
     return guest_student_id(claimed_id)
+
+
+EMAIL_UNCONFIRMED = "Confirm your email to use AI features."
+
+
+def ai_user(authorization: str | None) -> dict:
+    """The verified account for a route that spends AI. Anonymous accounts and accounts whose
+    email isn't confirmed get a 403 (code email_unconfirmed): a throwaway sign-up can't spend
+    the shared AI budget. Owners keep their exemptions."""
+    user = auth.authenticated_user(authorization)
+    if not auth.may_use_ai(user):
+        raise HTTPException(status_code=403, detail={"code": "email_unconfirmed", "message": EMAIL_UNCONFIRMED})
+    return user
 
 
 def topic_stats(record: dict) -> list[TopicStat]:
@@ -1349,7 +1363,7 @@ async def upload_note(
     # Sign-in checks, parsing, OCR and the database are all blocking calls. They run in
     # the thread pool so a slow OCR request never stalls the event loop, and with it
     # every other request (including streaming tutor replies) on this instance.
-    user = await run_in_threadpool(auth.authenticated_user, authorization)
+    user = await run_in_threadpool(ai_user, authorization)
     await run_in_threadpool(limit_action, user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
     if len(content) > note_ingestion.MAX_NOTE_BYTES:
@@ -2011,7 +2025,7 @@ def capped_tutor_route(owner: str, content: str, has_images: bool) -> dict:
 
 @app.post("/api/tutor/messages")
 def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str | None, Header()] = None):
-    user = auth.authenticated_user(authorization)
+    user = ai_user(authorization)
     owner = user["id"]
     content = data.content.strip()
     if not content:
@@ -2849,7 +2863,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
 def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None, background: BackgroundTasks = None):  # type: ignore[assignment]
     has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
     if has_school_context and data.notes:
-        student_id = auth.authenticated_user(authorization)["id"]
+        student_id = ai_user(authorization)["id"]
         instructions = checked_instructions(data.instructions, student_id, "generate_quiz")
         ai_tutor.warm_connection()
         course, unit = data.notes.course.strip(), data.notes.unit.strip()
@@ -3013,7 +3027,7 @@ def make_note_flashcards(
     authorization: Annotated[str | None, Header()] = None,
 ):
     """Make (once) and return the flashcards for one of the student's notes. Idempotent."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
     flashcards.init_flashcards()  # once per process, before the two reads below run side by side
@@ -3108,7 +3122,7 @@ def remake_note_flashcards(
     the stored cards without an AI call. Counts against the same daily flashcard limit as
     normal generation, and the cards pass the same validation and grounding check.
     """
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
     if not instructions:
         raise instructions_error()
@@ -3257,7 +3271,7 @@ def grade_review_card(card_id: str, data: ReviewGradeRequest, authorization: Ann
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)
 def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | None, Header()] = None):
     """Legacy unit-wide deck. Grounded only, and served from stored cards when the unit has them."""
-    student_id = auth.authenticated_user(authorization)["id"]
+    student_id = ai_user(authorization)["id"]
     course = data.course.strip()
     unit = data.unit.strip()
     if not course and not unit:
@@ -3310,7 +3324,7 @@ GRADING_UNAVAILABLE = "We couldn’t check this answer right now — try again i
 
 @app.post("/api/analyze-answer", response_model=AnswerResponse)
 def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Header()] = None):
-    student_id = verified_student_id(data.student_id, authorization)
+    student_id = verified_student_id(data.student_id, authorization, ai=True)
     question = questions.get_question(student_id, data.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
@@ -3500,7 +3514,7 @@ def practice_time_limit(data: PracticeTestCreate, count: int) -> int | None:
 
 @app.post("/api/practice-tests", status_code=201)
 def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str | None, Header()] = None):
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     instructions = checked_instructions(data.instructions, owner, "generate_test")
     course = data.course.strip()
     unit = data.unit.strip() if data.unit is not None else None
@@ -3630,7 +3644,7 @@ def submit_practice_test(
 ):
     """Grade the test once: per-item results, explanations, score, a topic breakdown and XP.
     A test submitted after its time limit (plus a short grace) is still graded, marked over time."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     submitted_at = datetime.now(timezone.utc)
     limit_action(owner, "practice_submit", PRACTICE_SUBMITS_PER_HOUR)
     loaded = practice_tests.graded_items(owner, test_id)
@@ -3823,7 +3837,7 @@ def make_study_guide(owner: str, course: str, unit: str | None, kind: str, raw_i
 @app.post("/api/study-guides", status_code=201)
 def create_study_guide(data: StudyGuideCreate, authorization: Annotated[str | None, Header()] = None):
     """Otto writes study material from the unit's (or course's) notes, or shows the saved one again."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     guide, how = make_study_guide(owner, data.course, data.unit, data.kind, data.instructions, data.fresh)
     return {**guide, "source": how}
 
@@ -3883,7 +3897,7 @@ def regenerate_study_guide(guide_id: GuideId, data: StudyGuideRegenerate, author
     """A new version from the notes as they are now. When the notes haven't changed, the guide is
     returned as it is ("unchanged") unless the student asks for a fresh version, which counts
     toward the daily AI limit like a new guide."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     row = study_guides.guide_row(owner, guide_id)
     if row is None:
         raise guide_error(404, "guide_not_found")
@@ -4146,7 +4160,7 @@ def help_bot_usage(authorization: Annotated[str | None, Header()] = None):
 @app.post("/api/help-bot")
 def ask_help_bot(data: HelpBotQuestion, authorization: Annotated[str | None, Header()] = None):
     """"How do I…" questions the app's local FAQ couldn't answer. Signed-in only; see help_bot.py for the limits."""
-    student_id = auth.authenticated_user(authorization)["id"]
+    student_id = ai_user(authorization)["id"]
     try:
         question = checked_instructions(data.question, student_id, help_bot.OP)
     except HTTPException:

@@ -284,7 +284,7 @@ class AccountDeletionTests(unittest.TestCase):
         supabase = supabase or FakeSupabase()
         authorization = authorization or fresh_token(user)
         with patch.dict(os.environ, env if env is not None else ENV), \
-                patch.object(auth, "authenticated_user", return_value={"id": user}):
+                patch.object(auth, "authenticated_user", return_value={"id": user, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             post, request, http_delete = supabase.patches()
             with post, request, http_delete:
                 return self.client.request("DELETE", "/api/account", json=body, headers={"Authorization": authorization})

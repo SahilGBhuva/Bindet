@@ -28,7 +28,7 @@ class FriendsTests(unittest.TestCase):
 
     def test_missing_profile_is_a_clean_error_not_a_500(self):
         group = database.create_study_group("alex-id", "Bio crew")
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "no-profile-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "no-profile-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             with self.assertRaises(main.HTTPException) as caught:
                 main.join_study_group(main.StudyGroupJoin(invite_code=group["invite_code"]), "Bearer t")
             self.assertEqual(caught.exception.status_code, 400)
@@ -103,7 +103,7 @@ class FriendsTests(unittest.TestCase):
         self.assertIn(third["id"], [item["id"] for item in database.active_friend_quests("alex-id")])
 
     def test_friend_endpoints_use_authenticated_identity(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             result = main.create_friend_request(main.FriendRequestCreate(friend_code=self.sam["friend_code"]), "Bearer test")
         self.assertEqual(result["status"], "pending")
         self.assertEqual(database.pending_friend_requests("sam-id")[0]["username"], "alex")
@@ -125,7 +125,7 @@ class FriendsTests(unittest.TestCase):
 
     def test_progress_route_includes_recent_xp(self):
         database.update_progress("alex-id", "Biology", True, 20)
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             response = main.get_progress("alex-id", "Bearer test", tz_offset=0)
         self.assertEqual(response.recent_xp[-1].xp, 20)
 
@@ -236,9 +236,9 @@ class FriendsTests(unittest.TestCase):
             database.get_study_group("alex-id", group["id"])
 
     def test_group_endpoints_use_authenticated_identity(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             group = main.create_study_group(main.StudyGroupCreate(name="Calculus crew"), "Bearer test")
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             joined = main.join_study_group(main.StudyGroupJoin(invite_code=group["invite_code"]), "Bearer test")
         self.assertEqual(joined["members"][1]["student_id"], "sam-id")
 

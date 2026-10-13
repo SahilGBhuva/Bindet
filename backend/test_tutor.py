@@ -44,7 +44,7 @@ class TutorTests(unittest.TestCase):
             os.unlink(TEST_DB.name)
 
     def as_user(self, student_id):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def send(self, student_id, chunks=("Photo", "synthesis ", "stores energy."), **fields):
         captured = {}

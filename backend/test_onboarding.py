@@ -48,7 +48,7 @@ class OnboardingTests(unittest.TestCase):
         self.client = TestClient(main.app)
 
     def call(self, method, user=NEW, json=None):
-        with patch.object(auth, "authenticated_user", return_value={"id": user}):
+        with patch.object(auth, "authenticated_user", return_value={"id": user, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             return self.client.request(method, "/api/account/onboarding", json=json, headers={"Authorization": "Bearer token"})
 
     def test_a_brand_new_account_needs_setup_and_has_nothing_done(self):

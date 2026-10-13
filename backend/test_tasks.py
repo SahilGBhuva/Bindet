@@ -390,7 +390,7 @@ class TaskRouteTests(unittest.TestCase):
         database.onboard_account("sam-id", "sam", "Sam", None)
 
     def as_user(self, student_id):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def test_routes_use_the_authenticated_identity(self):
         with self.as_user("alex-id"):
@@ -496,7 +496,7 @@ class GroupOwnershipTests(unittest.TestCase):
         self.client = TestClient(main.app)
 
     def call(self, student, method, path, **kwargs):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": student}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": student, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             return self.client.request(method, path, headers={"Authorization": "Bearer test"}, **kwargs)
 
     def test_only_the_owner_can_delete(self):
@@ -578,7 +578,7 @@ class GroupAnalyticsDateTests(unittest.TestCase):
 
     def analytics(self, today=None):
         params = {"today": today} if today is not None else {}
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             response = self.client.get(f"/api/study-groups/{self.group['id']}/analytics", params=params,
                                        headers={"Authorization": "Bearer test"})
         self.assertEqual(response.status_code, 200, response.text)

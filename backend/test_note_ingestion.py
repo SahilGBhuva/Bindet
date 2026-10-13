@@ -120,7 +120,7 @@ class NoteIngestionTests(unittest.TestCase):
 
     def test_image_upload_uses_vision_and_persists_text(self):
         upload = UploadFile(filename="cells.png", file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "vision-student"}), patch.object(
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "vision-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.ai_tutor, "extract_image_notes", return_value="Cell membranes regulate transport."
         ) as vision:
             result = asyncio.run(main.upload_note("Biology", "Cells", upload, "Bearer test"))
@@ -136,7 +136,7 @@ class NoteIngestionTests(unittest.TestCase):
             "notes.webp": (b"%PDF-1.7", "image/webp"),
             "notes.jpeg": (b"GIF89a" + b"0" * 32, "image/jpeg"),
         }
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "sniff-student"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sniff-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(main.ai_tutor, "extract_image_notes", return_value="text") as vision, \
                 patch.object(main, "limit_action") as limits:
             for name, (raw, claimed) in disguised.items():
@@ -172,7 +172,7 @@ class NoteIngestionTests(unittest.TestCase):
             task.cancel()
             return ticks
 
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "loop-student"}), patch.object(
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "loop-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.ai_tutor, "extract_image_notes", side_effect=slow_vision
         ):
             ticks = asyncio.run(scenario())
@@ -183,7 +183,7 @@ class NoteIngestionTests(unittest.TestCase):
         def upload(name="cells.png"):
             return UploadFile(filename=name, file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
 
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "ocr-fail"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "ocr-fail", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("OpenRouter request failed")):
                 with self.assertRaises(HTTPException) as caught:
                     asyncio.run(main.upload_note("Biology", "Cells", upload(), "Bearer test"))
@@ -207,7 +207,7 @@ class NoteIngestionTests(unittest.TestCase):
     def test_scanned_pdf_falls_back_to_ai_ocr(self):
         scanned = blank_pdf(2)
         upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student"}), patch.object(
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
         ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
             result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
@@ -218,7 +218,7 @@ class NoteIngestionTests(unittest.TestCase):
     def test_scanned_pdf_ocr_only_sends_the_first_pages(self):
         scanned = blank_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 4)
         upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student"}), patch.object(
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
         ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
             result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
@@ -231,7 +231,7 @@ class NoteIngestionTests(unittest.TestCase):
         note_store.save_note("student-a", "Biology", "Cells", "cells.txt", "text/plain", "Mitochondria generate ATP.", 25)
         request = main.QuestionRequest(student_id="student-a", notes=main.NoteContext(course="Biology", unit="Cells", files=["untrusted.txt"]))
         generated = {"question": "What generates ATP?", "correct_answer": "Mitochondria", "topic": "Cells"}
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-a'}), patch.object(main.ai_tutor, "generate_question", return_value=generated) as ai:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-a', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, "generate_question", return_value=generated) as ai:
             main.generate_question(request, 'Bearer test')
         kwargs = ai.call_args.kwargs
         self.assertIn("Mitochondria generate ATP", kwargs["source_text"])
@@ -240,19 +240,19 @@ class NoteIngestionTests(unittest.TestCase):
 
     def test_note_endpoint_hides_another_students_note(self):
         saved = note_store.save_note("student-a", "History", "Rome", "rome.txt", "text/plain", "Republic", 8)
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-b"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-b", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             with self.assertRaises(HTTPException) as raised:
                 main.get_note(saved["id"], "Bearer test")
         self.assertEqual(raised.exception.status_code, 404)
 
     def test_note_delete_enforces_ownership(self):
         saved = note_store.save_note("student-a", "History", "Rome", "rome.txt", "text/plain", "Republic", 8)
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-b"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-b", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             with self.assertRaises(HTTPException) as raised:
                 main.delete_note(saved["id"], "Bearer test")
         self.assertEqual(raised.exception.status_code, 404)
         self.assertIsNotNone(note_store.get_note("student-a", saved["id"]))
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-a"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "student-a", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             self.assertEqual(main.delete_note(saved["id"], "Bearer test"), {"deleted": True})
         self.assertIsNone(note_store.get_note("student-a", saved["id"]))
 

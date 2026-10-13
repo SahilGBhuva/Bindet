@@ -107,7 +107,7 @@ class PracticeTestCase(unittest.TestCase):
         return note_store.save_note(student, course, unit, name, "text/plain", text, len(text))
 
     def call(self, method, path, student="alex", **kwargs):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": student}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": student, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             return self.client.request(method, path, headers={"Authorization": f"Bearer token-{student}"}, **kwargs)
 
     def create(self, student="alex", **body):

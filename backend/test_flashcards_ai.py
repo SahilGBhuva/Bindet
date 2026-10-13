@@ -68,7 +68,7 @@ class FlashcardTestCase(unittest.TestCase):
             connection.execute(note_store.notes.delete())
 
     def as_user(self, student_id):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def note(self, student_id="alex", text=NOTE_TEXT, course="Biology", unit="Photosynthesis", name="photo.txt"):
         return note_store.save_note(student_id, course, unit, name, "text/plain", text, len(text))["id"]
