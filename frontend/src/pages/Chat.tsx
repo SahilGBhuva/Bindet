@@ -329,13 +329,16 @@ export function Chat({ session }: { session: AuthSession | null }) {
     if (!session || !activeId) return
     let live = true
     const refresh = () => {
+      // Not in a background tab: it would drain battery and data and run into rate limits.
+      if (document.visibilityState === 'hidden') return
       void Promise.all([listGroupReadReceipts(activeId, session), listGroupTyping(activeId, session)])
         .then(([nextReceipts, nextTyping]) => { if (live) { setReceipts(nextReceipts); setTypingUsers(nextTyping) } })
         .catch(() => undefined)
     }
     refresh()
     const timer = window.setInterval(refresh, 1800)
-    return () => { live = false; window.clearInterval(timer) }
+    document.addEventListener('visibilitychange', refresh)
+    return () => { live = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh) }
   }, [session, activeId])
 
   // Every group: unread counts, list previews, and a nudge when another group gets a message.
