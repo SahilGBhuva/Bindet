@@ -560,8 +560,8 @@ function RoundPlayer({ game, onFinish }: { game: Game; onFinish: (results: boole
         return
       }
       if (!revealed && (key === ' ' || key === 'enter')) {
-        // Enter on a focused button is that button's own click.
-        if (key === 'enter' && target?.closest('button')) return
+        // Enter or Space on a focused button is that button's own click.
+        if (target?.closest('button')) return
         event.preventDefault()
         setRevealed(true)
       } else if (revealed && (key === 'j' || key === '1')) {
