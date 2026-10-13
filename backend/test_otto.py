@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 TEST_DB.close()
@@ -454,6 +454,28 @@ class PreferenceTests(OttoTestCase):
             self.assertEqual(client.get("/api/otto/profile").json(), {
                 "preferred_name": "", "personality": "friendly", "about": "", "memory_enabled": True, "memory_noticed": False,
             })
+
+    def test_first_profile_write_racing_another_one_does_not_fail(self):
+        otto.save_profile("alex", preferred_name="Al", personality="coach", about="", memory_enabled=True)
+
+        class StaleReads:
+            """A connection whose reads miss the row another request just inserted."""
+            def __init__(self, connection):
+                self.connection = connection
+
+            def execute(self, statement, *args, **kwargs):
+                if getattr(statement, "is_select", False):
+                    return MagicMock(first=lambda: None)
+                return self.connection.execute(statement, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+        with database.engine().begin() as connection:
+            otto._upsert_profile(StaleReads(connection), "alex", {"memory_noticed": True})
+        profile = otto.get_profile("alex")
+        self.assertTrue(profile["memory_noticed"])
+        self.assertEqual((profile["preferred_name"], profile["personality"]), ("Al", "coach"))
 
     def test_saved_preferences_reach_the_tutor_as_delimited_data(self):
         response = self.save(preferred_name="Sam", personality="coach",
