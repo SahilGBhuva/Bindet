@@ -7,6 +7,7 @@ import {
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { loadNotebook } from '../lib/session'
+import { formatClockTime, lowerMeridiem } from '../lib/time'
 import { toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
 import './Goals.css'
@@ -50,7 +51,6 @@ const weekdayLong = new Intl.DateTimeFormat(undefined, { weekday: 'long' })
 const weekdayDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 const monthTitle = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' })
 const longDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
-const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 const stamp = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 /* ---------- dates ---------- */
@@ -75,7 +75,7 @@ function timeLabel(value: string | null) {
   const [hours, minutes] = value.split(':').map(Number)
   const date = new Date()
   date.setHours(hours || 0, minutes || 0, 0, 0)
-  return clock.format(date).toLowerCase()
+  return formatClockTime(date)
 }
 
 /* The day part of "Monday ⏱ 4:30 pm". */
@@ -543,7 +543,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
         <h1 className="tasks-title">Tasks</h1>
 
         {visibleNotice ? (
-          <div className="tasks-notice" role="status" title={stamp.format(new Date(parseServerTime(visibleNotice.created_at)))}>
+          <div className="tasks-notice" role="status" title={lowerMeridiem(stamp.format(new Date(parseServerTime(visibleNotice.created_at))))}>
             <span className="tasks-notice__mark"><Icon name="bell" /></span>
             <p>{visibleNotice.message}</p>
             <button type="button" className="tasks-icon-button" onClick={dismissNotice} aria-label="Dismiss notification"><Icon name="close" /></button>
@@ -1257,7 +1257,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
               {detail?.comments.length ? (
                 <ol className="task-comments">
                   {detail.comments.map((item) => (
-                    <li key={item.id}><Avatar name={item.author_name} /><div><strong>{item.author_name}</strong><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time><p>{item.body}</p></div></li>
+                    <li key={item.id}><Avatar name={item.author_name} /><div><strong>{item.author_name}</strong><time dateTime={item.created_at}>{lowerMeridiem(stamp.format(new Date(parseServerTime(item.created_at))))}</time><p>{item.body}</p></div></li>
                   ))}
                 </ol>
               ) : null}
@@ -1275,7 +1275,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
             <section className="task-section">
               <h3>Activity</h3>
               <ol className="task-activity">
-                {detail.activity.map((item) => <li key={item.id}><span><strong>{item.actor_name}</strong> {activityText(item)}</span><time dateTime={item.created_at}>{stamp.format(new Date(parseServerTime(item.created_at)))}</time></li>)}
+                {detail.activity.map((item) => <li key={item.id}><span><strong>{item.actor_name}</strong> {activityText(item)}</span><time dateTime={item.created_at}>{lowerMeridiem(stamp.format(new Date(parseServerTime(item.created_at))))}</time></li>)}
               </ol>
             </section>
           ) : null}

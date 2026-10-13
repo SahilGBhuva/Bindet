@@ -7,6 +7,7 @@ import { mergeNoteScopes, withCourseTones } from '../lib/session'
 import { loadHiddenCourses } from '../lib/studyPrefs'
 import { REVIEW_ALL_HASH, useReviewSummary } from '../lib/useReviewSummary'
 import { rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
+import { formatClockTime } from '../lib/time'
 import { toneClass, toneForName } from '../lib/tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
@@ -29,7 +30,6 @@ const COMPACT_WIDTH = 780 // keep in step with the container query in Home.css
 const WINDOW = 6 // one open card and up to five folded slices
 const MONTHS = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'June', 'July', 'Aug.', 'Sept.', 'Oct.', 'Nov.', 'Dec.']
 const monthDay = new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' })
-const clockFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 
 const PRIORITY_RANK: Record<Task['priority'], number> = { urgent: 0, high: 1, medium: 2, low: 3 }
 const THEME_NEXT: Record<ThemePreference, ThemePreference> = { system: 'light', light: 'dark', dark: 'system' }
@@ -69,7 +69,7 @@ function byDue(a: Task, b: Task) {
 
 /* "10:43 am" */
 function clock(timestamp: number) {
-  return clockFormat.format(new Date(timestamp)).replace(/\s?([AP]M)$/i, (_, meridiem: string) => ` ${meridiem.toLowerCase()}`)
+  return formatClockTime(timestamp)
 }
 
 function ordinal(day: number) {

@@ -5,6 +5,7 @@ import type { PracticeTest as PracticeTestData, PracticeTestOptions, PracticeTes
 import { useData } from '../../lib/dataSource'
 import { clearPracticeDraft, formatClock, loadPracticeDraft, savePracticeDraft, suggestedMinutes } from '../../lib/practice'
 import { INSTRUCTIONS_MAX } from '../../lib/studyPrefs'
+import { lowerMeridiem } from '../../lib/time'
 import { MathText } from '../math/Math'
 import './PracticeTest.css'
 
@@ -51,7 +52,7 @@ const dayTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numer
 
 function when(value: string | null) {
   const time = parseServerTime(value)
-  return Number.isNaN(time) ? '' : dayTime.format(time)
+  return Number.isNaN(time) ? '' : lowerMeridiem(dayTime.format(time))
 }
 
 function CheckIcon() {

@@ -8,6 +8,7 @@ import {
   isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages, CHAT_LOAD_ERROR, type RealtimeStatus,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
+import { formatClockTime } from '../lib/time'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import './Chat.css'
@@ -47,7 +48,6 @@ const signedUrls = new Map<string, { url: string; expires: number }>()
 /* Images this device just sent, shown from the local copy instead of being downloaded again. */
 const localPreviews = new Map<string, string>()
 
-const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 const dayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
 const shortDayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
@@ -75,7 +75,7 @@ function dayLabel(iso: string) {
 
 function listTime(iso: string) {
   const value = time(iso)
-  return startOfDay(value) === startOfDay(Date.now()) ? timeFormat.format(value) : shortDayFormat.format(value)
+  return startOfDay(value) === startOfDay(Date.now()) ? formatClockTime(value) : shortDayFormat.format(value)
 }
 
 function formatFileSize(bytes: number) {
@@ -699,7 +699,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
               const newDay = !previous || startOfDay(time(previous.created_at)) !== startOfDay(time(message.created_at))
               const grouped = !newDay && previous?.sender_id === message.sender_id && time(message.created_at) - time(previous.created_at) < GROUPING_WINDOW
               const name = memberName(message.sender_id, message.sender?.display_name)
-              const stamp = timeFormat.format(time(message.created_at))
+              const stamp = formatClockTime(time(message.created_at))
               return (
                 <div key={message.id} className={`chat__item${grouped ? ' is-grouped' : ''}`}>
                   {newDay ? <p className="chat__day"><span>{dayLabel(message.created_at)}</span></p> : null}
