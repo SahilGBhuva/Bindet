@@ -1294,11 +1294,18 @@ def _announce_study_day(connection, student_id: str, today: date) -> None:
     _send_streak_notices(connection, notices)
 
 
-def record_daily_login(student_id: str) -> dict:
+def record_daily_login(student_id: str, require_profile: bool = False) -> dict | None:
+    """Count today's sign-in for the login streak. With require_profile, does nothing and
+    returns None when the student has no profile row (a deleted account whose token is still
+    cached elsewhere must not get its progress row back)."""
     init_db()
     today = local_today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
+        if require_profile and connection.execute(
+            select(profiles.c.student_id).where(profiles.c.student_id == student_id)
+        ).first() is None:
+            return None
         progress = connection.execute(
             select(student_progress).where(student_progress.c.student_id == student_id)
         ).mappings().first()

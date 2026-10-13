@@ -1542,11 +1542,12 @@ def auth_me(authorization: Annotated[str | None, Header()] = None):
 @app.get("/api/account/profile", response_model=ProfileResponse)
 def get_account_profile(authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
-    database.record_daily_login(user["id"])
+    # Writes nothing without a profile row: after account deletion, a token still cached on
+    # another instance must not recreate the student's progress.
+    progress = database.record_daily_login(user["id"], require_profile=True)
     profile = database.get_profile(user["id"])
     if profile is None:
         raise HTTPException(status_code=404, detail="Finish setting up your profile")
-    progress = database.get_progress(user["id"])
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)

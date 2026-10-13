@@ -384,6 +384,16 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200)
         self.assertEqual(self.rows_mentioning(ALEX), {})
 
+    def test_a_cached_token_reading_the_profile_after_deletion_recreates_nothing(self):
+        self.assertEqual(self.delete().status_code, 200)
+        # Another instance still has the token cached: the app opens and reads the profile.
+        with patch.object(auth, "authenticated_user", return_value={"id": ALEX, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+            response = self.client.get("/api/account/profile", headers={"Authorization": fresh_token(ALEX)})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.rows_mentioning(ALEX), {})
+        self.assertIsNone(database.record_daily_login(ALEX, require_profile=True))
+        self.assertEqual(self.rows_mentioning(ALEX), {})
+
     def test_wrong_or_missing_confirmation_is_refused(self):
         for body in ({"confirm": "delete my account"}, {"confirm": "DELETE MY ACCOUNT "}, {"confirm": ""}, {}, None):
             result = self.delete(body=body)
