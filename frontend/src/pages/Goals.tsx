@@ -225,7 +225,14 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [notice, setNotice] = useState<SocialNotification | null>(() => token ? latestTaskNotice(getCachedFriends(token)?.notifications) : null)
   const [dismissedNotice, setDismissedNotice] = useState(() => { try { return localStorage.getItem('bindit:tasks:dismissed-notice') ?? '' } catch { return '' } })
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [today] = useState(() => isoDay(new Date()))
+  const [today, setToday] = useState(() => isoDay(new Date()))
+  // A tab left open past midnight moves on to the new day (Today, overdue flags, the calendar).
+  useEffect(() => {
+    const tick = () => setToday(isoDay(new Date()))
+    const timer = window.setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', tick) }
+  }, [])
   const [reload, setReload] = useState(0)
   const [fetched, setFetched] = useState(false)
   const [link, setLink] = useState<TaskLink | null>(readTaskLink)
@@ -401,6 +408,8 @@ export function Goals({ session }: { session: AuthSession | null }) {
       }
     } catch (error) {
       replaceTask(taskId, previous)
+      // Another edit may have landed meanwhile: reload the real task rather than trust the snapshot.
+      void getTask(taskId, token).then((fresh) => replaceTask(taskId, fresh)).catch(() => undefined)
       const movingToPersonal = Boolean(previous.group_id) && changes.group_id === null
       const text = movingToPersonal && error instanceof ApiError && error.code === 'task_manage_forbidden'
         ? 'Only the creator can move this task out of the group.'
