@@ -296,6 +296,21 @@ class SubmitTests(PracticeTestCase):
         self.assertEqual(practice_tests.xp_left_today("alex"), 0)
         self.assertEqual(practice_tests.xp_left_today("sam"), practice_tests.XP_PER_DAY)
 
+    def test_parallel_submits_cannot_pass_the_practice_xp_cap(self):
+        while practice_tests.xp_left_today("alex"):
+            test, answers = self.take()
+            self.submit(test["id"], answers)
+        test, answers = self.take()
+        keys = []
+        real_lock = database._advisory_lock
+        # A parallel submit read "XP left" before the others finished: that stale read must not count.
+        with patch.object(practice_tests, "xp_left_today", return_value=practice_tests.XP_PER_DAY), \
+                patch.object(database, "_advisory_lock", side_effect=lambda conn, key: (keys.append(key), real_lock(conn, key))):
+            result = self.submit(test["id"], answers).json()
+        self.assertEqual(result["xp_earned"], 0)
+        self.assertIn("practice:xp:alex", keys)
+        self.assertLess(keys.index("practice:xp:alex"), keys.index("xp:alex"))  # documented lock order
+
     def test_a_test_being_graded_refuses_a_second_submit(self):
         test, answers = self.take()
         token = practice_tests.claim_grading("alex", test["id"])
