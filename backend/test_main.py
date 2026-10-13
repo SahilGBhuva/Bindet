@@ -210,6 +210,19 @@ class BinditBackendTests(unittest.TestCase):
         self.assertFalse(main.answers_match('3', '3.5'))
         self.assertTrue(main.answers_match('mendel', 'mendel.pdf'))
 
+    def test_commas_only_count_as_thousands_separators(self):
+        self.assertFalse(main.answers_match('1,5', '15'))
+        self.assertFalse(main.answers_match('15', '1,5'))
+        self.assertFalse(main.answers_match('1,00', '100'))
+        self.assertFalse(main.answers_match('10,00,000', '1000000'))
+        self.assertIsNone(main.parse_number('1,5'))
+        self.assertTrue(main.answers_match('1,000', '1000'))
+        self.assertTrue(main.answers_match('12,345.5', '12345.5'))
+        self.assertTrue(main.answers_match('-1,000,000', '-1000000'))
+        self.assertTrue(main.answers_match('1,000%', '1000'))
+        self.assertTrue(main.answers_match('1,5', '1,5'))  # same text still matches
+        self.assertEqual(main.parse_number('1,000'), main.Decimal('1000'))
+
     def test_hostile_numbers_never_crash_the_grader(self):
         hostile = ['sNaN', '-sNaN', 'NaN', 'Infinity', '-Infinity', 'inf', '1e999999999', '1e-999999999',
                    '1e51', '1/0', '1e999999999/3', 'sNaN%', '12', '0', '3.5 cm']

@@ -770,10 +770,18 @@ def finite_decimal(text: str) -> Decimal | None:
         return None
 
 
+# Commas only count as thousands separators ("1,000", "12,345.6"); "1,5" is not 15.
+_THOUSANDS = re.compile(r"^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$")
+
+
 def parse_number(value: str) -> Decimal | None:
-    cleaned = value.strip().replace(",", "")
+    cleaned = value.strip()
     if cleaned.endswith("%"):
         cleaned = cleaned[:-1].strip()
+    if "," in cleaned:
+        if not _THOUSANDS.match(cleaned):
+            return None
+        cleaned = cleaned.replace(",", "")
     return finite_decimal(cleaned)
 
 
