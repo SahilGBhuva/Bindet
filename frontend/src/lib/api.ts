@@ -292,7 +292,14 @@ const inFlight = new Map<string, Promise<unknown>>()
 
 export function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }, accessToken?: string): Promise<T> {
   const method = (options?.method ?? 'GET').toUpperCase()
-  if (method !== 'GET' || options?.body) return sendRequest<T>(path, options, accessToken)
+  if (method !== 'GET' || options?.body) {
+    // A change on the server makes any GET already on its way out of date: later reads
+    // (including forced refreshes after this change) must start a fresh request.
+    inFlight.clear()
+    const sent = sendRequest<T>(path, options, accessToken)
+    sent.then(() => inFlight.clear(), () => inFlight.clear())
+    return sent
+  }
   const key = `${accessToken ?? ''}|${path}`
   let shared = inFlight.get(key) as Promise<T> | undefined
   if (!shared) {
