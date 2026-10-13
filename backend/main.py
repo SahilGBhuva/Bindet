@@ -2613,7 +2613,8 @@ def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
     Data goes first, in one transaction; the login last. If removing the login fails the
     data is already gone and the answer is 502 auth_delete_failed; calling again is safe
     (there is nothing left to delete) and retries the login removal."""
-    user = auth.authenticated_user(authorization)
+    # Even an account at a temporary-email service may delete itself.
+    user = auth.authenticated_user(authorization, allow_disposable=True)
     student_id = user["id"]
     if not auth.account_deletion_enabled():
         # Never delete the data while the login would have to stay behind.

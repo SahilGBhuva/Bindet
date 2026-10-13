@@ -12,6 +12,7 @@ import httpx
 from fastapi import HTTPException
 
 import rate_limit
+from disposable_email import is_disposable
 
 # Verification results are cached briefly per token, so repeated requests and
 # junk tokens don't each cost a round trip to Supabase. A successful result is kept
@@ -250,7 +251,16 @@ def is_owner_token(authorization: str) -> bool:
     return bool(cached and cached[0] is not None and is_owner_user(cached[0]))
 
 
-def authenticated_user(authorization: str | None) -> dict:
+DISPOSABLE_EMAIL = 'bindet doesn’t work with temporary email addresses. Sign up with your school or personal email.'
+
+
+def _refuse_disposable(user: dict) -> None:
+    """Accounts at throwaway inbox services (10-minute mail and the like) can't use bindet."""
+    if is_disposable(user.get('email')) and not is_owner_user(user):
+        raise HTTPException(status_code=403, detail={'code': 'email_disposable', 'message': DISPOSABLE_EMAIL})
+
+
+def authenticated_user(authorization: str | None, *, allow_disposable: bool = False) -> dict:
     if not authorization or not authorization.lower().startswith('bearer '):
         raise HTTPException(status_code=401, detail='Sign in required')
     now = time.monotonic()
@@ -260,6 +270,8 @@ def authenticated_user(authorization: str | None) -> dict:
         user, detail = cached
         if user is None:
             raise _reject(detail)
+        if not allow_disposable:
+            _refuse_disposable(user)
         _note_owner(user)
         return user
     if rate_limit.limiter.is_limited(f'badauth:{rate_limit.client_address.get()}', FAILED_AUTH_PER_MINUTE):
@@ -281,5 +293,7 @@ def authenticated_user(authorization: str | None) -> dict:
         _remember(key, None, 'Invalid account', now)
         raise _reject('Invalid account')
     _remember(key, user, '', now, _cache_seconds(authorization))
+    if not allow_disposable:
+        _refuse_disposable(user)
     _note_owner(user)
     return user

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { DISPOSABLE_EMAIL_MESSAGE, isDisposableEmail } from '../lib/disposableEmail'
 import {
   AUTH_SESSION_KEY,
   AuthRequestError,
@@ -382,6 +383,23 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
 
+  if (session && isDisposableEmail(session.user.email ?? '')) {
+    return (
+      <main className="auth">
+        <section className="auth-card" aria-labelledby="auth-title">
+          <img className="auth-card__mascot" src="/bindit-mascot-cutout.webp" alt="" width="240" height="288" />
+          <AuthBrand />
+          <p className="auth-eyebrow">Temporary email</p>
+          <h1 className="auth-title" id="auth-title">Use a real email address</h1>
+          <p className="auth-lead">{DISPOSABLE_EMAIL_MESSAGE}</p>
+          <button className="auth-submit" type="button" onClick={() => signOutAndReload()}>
+            Sign out
+          </button>
+        </section>
+      </main>
+    )
+  }
+
   if (linkGate?.kind === 'other-account') {
     return (
       <main className="auth">
@@ -600,6 +618,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
             throw err
           }
         } else {
+          if (isDisposableEmail(trimmed)) {
+            setError(DISPOSABLE_EMAIL_MESSAGE)
+            return
+          }
           if (password.length < PASSWORD_MIN) {
             setError(`Use at least ${PASSWORD_MIN} characters for your password.`)
             return
