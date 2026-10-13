@@ -98,6 +98,25 @@ class NoteIngestionTests(unittest.TestCase):
             note_ingestion.collect_page_text(pages, deadline=0.0)
         pages[0].extract_text.assert_not_called()
 
+    def test_scanned_pdf_is_trimmed_in_a_timed_child_process(self):
+        import subprocess
+        content = blank_pdf(20)
+        with patch.object(note_ingestion, "first_pdf_pages_in_process", side_effect=AssertionError("ran in-process")):
+            trimmed, omitted = note_ingestion.first_pdf_pages(content)
+        self.assertEqual(omitted, 5)
+        self.assertEqual(len(PdfReader(BytesIO(trimmed)).pages), note_ingestion.MAX_OCR_PDF_PAGES)
+        small = blank_pdf(3)
+        self.assertEqual(note_ingestion.first_pdf_pages(small), (small, 0))
+        with patch.object(note_ingestion.subprocess, "run", side_effect=subprocess.TimeoutExpired("python", 10)) as run:
+            with self.assertRaises(note_ingestion.PdfTimeout):
+                note_ingestion.first_pdf_pages(content)
+        self.assertEqual(run.call_args.kwargs["timeout"], note_ingestion.PDF_TIME_LIMIT_SECONDS)
+        with self.assertRaisesRegex(note_ingestion.NoteIngestionError, "Could not read"):
+            note_ingestion.first_pdf_pages(b"%PDF-1.7 garbage")
+        # In-process (no child processes on the host), the deadline is checked between pages.
+        with self.assertRaises(note_ingestion.PdfTimeout):
+            note_ingestion.first_pdf_pages_in_process(content, 15, deadline=0.0)
+
     def test_pdf_extraction_stops_after_enough_text(self):
         pages = [MagicMock() for _ in range(10)]
         for page in pages:
