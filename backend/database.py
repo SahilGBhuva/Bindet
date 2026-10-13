@@ -759,7 +759,9 @@ def init_db() -> None:
 
 
 def _next_streak(current_streak: int, last_active: date | None, correct: bool, today: date) -> int:
-    if not correct or last_active == today:
+    # last_active can be AFTER today when the student's offset moves the local day back
+    # (travel, a DST change, a different device): the streak already counts that day.
+    if not correct or (last_active is not None and last_active >= today):
         return current_streak
     if last_active == today - timedelta(days=1):
         return current_streak + 1
@@ -794,8 +796,13 @@ def live_streak(streak: int | None, last_date: date | None, today: date | None =
     return int(streak) if last_date >= today - timedelta(days=1) else 0
 
 
+def _active_date(last_active: date | None, today: date) -> date:
+    """The new last_active_date: today, but never earlier than the stored one."""
+    return today if last_active is None else max(last_active, today)
+
+
 def _next_login_streak(current_streak: int, last_login: date | None, today: date) -> int:
-    if last_login == today:
+    if last_login is not None and last_login >= today:
         return current_streak
     if last_login == today - timedelta(days=1):
         return current_streak + 1
@@ -912,7 +919,7 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
                 correct_answers=student_progress.c.correct_answers + int(correct),
                 streak=streak,
                 best_streak=max(progress["best_streak"], streak),
-                last_active_date=today if correct else progress["last_active_date"],
+                last_active_date=_active_date(progress["last_active_date"], today) if correct else progress["last_active_date"],
                 updated_at=now,
             )
         )
@@ -995,7 +1002,7 @@ def award_xp(student_id: str, xp: int) -> dict:
             streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
             connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
                 total_xp=total, streak=streak, best_streak=max(int(progress["best_streak"]), streak),
-                last_active_date=today, updated_at=now,
+                last_active_date=_active_date(progress["last_active_date"], today), updated_at=now,
             ))
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
@@ -1028,7 +1035,7 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
         total_xp=student_progress.c.total_xp + xp,
         streak=streak,
         best_streak=max(progress["best_streak"], streak),
-        last_active_date=today if active else progress["last_active_date"],
+        last_active_date=_active_date(progress["last_active_date"], today) if active else progress["last_active_date"],
         updated_at=now,
     ))
     total = connection.execute(
@@ -1058,7 +1065,7 @@ def mark_study_day(student_id: str) -> int:
             return 1
         # Written even when the streak already counts today (idempotent), so the day is never missed.
         record_study_day(connection, student_id, today)
-        if progress["last_active_date"] == today:
+        if progress["last_active_date"] is not None and progress["last_active_date"] >= today:
             return int(progress["streak"])
         streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
         connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
@@ -1302,7 +1309,8 @@ def record_daily_login(student_id: str) -> dict:
                 login_streak=1, best_login_streak=1, last_login_date=today,
                 updated_at=now,
             ))
-        elif progress["last_login_date"] != today:
+        elif progress["last_login_date"] is None or progress["last_login_date"] < today:
+            # Never moves backwards when the offset puts "today" before the stored day.
             login_streak = _next_login_streak(
                 progress.get("login_streak", 0),
                 progress.get("last_login_date"),

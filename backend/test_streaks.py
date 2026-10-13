@@ -50,5 +50,33 @@ class StreakDayTests(unittest.TestCase):
         self.assertEqual(database.get_progress(student)["streak"], 1)
 
 
+    def test_an_earlier_local_day_keeps_the_streak(self):
+        today = date(2026, 10, 7)
+        yesterday = today - timedelta(days=1)
+        # Last active "tomorrow" by this request's clock (the offset moved the day back).
+        self.assertEqual(database._next_streak(5, today, True, yesterday), 5)
+        self.assertEqual(database._next_login_streak(4, today, yesterday), 4)
+
+    def test_a_backwards_offset_never_resets_or_rewinds_the_streak(self):
+        student = "streak-offset-student"
+        database.client_tz_offset.set(-840)  # UTC+14: already "tomorrow"
+        database.update_progress(student, "t", True, 5)
+        database.record_daily_login(student)
+        ahead = database.get_progress(student)
+        database.client_tz_offset.set(720)   # UTC-12: the local day moves back
+        database.update_progress(student, "t", True, 5)
+        database.award_xp(student, 1)
+        database.mark_study_day(student)
+        database.record_daily_login(student)
+        with database.engine().connect() as connection:
+            row = connection.execute(database.select(database.student_progress).where(
+                database.student_progress.c.student_id == student)).mappings().one()
+        self.assertEqual(row["streak"], 1)
+        self.assertEqual(row["login_streak"], 1)
+        database.client_tz_offset.set(-840)
+        self.assertEqual(row["last_active_date"], database.local_today())
+        self.assertEqual(row["last_login_date"], database.local_today())
+        self.assertEqual(ahead["streak"], 1)
+
 if __name__ == "__main__":
     unittest.main()
