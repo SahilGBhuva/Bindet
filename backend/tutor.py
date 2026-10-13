@@ -221,10 +221,16 @@ def last_reply_turn(owner_id: str, conversation_id: str) -> tuple[dict, int] | N
     return _message(last_two[1]), last_two[0]["id"]
 
 
+class ReplyAlreadyReplaced(Exception):
+    """Regenerate lost a race: another request already replaced (or deleted) the old reply."""
+
+
 def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, content: str,
                   attachments: list[str] | None = None, model_tier: str = "") -> dict:
     """For Regenerate: save the new reply and remove the one it replaces (and its rating) in one
-    transaction, so the conversation always has exactly one answer to that turn."""
+    transaction, so the conversation always has exactly one answer to that turn.
+    Raises ReplyAlreadyReplaced (nothing saved) when the old reply is already gone, so two
+    parallel Regenerates can't leave two answers."""
     init_tutor()
     now = datetime.now(timezone.utc)
     with database.engine().begin() as connection:
@@ -232,7 +238,8 @@ def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, conten
         old = messages.c.id == old_reply_id
         mine = (messages.c.conversation_id == conversation_id) & (messages.c.role == "assistant")
         connection.execute(delete(ratings).where(ratings.c.message_id == old_reply_id, ratings.c.conversation_id == conversation_id))
-        connection.execute(delete(messages).where(old, mine))
+        if not connection.execute(delete(messages).where(old, mine)).rowcount:
+            raise ReplyAlreadyReplaced(old_reply_id)  # rolls the transaction back
         message_id = connection.execute(messages.insert().values(
             conversation_id=conversation_id, role="assistant", content=content,
             attachments=json.dumps([name[:120] for name in (attachments or [])][:3]), model_tier=model_tier, created_at=now,

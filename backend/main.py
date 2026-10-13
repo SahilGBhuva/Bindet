@@ -1973,6 +1973,7 @@ TUTOR_DAILY_LIMITED = "You’ve reached today’s limit with Otto. It resets wit
 TUTOR_TOO_MANY_STREAMS = "Otto is still answering your other messages. Wait for one to finish, then try again."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
+TUTOR_ALREADY_REGENERATED = "This reply was already regenerated. Refresh to see the newest answer."
 TUTOR_REGENERATE_FAILED = "Otto couldn’t write a new answer right now, so your previous answer is still here. Try again in a moment."
 
 
@@ -2260,7 +2261,13 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 failed = True
                 yield sse("error", {"message": TUTOR_REGENERATE_FAILED, "retry": True, "kept": True})
                 return
-            reply = save_reply("".join(chunks), guide_reply.get("attachments"))
+            try:
+                reply = save_reply("".join(chunks), guide_reply.get("attachments"))
+            except tutor.ReplyAlreadyReplaced:
+                # A parallel Regenerate already replaced this reply: keep that one, save nothing.
+                failed = True
+                yield sse("error", {"message": TUTOR_ALREADY_REGENERATED, "retry": False, "status": 409})
+                return
             saved = True
             yield sse("done", {"message": reply})
             # The reply is complete: free the stream slot, then do Otto's housekeeping (a title
@@ -2295,7 +2302,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # after the question it answers.
             # A stopped regeneration replaces the old reply with what was written, as the app shows.
             if chunks and not saved and not failed and (old_reply_id is None or "".join(chunks).strip()) and saved_user():
-                save_reply("".join(chunks))
+                try:
+                    save_reply("".join(chunks))
+                except tutor.ReplyAlreadyReplaced:
+                    pass  # another Regenerate already saved its answer to this turn
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
