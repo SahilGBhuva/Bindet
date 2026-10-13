@@ -132,6 +132,7 @@ export function HelpBot({ screen, session }: { screen: Screen; session: AuthSess
         type="button"
         className={`helpbot__fab${open ? ' is-open' : ''}${tucked ? ' is-tucked' : ''}`}
         aria-label="Help using bindet"
+        title="Help"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}

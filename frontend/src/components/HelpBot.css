@@ -40,6 +40,24 @@
 .helpbot__fab.is-open { border-color: var(--color-brand); }
 .helpbot__fab svg { width: 20px; height: 20px; fill: none; stroke: var(--color-brand-text); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
+/* Desktop: a compact icon button that sits in the page's right gutter instead of on top of
+   the last card in view. Pages keep a gutter of at least 48px while it is there (at 1200px
+   and wider that is already the page padding, so nothing moves). */
+@media (min-width: 861px) {
+  .helpbot__fab {
+    right: 6px;
+    bottom: 16px;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    justify-content: center;
+    border-radius: var(--radius-md);
+  }
+  .helpbot__fab svg { width: 18px; height: 18px; }
+  .helpbot__fab-label { display: none; }
+  .app-shell:has(> .helpbot__fab) > .sheet { padding-right: max(0px, 48px - clamp(20px, 4vw, 48px)); }
+}
+
 .helpbot__panel {
   position: fixed;
   right: 20px;
