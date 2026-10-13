@@ -596,9 +596,9 @@ function AccountSummary({ stats, failed, onRetry }: { stats: ProgressData | null
         <div className="ui-panel progress__account-sheet" aria-busy={loading || undefined}>
           <div className="ui-stats progress__stats">
             <div className="ui-stat">
-              <span className="ui-stat__label">Login streak</span>
-              <span className="ui-stat__value">{value(<>{stats?.login_streak ?? 0}<span className="ui-stat__unit">{stats?.login_streak === 1 ? 'day' : 'days'}</span></>)}</span>
-              {stats ? <span className="ui-stat__meta">Best {stats.best_login_streak} {stats.best_login_streak === 1 ? 'day' : 'days'}</span> : null}
+              <span className="ui-stat__label">Study streak</span>
+              <span className="ui-stat__value">{value(<>{stats?.streak ?? 0}<span className="ui-stat__unit">{stats?.streak === 1 ? 'day' : 'days'}</span></>)}</span>
+              {stats ? <span className="ui-stat__meta">Best {stats.best_streak} {stats.best_streak === 1 ? 'day' : 'days'}</span> : null}
             </div>
             <div className="ui-stat">
               <span className="ui-stat__label">Total XP</span>

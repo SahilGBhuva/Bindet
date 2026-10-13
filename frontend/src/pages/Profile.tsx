@@ -464,7 +464,8 @@ export function Profile({ session, onError }: ProfileProps) {
 
   const totalXp = profile?.total_xp ?? stats?.total_xp ?? 0
   const { level, inLevel, toNext } = xpLevel(totalXp)
-  const loginStreak = profile?.login_streak ?? stats?.login_streak ?? 0
+  // The study streak, the same one Home, the league and friend streaks show.
+  const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
   const unitStats = stats?.topics ?? []
   const username = profile?.username ?? 'Learner'
   const displayName = profile?.display_name ?? username
@@ -533,10 +534,10 @@ export function Profile({ session, onError }: ProfileProps) {
           <span className="ui-stat__meta">{toNext} XP to level {level + 1}</span>
         </div>
         <div className="ui-stat">
-          <span className="ui-stat__label">Login streak</span>
+          <span className="ui-stat__label">Study streak</span>
           <span className="ui-stat__value profile__streak">
-            {loginStreak}<span className="ui-stat__unit">{loginStreak === 1 ? 'day' : 'days'}</span>
-            {loginStreak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" title={`${loginStreak}-day streak`} /> : null}
+            {streak}<span className="ui-stat__unit">{streak === 1 ? 'day' : 'days'}</span>
+            {streak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" title={`${streak}-day streak`} /> : null}
           </span>
         </div>
         <div className="ui-stat">
