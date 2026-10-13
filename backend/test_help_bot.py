@@ -41,7 +41,7 @@ class HelpBotTests(unittest.TestCase):
             self.sent.append(payload)
             return model_says(reply)
 
-        with patch.object(main.auth, "authenticated_user", return_value={"id": student}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": student, "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(ai_tutor, "_post", side_effect=fake_post):
             return main.ask_help_bot(main.HelpBotQuestion(question=question), "Bearer t")
 
@@ -99,10 +99,21 @@ class HelpBotTests(unittest.TestCase):
     def test_global_budget_is_spent_and_enforced(self):
         self.ask("How do I change the color of a course?")
         self.assertEqual(help_bot._used(main.GLOBAL_AI_BUDGET_ID, "ai_call", 1440), 1)
-        with patch.object(main, "ai_daily_global_limit", return_value=1):
+        with patch.object(main, "ai_daily_global_limit", return_value=1), patch.object(main, "ai_account_daily_limit", return_value=100):
             error = self.status_of("How do I rename a unit in my course?")
         self.assertEqual(error.status_code, 503)
         self.assertEqual(len(self.sent), 1)
+
+    def test_one_account_can_only_use_its_share_of_the_global_budget(self):
+        self.assertEqual(main.ai_account_daily_limit(), main.ai_daily_global_limit() * 2 // 100)
+        with patch.object(main, "ai_account_daily_limit", return_value=1):
+            self.ask("How do I change the color of a course?")
+            error = self.status_of("How do I rename a unit in my course?")
+            self.assertEqual(error.status_code, 429)
+            self.assertEqual(error.detail, main.AI_ACCOUNT_SHARE_USED)
+            self.assertEqual(len(self.sent), 1)
+            self.ask("How do I rename a unit in my course?", student="sam")  # others are unaffected
+        self.assertEqual(help_bot._used(main.GLOBAL_AI_BUDGET_ID, "ai_call", 1440), 2)
 
     # --- cache -------------------------------------------------------------------------
 
@@ -236,7 +247,7 @@ class HelpBotTests(unittest.TestCase):
             self.assertEqual(connection.execute(help_bot.help_bot_cache.select()).all(), [])
 
     def test_model_failure_is_a_friendly_503(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(ai_tutor, "_post", side_effect=ai_tutor.AITutorError("down")):
             with self.assertRaises(HTTPException) as caught:
                 main.ask_help_bot(main.HelpBotQuestion(question="How do I change the color of a course?"), "Bearer t")
@@ -257,7 +268,7 @@ class HelpBotTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 401)
 
     def test_usage_endpoint(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             self.assertEqual(main.help_bot_usage("Bearer t"), {"daily_limit": 5, "hourly_limit": 3, "remaining_today": 5, "remaining_this_hour": 3})
 
     def test_path_has_the_ai_burst_cap(self):

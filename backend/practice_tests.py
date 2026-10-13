@@ -255,11 +255,16 @@ def release_grading(owner_id: str, test_id: str, token: str) -> None:
 def finish(owner_id: str, test_id: str, token: str, results: dict[int, dict], *, submitted_at: datetime,
            over_time: bool, xp: int) -> dict:
     """Store the graded answers and mark the test submitted (only with this request's claim).
-    results: {position: {student_answer, correct, grading_source, feedback}}. Raises Conflict
-    when the claim was lost (it went stale and another request took it)."""
+    results: {position: {student_answer, correct, grading_source, feedback}}. xp is what the
+    answers earned; it is capped here by what is left of today's practice-test XP, under the
+    practice:xp:{owner} lock, so parallel submits can't pass the cap. The public result's
+    xp_earned is the capped value. Raises Conflict when the claim was lost (it went stale and
+    another request took it). Lock order: practice:xp:{owner} before xp:{owner} (database.py)."""
     init_practice()
     score = sum(1 for result in results.values() if result["correct"])
     with _guard(), database.engine().begin() as connection:
+        database._advisory_lock(connection, f"practice:xp:{owner_id}")
+        xp = max(0, min(int(xp), _xp_left(connection, owner_id)))
         claimed = connection.execute(update(tests).where(
             tests.c.id == test_id, tests.c.owner_id == owner_id, tests.c.status == "grading", tests.c.grading_token == token,
         ).values(status="submitted", submitted_at=submitted_at, score=score, over_time=over_time, xp_awarded=xp,
@@ -278,12 +283,16 @@ def finish(owner_id: str, test_id: str, token: str, results: dict[int, dict], *,
 def xp_left_today(owner_id: str) -> int:
     """How much practice-test XP the owner can still earn today (UTC)."""
     init_practice()
+    with database.engine().connect() as connection:
+        return _xp_left(connection, owner_id)
+
+
+def _xp_left(connection, owner_id: str) -> int:
     now = _now()
     day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
-    with database.engine().connect() as connection:
-        earned = connection.execute(select(func.coalesce(func.sum(tests.c.xp_awarded), 0)).where(
-            tests.c.owner_id == owner_id, tests.c.status == "submitted", tests.c.submitted_at >= day_start,
-        )).scalar_one()
+    earned = connection.execute(select(func.coalesce(func.sum(tests.c.xp_awarded), 0)).where(
+        tests.c.owner_id == owner_id, tests.c.status == "submitted", tests.c.submitted_at >= day_start,
+    )).scalar_one()
     return max(0, XP_PER_DAY - int(earned))
 
 

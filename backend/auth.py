@@ -225,6 +225,16 @@ def is_owner_user(user: dict | None) -> bool:
     return bool(email and confirmed and email in owner_emails())
 
 
+def may_use_ai(user: dict | None) -> bool:
+    """AI features need a real account: not anonymous, with a confirmed email (Google sign-in
+    sets email_confirmed_at too). Owners always may."""
+    if not user:
+        return False
+    if is_owner_user(user):
+        return True
+    return not user.get('is_anonymous') and bool(user.get('email_confirmed_at'))
+
+
 def _note_owner(user: dict) -> None:
     if is_owner_user(user):
         rate_limit.mark_owner(str(user['id']))

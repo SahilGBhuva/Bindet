@@ -33,7 +33,7 @@ class BinditFlashcardTests(unittest.TestCase):
             {'front': 'What is an adaptation?', 'back': 'A heritable trait that increases reproductive success in an environment.', 'topic': 'Natural Selection'},
             {'front': 'Why does variation matter?', 'back': 'Selection can only act when individuals differ in heritable traits.', 'topic': 'Natural Selection'},
         ]
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1'}), patch.object(main.ai_tutor, 'generate_flashcards', return_value=cards) as mocked:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_flashcards', return_value=cards) as mocked:
             result = main.generate_flashcards(
                 main.FlashcardRequest(
                     student_id='student-1',
@@ -58,7 +58,7 @@ class BinditFlashcardTests(unittest.TestCase):
             {'front': 'What is ATP?', 'back': 'The cell’s main immediate energy-carrying molecule.', 'topic': 'Cell Biology'},
             {'front': 'Where does glycolysis occur?', 'back': 'In the cytosol.', 'topic': 'Cell Biology'},
         ]
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1'}), patch.object(main.ai_tutor, 'generate_flashcards', return_value=cards) as mocked:
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_flashcards', return_value=cards) as mocked:
             result = main.generate_flashcards(
                 main.FlashcardRequest(student_id='student-1', course='Biology', unit='Cell Biology', count=3), 'Bearer test'
             )
@@ -68,7 +68,7 @@ class BinditFlashcardTests(unittest.TestCase):
 
     def test_flashcard_ai_failure_returns_service_error(self):
         self.add_note('History', 'Industrial Revolution', 'Steam power transformed textile production in Britain.')
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1'}), patch.object(main.ai_tutor, 'generate_flashcards', side_effect=main.ai_tutor.AITutorError('offline')):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'generate_flashcards', side_effect=main.ai_tutor.AITutorError('offline')):
             with self.assertRaises(main.HTTPException) as context:
                 main.generate_flashcards(
                     main.FlashcardRequest(student_id='student-1', course='History', unit='Industrial Revolution'), 'Bearer test'
@@ -81,7 +81,7 @@ class BinditFlashcardTests(unittest.TestCase):
     # --- Renaming a unit or course moves its notes ------------------------------------
 
     def _as(self, student='student-1'):
-        return patch.object(main.auth, 'authenticated_user', return_value={'id': student})
+        return patch.object(main.auth, 'authenticated_user', return_value={'id': student, 'email_confirmed_at': '2026-01-01T00:00:00Z'})
 
     def test_renaming_a_unit_moves_its_notes_and_cards(self):
         note = self.add_note('Precalc', 'Trig identities', 'sin squared plus cos squared equals one.')

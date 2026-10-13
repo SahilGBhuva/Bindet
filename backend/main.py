@@ -770,10 +770,18 @@ def finite_decimal(text: str) -> Decimal | None:
         return None
 
 
+# Commas only count as thousands separators ("1,000", "12,345.6"); "1,5" is not 15.
+_THOUSANDS = re.compile(r"^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$")
+
+
 def parse_number(value: str) -> Decimal | None:
-    cleaned = value.strip().replace(",", "")
+    cleaned = value.strip()
     if cleaned.endswith("%"):
         cleaned = cleaned[:-1].strip()
+    if "," in cleaned:
+        if not _THOUSANDS.match(cleaned):
+            return None
+        cleaned = cleaned.replace(",", "")
     return finite_decimal(cleaned)
 
 
@@ -1008,11 +1016,25 @@ def guest_student_id(claimed_id: str) -> str:
     return f"{GUEST_ID_PREFIX}{claimed_id}"
 
 
-def verified_student_id(claimed_id: str, authorization: str | None) -> str:
-    """Authenticated callers are their token's subject; anyone else is a namespaced guest."""
+def verified_student_id(claimed_id: str, authorization: str | None, ai: bool = False) -> str:
+    """Authenticated callers are their token's subject; anyone else is a namespaced guest.
+    ai=True: a signed-in caller must also be allowed AI features (ai_user)."""
     if authorization:
-        return auth.authenticated_user(authorization)["id"]
+        return (ai_user(authorization) if ai else auth.authenticated_user(authorization))["id"]
     return guest_student_id(claimed_id)
+
+
+EMAIL_UNCONFIRMED = "Confirm your email to use AI features."
+
+
+def ai_user(authorization: str | None) -> dict:
+    """The verified account for a route that spends AI. Anonymous accounts and accounts whose
+    email isn't confirmed get a 403 (code email_unconfirmed): a throwaway sign-up can't spend
+    the shared AI budget. Owners keep their exemptions."""
+    user = auth.authenticated_user(authorization)
+    if not auth.may_use_ai(user):
+        raise HTTPException(status_code=403, detail={"code": "email_unconfirmed", "message": EMAIL_UNCONFIRMED})
+    return user
 
 
 def topic_stats(record: dict) -> list[TopicStat]:
@@ -1151,12 +1173,37 @@ def ai_daily_global_limit() -> int:
         return AI_DAILY_GLOBAL_LIMIT_DEFAULT
 
 
-def global_ai_available() -> bool:
-    """Spend one call from the shared daily AI budget. False once it is used up.
+# One account may use at most this share of the shared daily AI budget (owners are exempt),
+# so a single account can't pause AI for everyone else.
+AI_ACCOUNT_SHARE_PERCENT = 2
+AI_ACCOUNT_SHARE_USED = "You’ve used a lot of AI help today, so it’s taking a break until tomorrow. Your notes, flashcards and saved answers still work."
+
+
+def ai_account_daily_limit() -> int:
+    return max(1, ai_daily_global_limit() * AI_ACCOUNT_SHARE_PERCENT // 100)
+
+
+def account_ai_share_available(student_id: str | None) -> bool:
+    """Spend one call from this account's share of the shared daily budget. False once it is
+    used up. Owners are never limited (check_social_rate_limit skips them)."""
+    if not student_id:
+        return True
+    try:
+        database.check_social_rate_limit(student_id, "ai_global_share", ai_account_daily_limit(), 1440)
+    except ValueError:
+        return False
+    return True
+
+
+def global_ai_available(student_id: str | None) -> bool:
+    """Spend one call from the shared daily AI budget. False once it is used up, or once this
+    account has used its share of it (AI_ACCOUNT_SHARE_PERCENT).
 
     Counted in the database, so the budget holds across every server instance.
     Callers check their per-student limits first, so refused requests cost nothing here.
     """
+    if not account_ai_share_available(student_id):
+        return False
     try:
         database.check_social_rate_limit(GLOBAL_AI_BUDGET_ID, "ai_call", ai_daily_global_limit(), 1440)
     except ValueError:
@@ -1164,9 +1211,12 @@ def global_ai_available() -> bool:
     return True
 
 
-def spend_global_ai_call() -> None:
-    """Like global_ai_available, but answers a friendly 503 when the budget is used up."""
-    if not global_ai_available():
+def spend_global_ai_call(student_id: str | None) -> None:
+    """Like global_ai_available, but answers a friendly 429 when this account's share is used
+    up and a friendly 503 when the shared budget is."""
+    if not account_ai_share_available(student_id):
+        raise HTTPException(status_code=429, detail=AI_ACCOUNT_SHARE_USED, headers={"Retry-After": "3600"})
+    if not global_ai_available(None):  # the share was counted just above
         raise HTTPException(status_code=503, detail=AI_PAUSED, headers={"Retry-After": "3600"})
 
 
@@ -1341,7 +1391,7 @@ async def upload_note(
     # Sign-in checks, parsing, OCR and the database are all blocking calls. They run in
     # the thread pool so a slow OCR request never stalls the event loop, and with it
     # every other request (including streaming tutor replies) on this instance.
-    user = await run_in_threadpool(auth.authenticated_user, authorization)
+    user = await run_in_threadpool(ai_user, authorization)
     await run_in_threadpool(limit_action, user["id"], "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
     if len(content) > note_ingestion.MAX_NOTE_BYTES:
@@ -1382,7 +1432,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             text = cached_ocr_text(owner, cache_key)
             if text is None:
                 limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-                spend_global_ai_call()
+                spend_global_ai_call(owner)
                 ai_tutor.warm_connection()
                 # The image goes to the vision model only; it is never stored.
                 text = note_ingestion.clean_text(ai_tutor.extract_image_notes(
@@ -1399,7 +1449,7 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
                     text = cached_ocr_text(owner, cache_key)
                     if text is None:
                         limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
-                        spend_global_ai_call()
+                        spend_global_ai_call(owner)
                         ai_tutor.warm_connection()
                         text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
                         ai_cache.store_extraction(cache_key, text)
@@ -1492,11 +1542,12 @@ def auth_me(authorization: Annotated[str | None, Header()] = None):
 @app.get("/api/account/profile", response_model=ProfileResponse)
 def get_account_profile(authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)
-    database.record_daily_login(user["id"])
+    # Writes nothing without a profile row: after account deletion, a token still cached on
+    # another instance must not recreate the student's progress.
+    progress = database.record_daily_login(user["id"], require_profile=True)
     profile = database.get_profile(user["id"])
     if profile is None:
         raise HTTPException(status_code=404, detail="Finish setting up your profile")
-    progress = database.get_progress(user["id"])
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
@@ -1828,7 +1879,7 @@ def conversation_title(owner: str, conversation: dict, first_message: str, reply
     except ValueError:
         ai_tutor.log_ai_event("title_conversation", outcome="limited", student_id=owner)
         return fallback()
-    if not global_ai_available():
+    if not global_ai_available(owner):
         ai_tutor.log_ai_event("title_conversation", outcome="budget", student_id=owner)
         return fallback()
     try:
@@ -1874,7 +1925,7 @@ def update_memory_after(owner: str, conversation_id: str) -> dict | None:
     except ValueError:
         ai_tutor.log_ai_event("update_memory", outcome="limited", student_id=owner)
         return None
-    if not global_ai_available():
+    if not global_ai_available(owner):
         ai_tutor.log_ai_event("update_memory", outcome="budget", student_id=owner)
         return None
     try:
@@ -1973,6 +2024,7 @@ TUTOR_DAILY_LIMITED = "You’ve reached today’s limit with Otto. It resets wit
 TUTOR_TOO_MANY_STREAMS = "Otto is still answering your other messages. Wait for one to finish, then try again."
 TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
+TUTOR_ALREADY_REGENERATED = "This reply was already regenerated. Refresh to see the newest answer."
 TUTOR_REGENERATE_FAILED = "Otto couldn’t write a new answer right now, so your previous answer is still here. Try again in a moment."
 
 
@@ -2002,7 +2054,7 @@ def capped_tutor_route(owner: str, content: str, has_images: bool) -> dict:
 
 @app.post("/api/tutor/messages")
 def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str | None, Header()] = None):
-    user = auth.authenticated_user(authorization)
+    user = ai_user(authorization)
     owner = user["id"]
     content = data.content.strip()
     if not content:
@@ -2090,7 +2142,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
     if fixed_reply is None and cached_reply is None and guide_intent is None:
-        spend_global_ai_call()
+        spend_global_ai_call(owner)
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
     except ValueError as error:
@@ -2260,7 +2312,13 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 failed = True
                 yield sse("error", {"message": TUTOR_REGENERATE_FAILED, "retry": True, "kept": True})
                 return
-            reply = save_reply("".join(chunks), guide_reply.get("attachments"))
+            try:
+                reply = save_reply("".join(chunks), guide_reply.get("attachments"))
+            except tutor.ReplyAlreadyReplaced:
+                # A parallel Regenerate already replaced this reply: keep that one, save nothing.
+                failed = True
+                yield sse("error", {"message": TUTOR_ALREADY_REGENERATED, "retry": False, "status": 409})
+                return
             saved = True
             yield sse("done", {"message": reply})
             # The reply is complete: free the stream slot, then do Otto's housekeeping (a title
@@ -2295,7 +2353,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # after the question it answers.
             # A stopped regeneration replaces the old reply with what was written, as the app shows.
             if chunks and not saved and not failed and (old_reply_id is None or "".join(chunks).strip()) and saved_user():
-                save_reply("".join(chunks))
+                try:
+                    save_reply("".join(chunks))
+                except tutor.ReplyAlreadyReplaced:
+                    pass  # another Regenerate already saved its answer to this turn
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -2808,7 +2869,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
     avoid = quiz_avoid_list(questions.banked_among(cache_key, latest) if shared else latest) if latest else []
     repeats: list[dict] = []
     for _ in range(QUIZ_ATTEMPTS):
-        spend_global_ai_call()
+        spend_global_ai_call(student_id)
         try:
             result = ai_tutor.generate_question(avoid=avoid, **request)
         except ai_tutor.AITutorError as exc:
@@ -2831,7 +2892,7 @@ def fresh_quiz_question(*, student_id: str, cache_key: str, recent: list[str], s
 def generate_question(data: QuestionRequest, authorization: Annotated[str | None, Header()] = None, background: BackgroundTasks = None):  # type: ignore[assignment]
     has_school_context = bool(data.notes and (data.notes.course.strip() or data.notes.unit.strip()))
     if has_school_context and data.notes:
-        student_id = auth.authenticated_user(authorization)["id"]
+        student_id = ai_user(authorization)["id"]
         instructions = checked_instructions(data.instructions, student_id, "generate_quiz")
         ai_tutor.warm_connection()
         course, unit = data.notes.course.strip(), data.notes.unit.strip()
@@ -2970,8 +3031,10 @@ def flashcard_rate_limit(student_id: str, action: str, limit: int, window_minute
         raise ai_error(429, "rate_limited", f"You’ve made a lot of flashcards today. Try again {_wait_phrase(wait)}.", retry_after=wait) from error
 
 
-def flashcard_budget() -> None:
-    if not global_ai_available():
+def flashcard_budget(student_id: str) -> None:
+    if not account_ai_share_available(student_id):
+        raise ai_error(429, "ai_daily_limit", AI_ACCOUNT_SHARE_USED, retry_after=3600)
+    if not global_ai_available(None):
         raise ai_error(503, "ai_daily_limit", retry_after=3600)
 
 
@@ -2995,7 +3058,7 @@ def make_note_flashcards(
     authorization: Annotated[str | None, Header()] = None,
 ):
     """Make (once) and return the flashcards for one of the student's notes. Idempotent."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
     flashcards.init_flashcards()  # once per process, before the two reads below run side by side
@@ -3036,7 +3099,7 @@ def make_note_flashcards(
     except HTTPException:
         log("rate_limited")
         raise
-    flashcard_budget()
+    flashcard_budget(owner)
     outcome, attempt = flashcards.claim(owner, note_id, retry=retry)
     if outcome == "ready":
         return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
@@ -3090,7 +3153,7 @@ def remake_note_flashcards(
     the stored cards without an AI call. Counts against the same daily flashcard limit as
     normal generation, and the cards pass the same validation and grounding check.
     """
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
     if not instructions:
         raise instructions_error()
@@ -3121,7 +3184,7 @@ def remake_note_flashcards(
     try:
         flashcard_rate_limit(owner, "flashcards_note", FLASHCARD_NOTES_PER_DAY)
         if not reused:
-            flashcard_budget()
+            flashcard_budget(owner)
     except BaseException:
         flashcards.cancel_regeneration(owner, note_id, attempt, state["status"], state["error"])
         raise
@@ -3239,7 +3302,7 @@ def grade_review_card(card_id: str, data: ReviewGradeRequest, authorization: Ann
 @app.post("/api/generate-flashcards", response_model=FlashcardResponse)
 def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | None, Header()] = None):
     """Legacy unit-wide deck. Grounded only, and served from stored cards when the unit has them."""
-    student_id = auth.authenticated_user(authorization)["id"]
+    student_id = ai_user(authorization)["id"]
     course = data.course.strip()
     unit = data.unit.strip()
     if not course and not unit:
@@ -3260,7 +3323,7 @@ def generate_flashcards(data: FlashcardRequest, authorization: Annotated[str | N
             return FlashcardResponse(course=course, unit=unit, personalized=personalized,
                                      cards=[Flashcard(front=card["front"], back=card["back"], topic=card["topic"]) for card in stored[:data.count]])
     flashcard_rate_limit(student_id, "ai_flashcards", LEGACY_FLASHCARD_DECKS_PER_DAY)
-    flashcard_budget()
+    flashcard_budget(student_id)
     ai_tutor.warm_connection()
     try:
         cards = ai_tutor.generate_flashcards(
@@ -3292,7 +3355,7 @@ GRADING_UNAVAILABLE = "We couldn’t check this answer right now — try again i
 
 @app.post("/api/analyze-answer", response_model=AnswerResponse)
 def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Header()] = None):
-    student_id = verified_student_id(data.student_id, authorization)
+    student_id = verified_student_id(data.student_id, authorization, ai=True)
     question = questions.get_question(student_id, data.question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
@@ -3341,7 +3404,7 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
                     database.check_social_rate_limit(student_id, "ai_grading", 120, 1440)
                 except ValueError as error:
                     raise social_error(error) from error
-            if authorization and not global_ai_available():
+            if authorization and not global_ai_available(student_id):
                 # The shared AI budget is used up. Grading offline would mark answers the
                 # AI might accept as wrong, so don't grade at all: the student can resubmit.
                 raise HTTPException(status_code=503, detail=GRADING_UNAVAILABLE, headers={"Retry-After": "30"})
@@ -3482,7 +3545,7 @@ def practice_time_limit(data: PracticeTestCreate, count: int) -> int | None:
 
 @app.post("/api/practice-tests", status_code=201)
 def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str | None, Header()] = None):
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     instructions = checked_instructions(data.instructions, owner, "generate_test")
     course = data.course.strip()
     unit = data.unit.strip() if data.unit is not None else None
@@ -3518,7 +3581,7 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         except HTTPException:
             log("rate_limited")
             raise
-        if not global_ai_available():
+        if not global_ai_available(owner):
             raise practice_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
         try:
             ai_tutor.warm_connection()
@@ -3589,7 +3652,7 @@ def grade_practice_items(owner: str, rows: list[dict], answers: dict[int, str]) 
         return results
     started = time.perf_counter()
     practice_rate_limit(owner, "ai_grading", PRACTICE_GRADING_PER_DAY, "You’ve had a lot of answers checked today.")
-    if not global_ai_available():
+    if not global_ai_available(owner):
         raise practice_error(503, "grading_unavailable", retry_after=30)
     try:
         graded = ai_tutor.grade_practice_answers(pending, session_id=ai_session_id(owner, "practice-grading"))
@@ -3612,7 +3675,7 @@ def submit_practice_test(
 ):
     """Grade the test once: per-item results, explanations, score, a topic breakdown and XP.
     A test submitted after its time limit (plus a short grace) is still graded, marked over time."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     submitted_at = datetime.now(timezone.utc)
     limit_action(owner, "practice_submit", PRACTICE_SUBMITS_PER_HOUR)
     loaded = practice_tests.graded_items(owner, test_id)
@@ -3636,9 +3699,10 @@ def submit_practice_test(
         started_at = test["started_at"] if test["started_at"].tzinfo else test["started_at"].replace(tzinfo=timezone.utc)
         limit = test["time_limit_s"]
         over_time = bool(limit) and submitted_at > started_at + timedelta(seconds=int(limit) + practice_tests.GRACE_SECONDS)
-        xp = min(practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"]),
-                 practice_tests.xp_left_today(owner))
-        public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=xp)
+        # finish() caps this by today's practice-test XP left, inside its lock.
+        earned = practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"])
+        public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=earned)
+        xp = int(public["xp_earned"])
     except practice_tests.Conflict as error:
         raise practice_error(409, "grading_in_progress") from error
     except BaseException:
@@ -3749,7 +3813,7 @@ def write_guide(owner: str, *, course: str, unit: str | None, kind: str, text: s
     except HTTPException:
         log("rate_limited")
         raise
-    if not global_ai_available():
+    if not global_ai_available(owner):
         raise guide_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
     try:
         ai_tutor.warm_connection()
@@ -3804,7 +3868,7 @@ def make_study_guide(owner: str, course: str, unit: str | None, kind: str, raw_i
 @app.post("/api/study-guides", status_code=201)
 def create_study_guide(data: StudyGuideCreate, authorization: Annotated[str | None, Header()] = None):
     """Otto writes study material from the unit's (or course's) notes, or shows the saved one again."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     guide, how = make_study_guide(owner, data.course, data.unit, data.kind, data.instructions, data.fresh)
     return {**guide, "source": how}
 
@@ -3864,7 +3928,7 @@ def regenerate_study_guide(guide_id: GuideId, data: StudyGuideRegenerate, author
     """A new version from the notes as they are now. When the notes haven't changed, the guide is
     returned as it is ("unchanged") unless the student asks for a fresh version, which counts
     toward the daily AI limit like a new guide."""
-    owner = auth.authenticated_user(authorization)["id"]
+    owner = ai_user(authorization)["id"]
     row = study_guides.guide_row(owner, guide_id)
     if row is None:
         raise guide_error(404, "guide_not_found")
@@ -4127,14 +4191,14 @@ def help_bot_usage(authorization: Annotated[str | None, Header()] = None):
 @app.post("/api/help-bot")
 def ask_help_bot(data: HelpBotQuestion, authorization: Annotated[str | None, Header()] = None):
     """"How do I…" questions the app's local FAQ couldn't answer. Signed-in only; see help_bot.py for the limits."""
-    student_id = auth.authenticated_user(authorization)["id"]
+    student_id = ai_user(authorization)["id"]
     try:
         question = checked_instructions(data.question, student_id, help_bot.OP)
     except HTTPException:
         return help_bot.blocked(student_id, data.question)
     if not question:
         raise HTTPException(status_code=400, detail={"code": "empty_question", "message": "Type a question first."})
-    return help_bot.answer(student_id, question, spend_global_ai_call)
+    return help_bot.answer(student_id, question, lambda: spend_global_ai_call(student_id))
 
 
 def admin_emails() -> set[str]:

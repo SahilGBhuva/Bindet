@@ -167,9 +167,12 @@ def update_settings(owner_id: str, conversation_id: str, *, pinned: bool | None 
         current = _settings_for(connection, owner_id, [conversation_id]).get(conversation_id)
         values = {key: value for key, value in (("pinned", pinned), ("study_mode", study_mode)) if value is not None}
         if current is None:
-            connection.execute(settings.insert().values(conversation_id=conversation_id, owner_id=owner_id,
-                                                        pinned=bool(values.get("pinned", False)),
-                                                        study_mode=values.get("study_mode", "explain"), updated_at=now))
+            # Upsert: a parallel first write (pin and study mode at once) must not hit the primary key.
+            database._upsert(connection, settings, {
+                "conversation_id": conversation_id, "owner_id": owner_id,
+                "pinned": bool(values.get("pinned", False)), "study_mode": values.get("study_mode", "explain"),
+                "updated_at": now,
+            }, ["conversation_id"], [*values, "updated_at"] if values else [])
         elif values:
             connection.execute(update(settings).where(settings.c.conversation_id == conversation_id).values(**values, updated_at=now))
         return _conversation(row, _settings_for(connection, owner_id, [conversation_id]).get(conversation_id))
@@ -186,10 +189,14 @@ def rate_message(owner_id: str, message_id: int, rating: int) -> dict:
         )).first()
         if row is None:
             raise ValueError("message_not_found")
-        connection.execute(delete(ratings).where(ratings.c.message_id == message_id))
         if rating:
-            connection.execute(ratings.insert().values(message_id=message_id, owner_id=owner_id, conversation_id=row.conversation_id,
-                                                       rating=1 if rating > 0 else -1, created_at=datetime.now(timezone.utc)))
+            # Upsert, so a double tap (two requests at once) can't hit the primary key.
+            database._upsert(connection, ratings, {
+                "message_id": message_id, "owner_id": owner_id, "conversation_id": row.conversation_id,
+                "rating": 1 if rating > 0 else -1, "created_at": datetime.now(timezone.utc),
+            }, ["message_id"], ["rating", "created_at"])
+        else:
+            connection.execute(delete(ratings).where(ratings.c.message_id == message_id))
     return {"message_id": message_id, "rating": (1 if rating > 0 else -1) if rating else 0}
 
 
@@ -221,10 +228,16 @@ def last_reply_turn(owner_id: str, conversation_id: str) -> tuple[dict, int] | N
     return _message(last_two[1]), last_two[0]["id"]
 
 
+class ReplyAlreadyReplaced(Exception):
+    """Regenerate lost a race: another request already replaced (or deleted) the old reply."""
+
+
 def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, content: str,
                   attachments: list[str] | None = None, model_tier: str = "") -> dict:
     """For Regenerate: save the new reply and remove the one it replaces (and its rating) in one
-    transaction, so the conversation always has exactly one answer to that turn."""
+    transaction, so the conversation always has exactly one answer to that turn.
+    Raises ReplyAlreadyReplaced (nothing saved) when the old reply is already gone, so two
+    parallel Regenerates can't leave two answers."""
     init_tutor()
     now = datetime.now(timezone.utc)
     with database.engine().begin() as connection:
@@ -232,7 +245,8 @@ def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, conten
         old = messages.c.id == old_reply_id
         mine = (messages.c.conversation_id == conversation_id) & (messages.c.role == "assistant")
         connection.execute(delete(ratings).where(ratings.c.message_id == old_reply_id, ratings.c.conversation_id == conversation_id))
-        connection.execute(delete(messages).where(old, mine))
+        if not connection.execute(delete(messages).where(old, mine)).rowcount:
+            raise ReplyAlreadyReplaced(old_reply_id)  # rolls the transaction back
         message_id = connection.execute(messages.insert().values(
             conversation_id=conversation_id, role="assistant", content=content,
             attachments=json.dumps([name[:120] for name in (attachments or [])][:3]), model_tier=model_tier, created_at=now,

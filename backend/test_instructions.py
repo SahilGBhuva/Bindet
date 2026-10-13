@@ -65,7 +65,7 @@ class InstructionTests(unittest.TestCase):
             os.unlink(TEST_DB.name)
 
     def as_user(self, student="alex"):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def ask(self, instructions=None, unit="Photosynthesis", student="alex"):
         body = {"topic": "mixed", "difficulty": 1, "notes": {"course": "Biology", "unit": unit}}

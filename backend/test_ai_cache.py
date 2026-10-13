@@ -63,7 +63,7 @@ class CacheTestCase(unittest.TestCase):
             connection.execute(note_store.notes.delete())
 
     def as_user(self, student_id):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def no_quota_or_budget(self):
         """Patches that fail the test if any per-student limit or the global budget is charged."""

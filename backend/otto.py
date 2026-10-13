@@ -77,11 +77,10 @@ def _profile_row(connection, owner_id: str) -> dict:
 
 
 def _upsert_profile(connection, owner_id: str, values: dict) -> None:
-    exists = connection.execute(select(profiles.c.owner_id).where(profiles.c.owner_id == owner_id)).first()
-    if exists:
-        connection.execute(update(profiles).where(profiles.c.owner_id == owner_id).values(**values, updated_at=_now()))
-    else:
-        connection.execute(profiles.insert().values(**{**DEFAULT_PROFILE, **values, "owner_id": owner_id, "updated_at": _now()}))
+    # INSERT ... ON CONFLICT DO UPDATE: a check-then-insert could hit the primary key when the
+    # first save and Otto's first memory notice run at once.
+    database._upsert(connection, profiles, {**DEFAULT_PROFILE, **values, "owner_id": owner_id, "updated_at": _now()},
+                     ["owner_id"], [*values, "updated_at"])
 
 
 def get_profile(owner_id: str) -> dict:
@@ -102,6 +101,8 @@ def save_profile(owner_id: str, *, preferred_name: str, personality: str, about:
     }
     init_otto()
     with database.engine().begin() as connection:
+        # The memory lock too, so turning memory off can't interleave with Otto saving a memory.
+        database._advisory_lock(connection, f"otto:memory:{owner_id}")
         _upsert_profile(connection, owner_id, values)
         return _profile_row(connection, owner_id)
 

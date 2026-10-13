@@ -119,7 +119,7 @@ class GuideTestCase(unittest.TestCase):
         return note_store.save_note(student, course, unit, name, "text/plain", text, len(text))
 
     def call(self, method, path, student="alex", **kwargs):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": student}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": student, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             return self.client.request(method, path, headers={"Authorization": f"Bearer token-{student}"}, **kwargs)
 
     def create(self, student="alex", **body):
@@ -547,7 +547,7 @@ class OttoGuideTests(GuideTestCase):
             yield from ("Photosynthesis ", "stores energy.")
             return {"finish_reason": "stop", "done": True}
 
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex"}), \
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex", "email_confirmed_at": "2026-01-01T00:00:00Z"}), \
                 patch.object(ai_tutor, "stream_tutor_reply", side_effect=fake_stream):
             events = stream_events(main.send_tutor_message(main.TutorMessageRequest(content=content, **fields), "Bearer t"))
         return events, streamed

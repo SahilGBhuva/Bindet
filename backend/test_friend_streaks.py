@@ -190,7 +190,7 @@ class FriendStreakTests(unittest.TestCase):
     # --- nudges ---------------------------------------------------------------------
 
     def nudge(self, friend_id, user="alex-id"):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": user}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": user, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             try:
                 return 200, main.nudge_friend(friend_id, "Bearer t")
             except main.HTTPException as error:
@@ -254,7 +254,7 @@ class FriendStreakTests(unittest.TestCase):
         self.add_days("sam-id", 1)
         self.assertTrue(self.friend("alex-id")["accepts_nudges"])
         self.assertTrue(database.get_profile("sam-id")["allow_nudges"])
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             saved = main.save_social_privacy(main.SocialPrivacyUpdate(discoverable=True, allow_friend_requests=True, allow_nudges=False), "Bearer t")
             self.assertFalse(saved["allow_nudges"])
             # An older client that doesn't send the setting leaves it as it is.

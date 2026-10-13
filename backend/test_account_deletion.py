@@ -284,7 +284,7 @@ class AccountDeletionTests(unittest.TestCase):
         supabase = supabase or FakeSupabase()
         authorization = authorization or fresh_token(user)
         with patch.dict(os.environ, env if env is not None else ENV), \
-                patch.object(auth, "authenticated_user", return_value={"id": user}):
+                patch.object(auth, "authenticated_user", return_value={"id": user, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             post, request, http_delete = supabase.patches()
             with post, request, http_delete:
                 return self.client.request("DELETE", "/api/account", json=body, headers={"Authorization": authorization})
@@ -382,6 +382,16 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertEqual(self.delete().status_code, 200)
         again = self.delete(supabase=FakeSupabase(auth_status=404))
         self.assertEqual(again.status_code, 200)
+        self.assertEqual(self.rows_mentioning(ALEX), {})
+
+    def test_a_cached_token_reading_the_profile_after_deletion_recreates_nothing(self):
+        self.assertEqual(self.delete().status_code, 200)
+        # Another instance still has the token cached: the app opens and reads the profile.
+        with patch.object(auth, "authenticated_user", return_value={"id": ALEX, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+            response = self.client.get("/api/account/profile", headers={"Authorization": fresh_token(ALEX)})
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.rows_mentioning(ALEX), {})
+        self.assertIsNone(database.record_daily_login(ALEX, require_profile=True))
         self.assertEqual(self.rows_mentioning(ALEX), {})
 
     def test_wrong_or_missing_confirmation_is_refused(self):

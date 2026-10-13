@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -110,11 +111,17 @@ def extract_pdf_in_process(content: bytes, deadline: float) -> str:
         return collect_page_text(reader.pages, deadline)
 
 
-def _pdf_worker() -> None:
-    """Child process entry point: PDF bytes on stdin, one JSON object on stdout."""
+def _pdf_worker(mode: str = 'text', max_pages: int = MAX_OCR_PDF_PAGES) -> None:
+    """Child process entry point: PDF bytes on stdin, one JSON object on stdout.
+    mode 'text' extracts the text; mode 'trim' returns the first max_pages pages as a PDF."""
     content = sys.stdin.buffer.read()
+    deadline = time.monotonic() + PDF_TIME_LIMIT_SECONDS
     try:
-        result = {'ok': True, 'text': extract_pdf_in_process(content, time.monotonic() + PDF_TIME_LIMIT_SECONDS)}
+        if mode == 'trim':
+            trimmed, omitted = first_pdf_pages_in_process(content, max_pages, deadline)
+            result = {'ok': True, 'pdf': base64.b64encode(trimmed).decode('ascii'), 'omitted': omitted}
+        else:
+            result = {'ok': True, 'text': extract_pdf_in_process(content, deadline)}
     except NoteIngestionError as exc:
         result = {'ok': False, 'error': str(exc)}
     except Exception:  # noqa: BLE001 - any parser failure is "unreadable"
@@ -123,17 +130,16 @@ def _pdf_worker() -> None:
     sys.stdout.flush()
 
 
-def extract_pdf_text(content: bytes, time_limit: float | None = None) -> str:
-    """Extract a PDF's text with a hard wall-clock limit (see PDF_TIME_LIMIT_SECONDS)."""
-    limit = PDF_TIME_LIMIT_SECONDS if time_limit is None else time_limit
-    if not PDF_IN_SUBPROCESS:
-        return extract_pdf_in_process(content, time.monotonic() + limit)
+def _run_pdf_child(args: list[str], content: bytes, limit: float, in_process):
+    """Run this file as a PDF child process (see PDF_TIME_LIMIT_SECONDS) and return its JSON
+    result, killing it after `limit` seconds. Falls back to in_process(deadline) when no child
+    can be started on this host."""
     started = time.monotonic()
     # The child must find the same packages; some hosts add them to sys.path at runtime.
     env = {**os.environ, 'PYTHONPATH': os.pathsep.join(path for path in sys.path if path and os.path.isdir(path))}
     try:
         completed = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), '--pdf-worker'],
+            [sys.executable, str(Path(__file__).resolve()), *args],
             input=content, capture_output=True, timeout=limit, check=False,
             cwd=str(Path(__file__).resolve().parent), env=env,
         )
@@ -141,29 +147,57 @@ def extract_pdf_text(content: bytes, time_limit: float | None = None) -> str:
         raise PdfTimeout(PDF_TOO_SLOW) from exc
     except OSError:
         # No child process on this host: same limits, deadline checked between pages.
-        return extract_pdf_in_process(content, started + limit)
+        return in_process(started + limit)
     try:
         result = json.loads(completed.stdout.decode('utf-8'))
     except (UnicodeDecodeError, ValueError) as exc:
         if b'ModuleNotFoundError' in completed.stderr or b'ImportError' in completed.stderr:
             # The child could not even start the parser: an environment problem, not the PDF.
-            return extract_pdf_in_process(content, started + limit)
+            return in_process(started + limit)
         # The child died (out of memory, a crash) without answering.
         raise NoteIngestionError(PDF_UNREADABLE) from exc
     if not isinstance(result, dict):
         raise NoteIngestionError(PDF_UNREADABLE)
     if not result.get('ok'):
         raise NoteIngestionError(str(result.get('error') or PDF_UNREADABLE))
+    return result
+
+
+def extract_pdf_text(content: bytes, time_limit: float | None = None) -> str:
+    """Extract a PDF's text with a hard wall-clock limit (see PDF_TIME_LIMIT_SECONDS)."""
+    limit = PDF_TIME_LIMIT_SECONDS if time_limit is None else time_limit
+    if not PDF_IN_SUBPROCESS:
+        return extract_pdf_in_process(content, time.monotonic() + limit)
+    result = _run_pdf_child(['--pdf-worker'], content, limit,
+                            lambda deadline: {'text': extract_pdf_in_process(content, deadline)})
     return str(result.get('text') or '')
 
 
-def first_pdf_pages(content: bytes, max_pages: int = MAX_OCR_PDF_PAGES) -> tuple[bytes, int]:
-    """A copy of the PDF holding only its first pages, and how many pages were left out."""
+def first_pdf_pages(content: bytes, max_pages: int = MAX_OCR_PDF_PAGES, time_limit: float | None = None) -> tuple[bytes, int]:
+    """A copy of the PDF holding only its first pages, and how many pages were left out.
+    Runs in the same timed child process as text extraction (a crafted PDF can make pypdf
+    run for minutes)."""
+    limit = PDF_TIME_LIMIT_SECONDS if time_limit is None else time_limit
+    if not PDF_IN_SUBPROCESS:
+        return first_pdf_pages_in_process(content, max_pages, time.monotonic() + limit)
+
+    def in_process(deadline: float) -> dict:
+        trimmed, omitted = first_pdf_pages_in_process(content, max_pages, deadline)
+        return {'pdf': base64.b64encode(trimmed).decode('ascii'), 'omitted': omitted}
+
+    result = _run_pdf_child(['--pdf-trim', str(int(max_pages))], content, limit, in_process)
+    try:
+        return base64.b64decode(str(result.get('pdf') or ''), validate=True), int(result.get('omitted') or 0)
+    except (ValueError, TypeError) as exc:
+        raise NoteIngestionError(PDF_UNREADABLE) from exc
+
+
+def first_pdf_pages_in_process(content: bytes, max_pages: int, deadline: float = float('inf')) -> tuple[bytes, int]:
     with pdf_limits():
-        return _first_pdf_pages(content, max_pages)
+        return _first_pdf_pages(content, max_pages, deadline)
 
 
-def _first_pdf_pages(content: bytes, max_pages: int) -> tuple[bytes, int]:
+def _first_pdf_pages(content: bytes, max_pages: int, deadline: float = float('inf')) -> tuple[bytes, int]:
     try:
         reader = PdfReader(BytesIO(content))
         if reader.is_encrypted:
@@ -173,13 +207,15 @@ def _first_pdf_pages(content: bytes, max_pages: int) -> tuple[bytes, int]:
             return content, 0
         writer = PdfWriter()
         for page in reader.pages[:max_pages]:
+            if time.monotonic() > deadline:
+                raise PdfTimeout(PDF_TOO_SLOW)
             writer.add_page(page)
         output = BytesIO()
         writer.write(output)
     except NoteIngestionError:
         raise
     except Exception as exc:
-        raise NoteIngestionError('Could not read that file. Try exporting it again.') from exc
+        raise NoteIngestionError(PDF_UNREADABLE) from exc
     return output.getvalue(), total - max_pages
 
 
@@ -217,3 +253,5 @@ def extract_text(filename: str, content: bytes) -> str:
 
 if __name__ == '__main__' and sys.argv[1:] == ['--pdf-worker']:
     _pdf_worker()
+elif __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '--pdf-trim' and sys.argv[2].isdigit():
+    _pdf_worker('trim', int(sys.argv[2]))

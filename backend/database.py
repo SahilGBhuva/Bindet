@@ -759,7 +759,9 @@ def init_db() -> None:
 
 
 def _next_streak(current_streak: int, last_active: date | None, correct: bool, today: date) -> int:
-    if not correct or last_active == today:
+    # last_active can be AFTER today when the student's offset moves the local day back
+    # (travel, a DST change, a different device): the streak already counts that day.
+    if not correct or (last_active is not None and last_active >= today):
         return current_streak
     if last_active == today - timedelta(days=1):
         return current_streak + 1
@@ -794,8 +796,13 @@ def live_streak(streak: int | None, last_date: date | None, today: date | None =
     return int(streak) if last_date >= today - timedelta(days=1) else 0
 
 
+def _active_date(last_active: date | None, today: date) -> date:
+    """The new last_active_date: today, but never earlier than the stored one."""
+    return today if last_active is None else max(last_active, today)
+
+
 def _next_login_streak(current_streak: int, last_login: date | None, today: date) -> int:
-    if last_login == today:
+    if last_login is not None and last_login >= today:
         return current_streak
     if last_login == today - timedelta(days=1):
         return current_streak + 1
@@ -859,6 +866,27 @@ def check_social_rate_limit(student_id: str, action: str, limit: int, window_min
         ))
 
 
+def _progress_row(connection, student_id: str, now: datetime):
+    """The student's progress row, created empty first if missing. INSERT ... ON CONFLICT DO
+    NOTHING, so two first answers at once don't fail on the primary key."""
+    _insert_ignore(connection, student_progress, [{
+        "student_id": student_id, "total_xp": 0, "attempts": 0, "correct_answers": 0,
+        "streak": 0, "best_streak": 0, "last_active_date": None,
+        "login_streak": 0, "best_login_streak": 0, "last_login_date": None, "updated_at": now,
+    }], ["student_id"])
+    return connection.execute(
+        select(student_progress).where(student_progress.c.student_id == student_id)
+    ).mappings().one()
+
+
+# XP lock order. Everything that changes a student's XP, attempts or streak takes
+# xp:{student_id} (update_progress, award_xp, award_xp_in, mark_study_day). Callers that
+# need their own cap lock take it FIRST and xp:{student_id} LAST:
+#   practice:xp:{owner}  ->  xp:{owner}
+# (practice rounds via award_xp_in; practice tests cap in practice_tests.finish, then
+# award_xp in a separate transaction). Never take a practice lock while holding xp:{...}.
+# Postgres advisory locks are re-entrant within a session, so nesting the same key is safe.
+
 # Most XP one student can earn per UTC day. Real study rarely gets near it;
 # it stops scripted answer loops from inflating leaderboards and quests.
 DAILY_XP_CAP = 3000
@@ -870,37 +898,28 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
     today = local_today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
+        # Parallel answers would otherwise both read the old totals and the daily cap.
+        _advisory_lock(connection, f"xp:{student_id}")
         if xp > 0:
             day_start = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc)
             earned_today = connection.execute(select(func.coalesce(func.sum(xp_events.c.xp), 0)).where(
                 xp_events.c.student_id == student_id, xp_events.c.created_at >= day_start,
             )).scalar_one()
             xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
-        progress = connection.execute(
-            select(student_progress).where(student_progress.c.student_id == student_id)
-        ).mappings().first()
-        if progress is None:
-            connection.execute(student_progress.insert().values(
-                student_id=student_id, total_xp=0, attempts=0, correct_answers=0,
-                streak=0, best_streak=0, last_active_date=None,
-                login_streak=0, best_login_streak=0, last_login_date=None,
-                updated_at=now,
-            ))
-            progress = connection.execute(
-                select(student_progress).where(student_progress.c.student_id == student_id)
-            ).mappings().one()
+        progress = _progress_row(connection, student_id, now)
 
         streak = _next_streak(progress["streak"], progress["last_active_date"], correct, today)
+        # Counters are relative updates, so no answer is lost even if a writer skips the lock.
         connection.execute(
             update(student_progress)
             .where(student_progress.c.student_id == student_id)
             .values(
-                total_xp=progress["total_xp"] + xp,
-                attempts=progress["attempts"] + 1,
-                correct_answers=progress["correct_answers"] + int(correct),
+                total_xp=student_progress.c.total_xp + xp,
+                attempts=student_progress.c.attempts + 1,
+                correct_answers=student_progress.c.correct_answers + int(correct),
                 streak=streak,
                 best_streak=max(progress["best_streak"], streak),
-                last_active_date=today if correct else progress["last_active_date"],
+                last_active_date=_active_date(progress["last_active_date"], today) if correct else progress["last_active_date"],
                 updated_at=now,
             )
         )
@@ -983,7 +1002,7 @@ def award_xp(student_id: str, xp: int) -> dict:
             streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
             connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
                 total_xp=total, streak=streak, best_streak=max(int(progress["best_streak"]), streak),
-                last_active_date=today, updated_at=now,
+                last_active_date=_active_date(progress["last_active_date"], today), updated_at=now,
             ))
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
@@ -997,8 +1016,10 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
     Applies the same daily cap as update_progress and counts the day for the study streak
     when `active` (the student got something right), but leaves attempts, correct answers
     and topic accuracy alone: a timed self-check round is not a graded quiz answer.
+    Takes the xp:{student_id} lock (see XP lock order above DAILY_XP_CAP).
     Returns {"xp_awarded", "total_xp", "streak"}.
     """
+    _advisory_lock(connection, f"xp:{student_id}")
     today = local_today()
     now = datetime.now(timezone.utc)
     if xp > 0:
@@ -1008,32 +1029,23 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
         )).scalar_one()
         xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
     xp = max(0, xp)
-    progress = connection.execute(
-        select(student_progress).where(student_progress.c.student_id == student_id)
-    ).mappings().first()
-    if progress is None:
-        connection.execute(student_progress.insert().values(
-            student_id=student_id, total_xp=0, attempts=0, correct_answers=0,
-            streak=0, best_streak=0, last_active_date=None,
-            login_streak=0, best_login_streak=0, last_login_date=None,
-            updated_at=now,
-        ))
-        progress = connection.execute(
-            select(student_progress).where(student_progress.c.student_id == student_id)
-        ).mappings().one()
+    progress = _progress_row(connection, student_id, now)
     streak = _next_streak(progress["streak"], progress["last_active_date"], active, today)
     connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
-        total_xp=progress["total_xp"] + xp,
+        total_xp=student_progress.c.total_xp + xp,
         streak=streak,
         best_streak=max(progress["best_streak"], streak),
-        last_active_date=today if active else progress["last_active_date"],
+        last_active_date=_active_date(progress["last_active_date"], today) if active else progress["last_active_date"],
         updated_at=now,
     ))
+    total = connection.execute(
+        select(student_progress.c.total_xp).where(student_progress.c.student_id == student_id)
+    ).scalar_one()
     if xp > 0:
         connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
     if active:
         record_study_day(connection, student_id, today)
-    return {"xp_awarded": xp, "total_xp": progress["total_xp"] + xp, "streak": streak}
+    return {"xp_awarded": xp, "total_xp": int(total), "streak": streak}
 
 
 def mark_study_day(student_id: str) -> int:
@@ -1053,7 +1065,7 @@ def mark_study_day(student_id: str) -> int:
             return 1
         # Written even when the streak already counts today (idempotent), so the day is never missed.
         record_study_day(connection, student_id, today)
-        if progress["last_active_date"] == today:
+        if progress["last_active_date"] is not None and progress["last_active_date"] >= today:
             return int(progress["streak"])
         streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
         connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
@@ -1080,6 +1092,19 @@ def _insert_ignore(connection, table, rows: list[dict], keys: list[str]) -> int:
         return 0
     insert = postgres_insert if connection.dialect.name == "postgresql" else sqlite_insert
     return connection.execute(insert(table).values(rows).on_conflict_do_nothing(index_elements=keys)).rowcount or 0
+
+
+def _upsert(connection, table, row: dict, keys: list[str], update_columns: list[str]) -> None:
+    """INSERT ... ON CONFLICT (keys) DO UPDATE SET update_columns (DO NOTHING when empty)."""
+    insert = postgres_insert if connection.dialect.name == "postgresql" else sqlite_insert
+    statement = insert(table).values(row)
+    if update_columns:
+        statement = statement.on_conflict_do_update(
+            index_elements=keys, set_={column: statement.excluded[column] for column in update_columns},
+        )
+    else:
+        statement = statement.on_conflict_do_nothing(index_elements=keys)
+    connection.execute(statement)
 
 
 def record_study_day(connection, student_id: str, day: date | None = None) -> bool:
@@ -1269,11 +1294,18 @@ def _announce_study_day(connection, student_id: str, today: date) -> None:
     _send_streak_notices(connection, notices)
 
 
-def record_daily_login(student_id: str) -> dict:
+def record_daily_login(student_id: str, require_profile: bool = False) -> dict | None:
+    """Count today's sign-in for the login streak. With require_profile, does nothing and
+    returns None when the student has no profile row (a deleted account whose token is still
+    cached elsewhere must not get its progress row back)."""
     init_db()
     today = local_today()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
+        if require_profile and connection.execute(
+            select(profiles.c.student_id).where(profiles.c.student_id == student_id)
+        ).first() is None:
+            return None
         progress = connection.execute(
             select(student_progress).where(student_progress.c.student_id == student_id)
         ).mappings().first()
@@ -1284,7 +1316,8 @@ def record_daily_login(student_id: str) -> dict:
                 login_streak=1, best_login_streak=1, last_login_date=today,
                 updated_at=now,
             ))
-        elif progress["last_login_date"] != today:
+        elif progress["last_login_date"] is None or progress["last_login_date"] < today:
+            # Never moves backwards when the offset puts "today" before the stored day.
             login_streak = _next_login_streak(
                 progress.get("login_streak", 0),
                 progress.get("last_login_date"),

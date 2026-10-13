@@ -173,7 +173,7 @@ class ActionLimitTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 429)
 
     def test_profile_updates_are_limited(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             for _ in range(30):
                 main.limit_action("alex-id", "profile_update", 30)
             with self.assertRaises(HTTPException) as caught:
@@ -181,7 +181,7 @@ class ActionLimitTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 429)
 
     def test_task_creation_is_limited(self):
-        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id"}), patch.object(main, "TASK_CREATE_LIMIT", 1):
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(main, "TASK_CREATE_LIMIT", 1):
             main.create_task_route(main.TaskCreate(title="One"), "Bearer t")
             with self.assertRaises(HTTPException) as caught:
                 main.create_task_route(main.TaskCreate(title="Two"), "Bearer t")

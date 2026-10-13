@@ -70,7 +70,7 @@ class BinditBackendTests(unittest.TestCase):
         self.assertTrue(stored['correct_answer'])
 
     def test_public_question_hides_answer_for_authenticated_user(self):
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-1'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             response = main.generate_question(
                 main.QuestionRequest(topic='addition', difficulty=1, student_id='spoofed'),
                 'Bearer test',
@@ -109,7 +109,7 @@ class BinditBackendTests(unittest.TestCase):
             'explanation': 'Your setup is close, but 2 + 2 equals 4.',
             'hint': 'Count two more from 2.',
         }
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'guest-1'}), patch.object(main.ai_tutor, 'grade_answer', return_value=ai_result):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'guest-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), patch.object(main.ai_tutor, 'grade_answer', return_value=ai_result):
             result = main.analyze_answer(
                 main.AnswerRequest(question_id=question_id, student_answer='two plus two is five', student_id='guest-1'), 'Bearer test'
             )
@@ -136,7 +136,7 @@ class BinditBackendTests(unittest.TestCase):
         request = main.AnswerRequest(question_id=question_id, student_answer='the powerhouse of the cell')
 
         def refused(budget_left):
-            with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+            with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), \
                     patch.object(main, 'global_ai_available', return_value=budget_left), \
                     patch.object(main.ai_tutor, 'grade_answer', side_effect=main.ai_tutor.AITutorError('offline')) as grader:
                 with self.assertRaises(main.HTTPException) as caught:
@@ -151,7 +151,7 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(main.questions.get_question('student-ai', question_id)['completed'], main.questions.OPEN)
         self.assertIsNone(main.database.get_progress('student-ai'))
         ai_result = {'correct': True, 'score': 100, 'mistake_type': None, 'misconception': None, 'explanation': 'Yes.', 'hint': None}
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), \
                 patch.object(main.ai_tutor, 'grade_answer', return_value=ai_result):
             result = main.analyze_answer(request, 'Bearer test')
         self.assertTrue(result.correct)
@@ -159,7 +159,7 @@ class BinditBackendTests(unittest.TestCase):
 
     def test_wrong_arithmetic_is_graded_without_ai(self):
         question_id = self.save_math_question('student-ai')
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai'}), \
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'student-ai', 'email_confirmed_at': '2026-01-01T00:00:00Z'}), \
                 patch.object(main.ai_tutor, 'grade_answer') as grader, \
                 patch.object(main.database, 'check_social_rate_limit') as limit:
             result = main.analyze_answer(main.AnswerRequest(question_id=question_id, student_answer='5'), 'Bearer test')
@@ -210,6 +210,19 @@ class BinditBackendTests(unittest.TestCase):
         self.assertFalse(main.answers_match('3', '3.5'))
         self.assertTrue(main.answers_match('mendel', 'mendel.pdf'))
 
+    def test_commas_only_count_as_thousands_separators(self):
+        self.assertFalse(main.answers_match('1,5', '15'))
+        self.assertFalse(main.answers_match('15', '1,5'))
+        self.assertFalse(main.answers_match('1,00', '100'))
+        self.assertFalse(main.answers_match('10,00,000', '1000000'))
+        self.assertIsNone(main.parse_number('1,5'))
+        self.assertTrue(main.answers_match('1,000', '1000'))
+        self.assertTrue(main.answers_match('12,345.5', '12345.5'))
+        self.assertTrue(main.answers_match('-1,000,000', '-1000000'))
+        self.assertTrue(main.answers_match('1,000%', '1000'))
+        self.assertTrue(main.answers_match('1,5', '1,5'))  # same text still matches
+        self.assertEqual(main.parse_number('1,000'), main.Decimal('1000'))
+
     def test_hostile_numbers_never_crash_the_grader(self):
         hostile = ['sNaN', '-sNaN', 'NaN', 'Infinity', '-Infinity', 'inf', '1e999999999', '1e-999999999',
                    '1e51', '1/0', '1e999999999/3', 'sNaN%', '12', '0', '3.5 cm']
@@ -237,7 +250,7 @@ class BinditBackendTests(unittest.TestCase):
     def test_authenticated_identity_overrides_spoofed_student_id(self):
         question_id = self.save_math_question('account-1')
         request = main.AnswerRequest(question_id=question_id, student_answer='4', student_id='spoofed')
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-1'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-1', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             result = main.analyze_answer(request, 'Bearer test')
         self.assertTrue(result.correct)
         self.assertIsNone(main.database.get_progress('spoofed'))
@@ -246,7 +259,7 @@ class BinditBackendTests(unittest.TestCase):
     def test_question_is_bound_to_identity(self):
         question_id = self.save_math_question('account-1')
         request = main.AnswerRequest(question_id=question_id, student_answer='4', student_id='spoofed')
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-2'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'account-2', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             with self.assertRaises(main.HTTPException) as context:
                 main.analyze_answer(request, 'Bearer test')
         self.assertEqual(context.exception.status_code, 404)
@@ -301,7 +314,7 @@ class BinditBackendTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 401)
 
     def test_daily_login_streak_increments_once_per_day(self):
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'login-student'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'login-student', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             first = main.daily_login(main.DailyLoginRequest(), 'Bearer test')
             second = main.daily_login(main.DailyLoginRequest(), 'Bearer test')
         self.assertEqual(first.login_streak, 1)
@@ -310,7 +323,7 @@ class BinditBackendTests(unittest.TestCase):
 
     def test_unit_accuracy_is_returned_per_topic(self):
         token = 'Bearer test'
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'unit-student'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'unit-student', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             q1 = self.save_math_question('unit-student')
             with patch.object(main.ai_tutor, 'grade_answer', side_effect=main.ai_tutor.AITutorError('offline')):
                 main.analyze_answer(main.AnswerRequest(question_id=q1, student_answer='5'), token)
@@ -331,7 +344,7 @@ class BinditBackendTests(unittest.TestCase):
 
     def test_progress_rejects_another_users_id(self):
         main.database.update_progress('victim-account', 'addition', True, 10)
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'attacker-account'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'attacker-account', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             with self.assertRaises(main.HTTPException) as context:
                 main.get_progress('victim-account', 'Bearer test')
         self.assertEqual(context.exception.status_code, 403)
@@ -343,7 +356,7 @@ class BinditBackendTests(unittest.TestCase):
         self.assertIsNone(main.database.get_progress('victim-account'))
 
     def test_daily_login_ignores_client_supplied_id(self):
-        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'attacker-account'}):
+        with patch.object(main.auth, 'authenticated_user', return_value={'id': 'attacker-account', 'email_confirmed_at': '2026-01-01T00:00:00Z'}):
             result = main.daily_login(main.DailyLoginRequest(student_id='victim-account'), 'Bearer test')
         self.assertEqual(result.student_id, 'attacker-account')
         self.assertIsNone(main.database.get_progress('victim-account'))

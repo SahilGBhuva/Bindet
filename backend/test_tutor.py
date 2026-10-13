@@ -11,6 +11,7 @@ TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
 from fastapi import HTTPException
+from sqlalchemy import delete, false
 
 import ai_tutor
 import database
@@ -43,7 +44,7 @@ class TutorTests(unittest.TestCase):
             os.unlink(TEST_DB.name)
 
     def as_user(self, student_id):
-        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id})
+        return patch.object(main.auth, "authenticated_user", return_value={"id": student_id, "email_confirmed_at": "2026-01-01T00:00:00Z"})
 
     def send(self, student_id, chunks=("Photo", "synthesis ", "stores energy."), **fields):
         captured = {}
@@ -180,6 +181,56 @@ class TutorTests(unittest.TestCase):
                 self.send("alex")
         self.assertEqual(caught.exception.status_code, 429)
         self.assertEqual(caught.exception.detail, main.TUTOR_DAILY_LIMITED)
+
+    def test_a_reply_can_only_be_replaced_once(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        old_id = next(data for name, data in events if name == "done")["message"]["id"]
+        self.send("alex")  # newer rows, so SQLite doesn't hand the deleted reply's id to the new one
+        tutor.replace_reply("alex", conversation_id, old_id, "First regeneration.")
+        with self.assertRaises(tutor.ReplyAlreadyReplaced):
+            tutor.replace_reply("alex", conversation_id, old_id, "Second regeneration.")
+        replies = [item["content"] for item in tutor.list_messages("alex", conversation_id) if item["role"] == "assistant"]
+        self.assertEqual(replies, ["First regeneration."])
+
+    def test_parallel_regenerate_keeps_one_reply_and_reports_409(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        self.send("alex")  # newer rows, so SQLite doesn't hand the deleted reply's id to the new one
+        real_turn = tutor.last_reply_turn
+
+        def turn_then_lose_the_race(owner, conversation):
+            found = real_turn(owner, conversation)
+            tutor.replace_reply(owner, conversation, found[1], "The other tab's answer.")  # the other request wins
+            return found
+
+        with patch.object(tutor, "last_reply_turn", side_effect=turn_then_lose_the_race):
+            events, _ = self.send("alex", conversation_id=conversation_id, regenerate=True)
+        self.assertEqual(events[-1][0], "error")
+        self.assertEqual(events[-1][1]["status"], 409)
+        self.assertEqual(events[-1][1]["message"], main.TUTOR_ALREADY_REGENERATED)
+        replies = [item["content"] for item in tutor.list_messages("alex", conversation_id) if item["role"] == "assistant"]
+        self.assertEqual(replies, ["The other tab's answer."])
+
+    def test_double_tapped_rating_and_first_settings_write_do_not_fail(self):
+        events, _ = self.send("alex")
+        conversation_id = events[0][1]["conversation"]["id"]
+        reply_id = next(data for name, data in events if name == "done")["message"]["id"]
+        tutor.rate_message("alex", reply_id, 1)
+        # The second tap runs as if the first one's row appeared after any check it made.
+        with patch.object(tutor, "delete", side_effect=lambda table: delete(table).where(false())):
+            self.assertEqual(tutor.rate_message("alex", reply_id, -1)["rating"], -1)
+        self.assertEqual(tutor.list_messages("alex", conversation_id)[-1]["rating"], -1)
+        self.assertEqual(tutor.rate_message("alex", reply_id, 0)["rating"], 0)
+        self.assertEqual(tutor.list_messages("alex", conversation_id)[-1]["rating"], 0)
+
+        tutor.update_settings("alex", conversation_id, pinned=True)
+        # A parallel first write: this request saw no settings row, but one exists by now.
+        with patch.object(tutor, "_settings_for", side_effect=[{}, {conversation_id: {"pinned": True, "study_mode": "guide"}}]):
+            tutor.update_settings("alex", conversation_id, study_mode="guide")
+        stored = tutor.get_conversation("alex", conversation_id)
+        self.assertTrue(stored["pinned"])
+        self.assertEqual(stored["study_mode"], "guide")
 
     def test_history_sent_to_the_model_is_capped_by_characters(self):
         events, _ = self.send("alex")
