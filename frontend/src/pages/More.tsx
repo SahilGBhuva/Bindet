@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Icons } from '../components/Icons'
+import { useAnnounce } from '../lib/announce'
 import type { AuthSession } from '../lib/auth'
 import { describeDevice, sendFeedback, type FeedbackCategory } from '../lib/practiceLab'
 import { pageBeforeHelp } from '../lib/screens'
@@ -222,6 +223,10 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
   const page = pageBeforeHelp()
+  // The thanks and errors go through the shared live regions (lib/announce.ts); the visual
+  // panel and alert keep no live role so nothing is read twice.
+  useAnnounce(session && sent ? 'Thanks — the bindet team reads every message.' : '')
+  useAnnounce(error, { error: true })
 
   if (!session) {
     return <div className="ui-panel ui-panel--padded help__feedback"><p className="help__note">Sign in to send feedback, or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p></div>
@@ -229,7 +234,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
 
   if (sent) {
     return (
-      <div className="ui-panel ui-panel--padded help__feedback help__thanks ui-tone--green" role="status">
+      <div className="ui-panel ui-panel--padded help__feedback help__thanks ui-tone--green">
         <span className="ui-icon" aria-hidden="true">{Icons.check}</span>
         <div>
           <p className="help__thanks-title">Thanks — the bindet team reads every message.</p>
@@ -294,7 +299,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
       {device ? (
         <p className="help__device">{[device.browser, device.os, `screen ${device.screen}`, `window ${device.viewport}`, page ? `page: ${page}` : ''].filter(Boolean).join(' · ')}</p>
       ) : null}
-      {error ? <div className="ui-alert" role="alert"><span>{error}</span></div> : null}
+      {error ? <div className="ui-alert"><span>{error}</span></div> : null}
       <div>
         <button type="submit" className={`ui-button ui-button--primary${busy ? ' is-busy' : ''}`} disabled={!message.trim() || busy}>Send feedback</button>
       </div>
