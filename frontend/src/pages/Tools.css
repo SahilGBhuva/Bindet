@@ -1710,8 +1710,9 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   .tools__header-actions .tools__label-long { display: none; }
   .tools__header-actions .tools__label-short { display: inline; }
   /* The selected unit tab already names the unit: its heading stays for screen readers only,
-     so the card or notes start higher on the screen. */
-  .tools__toolbar .tools__unit-title {
+     so the card or notes start higher on the screen. Review over all units has no unit
+     tab, so its heading stays: without it the page reads as the open course's review. */
+  .tools__toolbar:not(.tools__review-toolbar) .tools__unit-title {
     position: absolute;
     width: 1px;
     height: 1px;

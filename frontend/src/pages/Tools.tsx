@@ -464,6 +464,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const courseImageInput = useRef<HTMLInputElement>(null)
   const orderDragIndex = useRef(-1)
   const menuRef = useRef<HTMLDivElement>(null)
+  const courseListRef = useRef<HTMLUListElement>(null)
   const studentId = useRef(data.getStudentId())
   // AI generation is rate limited per day, so generated content is only requested
   // when what it depends on changes, never just because the user switched views.
@@ -494,6 +495,25 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const units = unitsFor(courses, activeCourse)
   const current = courses.find((course) => course.name === activeCourse)
   const looking = courses.find((course) => course.name === lookCourse) ?? current
+  // On phones the course list is one scrolling row: keep the open course in view, without
+  // scrolling the page itself.
+  useEffect(() => {
+    const list = courseListRef.current
+    if (!list) return
+    const reveal = () => {
+      const item = list.querySelector<HTMLElement>('.tools__course.is-active')
+      if (!item || list.scrollWidth <= list.clientWidth) return
+      const start = item.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft
+      if (start < list.scrollLeft || start + item.offsetWidth > list.scrollLeft + list.clientWidth) {
+        list.scrollLeft = Math.max(0, start - 16)
+      }
+    }
+    reveal()
+    // The row may not be laid out yet (the page is still appearing), so check again once it is.
+    const observer = new ResizeObserver(reveal)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [activeCourse, courses.length])
   // A unit's notes are the ones saved on the server (from any device) plus this device's own.
   const localUnitNotes = notesFor(notebook.deposits, activeCourse, activeUnit)
   const unitNotes = [
@@ -1945,6 +1965,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const testsHere = unitTests?.key === unitKey ? unitTests.tests : []
   const inProgressTest = testsHere.find((test) => test.status === 'in_progress')
   const lastTest = testsHere.find((test) => test.status === 'submitted')
+  // A test left open past its time limit can't be resumed: opening it hands it in as it stands.
+  const inProgressExpired = Boolean(inProgressTest?.deadline && Date.parse(inProgressTest.deadline) <= data.now())
   const practiceEntry = (
     <section className="tools__practice" aria-labelledby="tools-practice-title">
       <div className="tools__practice-text">
@@ -1953,7 +1975,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           {!unitNotes.length
             ? `Add notes to ${activeUnit} to take a timed practice test.`
             : inProgressTest
-              ? `You have a test in progress from ${formatDay(inProgressTest.created_at) || 'earlier'}.`
+              ? inProgressExpired
+                ? `Your test from ${formatDay(inProgressTest.created_at) || 'earlier'} ran out of time. Hand it in to see your score.`
+                : `You have a test in progress from ${formatDay(inProgressTest.created_at) || 'earlier'}.`
               : lastTest
                 ? `Last score: ${lastTest.score ?? 0} of ${lastTest.question_count} (${formatDay(lastTest.created_at)}).`
                 : `A timed test of 5–15 questions from ${plural(unitNotes.length, 'note')}, with a score report and weak spots.`}
@@ -1962,7 +1986,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       <div className="tools__practice-actions">
         {inProgressTest ? (
           <button className="ui-button ui-button--primary tools__practice-entry" type="button" onClick={() => openPractice(activeUnit, inProgressTest.id)}>
-            Resume practice test
+            {inProgressExpired ? 'Hand in and see results' : 'Resume practice test'}
           </button>
         ) : null}
         <button className="ui-button tools__practice-entry" type="button" disabled={!unitNotes.length} onClick={() => openPractice(activeUnit)}>
@@ -2049,7 +2073,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       <div className="tools__layout">
         <nav className="tools__courses" aria-label="Courses">
           <h2 className="tools__courses-title">Courses</h2>
-          <ul className="tools__course-list">
+          <ul className="tools__course-list" ref={courseListRef}>
             {courses.map((course) => {
               const isActive = course.name === activeCourse
               return (
