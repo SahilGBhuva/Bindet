@@ -1,6 +1,11 @@
 /* Practice test: setup sheet, test screen and results. Tokens only (both themes). */
 
-.practice {
+/*
+ * The Practice lab page (pages/Games.tsx) also uses the "practice" class on its
+ * .ui-page root; :not(.ui-page) keeps this padding off it so its header lines up
+ * with every other page.
+ */
+.practice:not(.ui-page) {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -702,7 +707,7 @@
 /* Phones: one column, finger-sized targets, inputs at 16px so iOS does not zoom. */
 
 @media (max-width: 860px) {
-  .practice { padding: var(--space-4); gap: var(--space-4); scroll-margin-top: calc(var(--phone-topbar, 0px) + var(--space-2)); }
+  .practice:not(.ui-page) { padding: var(--space-4); gap: var(--space-4); scroll-margin-top: calc(var(--phone-topbar, 0px) + var(--space-2)); }
   .practice__bar-top { top: var(--phone-topbar, 0px); margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0; padding: var(--space-3) var(--space-4); }
   .practice__question { padding: var(--space-4); }
   .practice__nav-item { width: 44px; height: 44px; }
