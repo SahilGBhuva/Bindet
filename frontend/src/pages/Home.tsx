@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { parseServerTime, type FriendsHub, type NoteScope, type Profile, type Progress, type StudyGroup, type Task } from '../lib/api'
 import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
+import { useAnnounce } from '../lib/announce'
 import { useData } from '../lib/dataSource'
 import { mergeNoteScopes, withCourseTones } from '../lib/session'
 import { loadHiddenCourses } from '../lib/studyPrefs'
@@ -493,6 +494,11 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
     return mine.find((task) => task.status === 'in_progress') ?? mine[0]
   }
 
+  // Load failures are announced through the shared live regions (lib/announce.ts); the
+  // visual messages keep no live role so nothing is read twice.
+  useAnnounce(tasks !== null && tasksFailed && !deadlines.length ? 'Deadlines couldn’t load.' : '', { error: true })
+  useAnnounce(groups !== null && !group && groupsFailed ? 'Your groups couldn’t load.' : '', { error: true })
+
   const filterLabel = filter === 'none' ? 'Showing all' : filter === 'courses' ? 'Courses only' : 'Groups only'
 
   return (
@@ -709,7 +715,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                   <span className="ui-skeleton home-rows__skeleton" /><span className="ui-skeleton home-rows__skeleton" /><span className="ui-skeleton home-rows__skeleton" />
                 </div>
               ) : tasksFailed && !deadlines.length ? (
-                <p className="home-rows__empty" role="alert">Deadlines couldn’t load. <button type="button" className="ui-link" onClick={retryTasks}>Try again</button></p>
+                <p className="home-rows__empty">Deadlines couldn’t load. <button type="button" className="ui-link" onClick={retryTasks}>Try again</button></p>
               ) : deadlines.length ? (
                 <ul className="home-rows">
                   {deadlines.map((task) => {
@@ -813,7 +819,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                 </ul>
               </>
             ) : groupsFailed ? (
-              <div className="home-team__empty" role="alert">
+              <div className="home-team__empty">
                 <h2 className="home-team__name" id="home-team-title">Your group</h2>
                 <p>Your groups couldn’t load.</p>
                 <button type="button" className="ui-link" onClick={retryGroups}>Try again</button>
