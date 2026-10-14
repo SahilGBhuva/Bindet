@@ -1945,6 +1945,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const testsHere = unitTests?.key === unitKey ? unitTests.tests : []
   const inProgressTest = testsHere.find((test) => test.status === 'in_progress')
   const lastTest = testsHere.find((test) => test.status === 'submitted')
+  // A test left open past its time limit can't be resumed: opening it hands it in as it stands.
+  const inProgressExpired = Boolean(inProgressTest?.deadline && Date.parse(inProgressTest.deadline) <= data.now())
   const practiceEntry = (
     <section className="tools__practice" aria-labelledby="tools-practice-title">
       <div className="tools__practice-text">
@@ -1953,7 +1955,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
           {!unitNotes.length
             ? `Add notes to ${activeUnit} to take a timed practice test.`
             : inProgressTest
-              ? `You have a test in progress from ${formatDay(inProgressTest.created_at) || 'earlier'}.`
+              ? inProgressExpired
+                ? `Your test from ${formatDay(inProgressTest.created_at) || 'earlier'} ran out of time. Hand it in to see your score.`
+                : `You have a test in progress from ${formatDay(inProgressTest.created_at) || 'earlier'}.`
               : lastTest
                 ? `Last score: ${lastTest.score ?? 0} of ${lastTest.question_count} (${formatDay(lastTest.created_at)}).`
                 : `A timed test of 5–15 questions from ${plural(unitNotes.length, 'note')}, with a score report and weak spots.`}
@@ -1962,7 +1966,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       <div className="tools__practice-actions">
         {inProgressTest ? (
           <button className="ui-button ui-button--primary tools__practice-entry" type="button" onClick={() => openPractice(activeUnit, inProgressTest.id)}>
-            Resume practice test
+            {inProgressExpired ? 'Hand in and see results' : 'Resume practice test'}
           </button>
         ) : null}
         <button className="ui-button tools__practice-entry" type="button" disabled={!unitNotes.length} onClick={() => openPractice(activeUnit)}>
