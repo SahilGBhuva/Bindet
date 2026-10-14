@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import type { Progress as ProgressData } from '../lib/api'
+import type { NoteScope, Progress as ProgressData } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
 import {
@@ -39,6 +39,8 @@ export function Progress({ session }: ProgressProps) {
     return { ...loaded, courses: withCourseTones(loaded.courses) }
   })
   const [attempts, setAttempts] = useState(() => data.loadUnitAttempts())
+  // Notes saved from any device; the notebook only knows the ones added on this one.
+  const [savedNotes, setSavedNotes] = useState<NoteScope[]>([])
   const [selected, setSelected] = useState(() => notebook.activeCourse || notebook.courses[0]?.name || '')
   const [focusUnit, setFocusUnit] = useState('')
   const [hover, setHover] = useState<number | null>(null)
@@ -59,6 +61,14 @@ export function Progress({ session }: ProgressProps) {
       .catch(() => { if (active) setStatsFailed(true) })
     return () => { active = false }
   }, [data, studentId, session?.access_token, reload])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    data.listNoteScopes(session?.access_token, controller.signal)
+      .then((scopes) => { if (!controller.signal.aborted) setSavedNotes(scopes) })
+      .catch(() => { /* this device's notes still count */ })
+    return () => controller.abort()
+  }, [data, session?.access_token, reload])
 
   useEffect(() => {
     const sync = () => {
@@ -84,9 +94,9 @@ export function Progress({ session }: ProgressProps) {
   const pulse = useMemo(
     () =>
       activeCourse
-        ? buildCoursePulse(activeCourse, notebook.deposits, attempts, stats?.topics ?? [])
+        ? buildCoursePulse(activeCourse, notebook.deposits, attempts, stats?.topics ?? [], savedNotes)
         : null,
-    [activeCourse, notebook.deposits, attempts, stats],
+    [activeCourse, notebook.deposits, attempts, stats, savedNotes],
   )
 
   // Opens Study on the recommended unit, the same way Home opens a course.

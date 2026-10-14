@@ -102,11 +102,14 @@ export function buildCoursePulse(
   deposits: NoteDeposit[],
   attempts: UnitAttempt[],
   topics: TopicStat[],
+  // Notes saved on the server (from any device), counted per unit. This device's own
+  // deposits miss notes added elsewhere, so a unit counts whichever is larger.
+  savedNotes: { course: string; unit: string; note_count: number }[] = [],
 ): CoursePulse {
   const names = course.units
   const palette = paletteFor(course.tone ?? '#2a6ea8', names.length)
   const courseAttempts = attempts.filter((item) => sameName(item.course, course.name))
-  const units = names.map((name) => judgeUnit(name, course.name, deposits, courseAttempts, topics))
+  const units = names.map((name) => judgeUnit(name, course.name, deposits, courseAttempts, topics, savedNotes))
   const anyLive = units.some((unit) => unit.live)
   const mastery = units.length
     ? Math.round(units.reduce((sum, unit) => sum + unit.mastery, 0) / units.length)
@@ -151,8 +154,11 @@ function judgeUnit(
   deposits: NoteDeposit[],
   attempts: UnitAttempt[],
   topics: TopicStat[],
+  savedNotes: { course: string; unit: string; note_count: number }[],
 ): UnitJudgment {
-  const notes = deposits.filter((item) => sameName(item.course, courseName) && sameName(item.unit, name)).length
+  const localNotes = deposits.filter((item) => sameName(item.course, courseName) && sameName(item.unit, name)).length
+  const saved = savedNotes.find((item) => sameName(item.course, courseName) && sameName(item.unit, name))?.note_count ?? 0
+  const notes = Math.max(localNotes, saved)
   const mine = attempts.filter((item) => sameName(item.unit, name))
   const topic = topics.find((item) => sameName(item.topic, name))
   const loggedAttempts = mine.length
