@@ -143,7 +143,7 @@ const GUIDES: Guide[] = [
         <li>Group chats are private to the group’s members. In <a href="#settings">Settings</a>, choose whether you appear in search and whether new people can send you friend requests. You can block or report someone from Friends &amp; groups.</li>
         <li><b>Delete your account:</b> in <a href="#settings">Settings</a>, choose <b>Delete account</b> and type <b>DELETE MY ACCOUNT</b>. For your safety you may be asked to sign in again first.</li>
         <li>Everything in your account is deleted at once and can’t be recovered, including practice rounds and challenges you sent or received. Groups you own pass to the member who joined earliest; a group where you’re the only member is deleted.</li>
-        <li>Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>, or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> for a copy of your data.</li>
+        <li>Read the <a className="ui-link" href="/privacy">Privacy Policy</a> and <a className="ui-link" href="/terms">Terms of Service</a>, or email <a className="ui-link" href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a> for a copy of your data.</li>
       </ol>
     ),
   },
@@ -229,7 +229,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
   useAnnounce(error, { error: true })
 
   if (!session) {
-    return <div className="ui-panel ui-panel--padded help__feedback"><p className="help__note">Sign in to send feedback, or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p></div>
+    return <div className="ui-panel ui-panel--padded help__feedback"><p className="help__note">Sign in to send feedback, or email <a className="ui-link" href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p></div>
   }
 
   if (sent) {
@@ -238,7 +238,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
         <span className="ui-icon" aria-hidden="true">{Icons.check}</span>
         <div>
           <p className="help__thanks-title">Thanks — the bindet team reads every message.</p>
-          <p className="help__note">You can also email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
+          <p className="help__note">You can also email <a className="ui-link" href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
           <button type="button" className="ui-button ui-button--sm" onClick={() => { setSent(false); setMessage('') }}>Send another</button>
         </div>
       </div>
@@ -267,7 +267,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
 
   return (
     <form className="ui-panel ui-panel--padded help__feedback" onSubmit={(event) => void submit(event)}>
-      <p className="help__note">Tell us what to fix or build next. Or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
+      <p className="help__note">Tell us what to fix or build next. Or email <a className="ui-link" href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
       <div className="help__field">
         <span className="help__label" id="feedback-kind">What is it about?</span>
         <div className="ui-segmented help__kinds" role="group" aria-labelledby="feedback-kind">

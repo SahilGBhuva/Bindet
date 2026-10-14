@@ -497,7 +497,7 @@ export function Settings({ session, onSession }: SettingsProps) {
           <Section id="settings-delete" title="Delete account" copy="Permanently delete your bindet account and everything in it.">
             <div className="ui-panel settings__danger">
               <div className="settings__row settings__row--stack">
-                <p className="settings__danger-lead">Deleting your account removes, right away:</p>
+                <p className="settings__danger-lead">Deleting your account removes{canDelete === false ? "" : ", right away"}:</p>
                 <ul className="settings__danger-list">
                   <li>Your profile, XP, streaks, progress and friend ID</li>
                   <li>Your notes, flashcards, quiz questions, tutor conversations and what Otto remembers about you</li>

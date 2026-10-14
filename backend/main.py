@@ -668,6 +668,8 @@ class ProfileResponse(BaseModel):
     daily_goal: int = 20
     discoverable: bool = True
     allow_friend_requests: bool = True
+    # "Let friends nudge me": without it here, the switch read as on after every reload.
+    allow_nudges: bool = True
     total_xp: int = 0
     streak: int = 0
     best_streak: int = 0
@@ -2031,7 +2033,7 @@ OCR_UNAVAILABLE = "Reading that file took too long or the reader is unavailable.
 TUTOR_RATE_LIMITED = "You’ve sent a lot of messages this hour. Take a short break and try again soon."
 TUTOR_DAILY_LIMITED = "You’ve reached today’s limit with Otto. It resets within a day."
 TUTOR_TOO_MANY_STREAMS = "Otto is still answering your other messages. Wait for one to finish, then try again."
-TUTOR_UNAVAILABLE = "The tutor is unavailable right now. Your message is saved, so you can try again in a moment."
+TUTOR_UNAVAILABLE = "Otto is unavailable right now. Your message is saved, so you can try again in a moment."
 TUTOR_NOT_SAVED = "Your message couldn’t be saved. Try sending it again."
 TUTOR_ALREADY_REGENERATED = "This reply was already regenerated. Refresh to see the newest answer."
 TUTOR_REGENERATE_FAILED = "Otto couldn’t write a new answer right now, so your previous answer is still here. Try again in a moment."

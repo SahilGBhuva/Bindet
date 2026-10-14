@@ -197,8 +197,11 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session || peopleQuery.trim().length < 2) return
     setSocialBusy(true)
     try {
-      setPeopleResults(await data.searchFriends(peopleQuery, session.access_token))
+      const found = await data.searchFriends(peopleQuery, session.access_token)
+      setPeopleResults(found)
       setSearched(peopleQuery.trim())
+      // An empty result used to look like the button did nothing.
+      if (!found.length) say(`No one found for “${peopleQuery.trim()}”. Try their username, or ask for their friend ID.`)
     } catch {
       say('Search is not working right now. Try again in a moment.', true)
     } finally {
@@ -314,10 +317,16 @@ export function Profile({ session, onError }: ProfileProps) {
 
   async function beginQuest(friendId: string) {
     if (!session) return
+    // Only one quest runs per friend: starting another would just return the running one.
+    const running = social?.quests.find((quest) => quest.friend_id === friendId && quest.status === 'active')
+    if (running) {
+      say(`You already have a quest with ${running.friend_name}: ${running.progress_xp} of ${running.target_xp} XP so far.`)
+      return
+    }
     setSocialBusy(true)
     try {
-      await data.startFriendQuest(friendId, session.access_token)
-      say('Friend quest started. Earn 100 XP together this week.')
+      const quest = await data.startFriendQuest(friendId, session.access_token)
+      say(`Friend quest started. Earn ${quest?.target_xp ?? 100} XP together this week.`)
       await refreshSocial()
     } catch (error) {
       say(error instanceof Error ? error.message : 'Could not start that quest.', true)
@@ -772,7 +781,7 @@ export function Profile({ session, onError }: ProfileProps) {
                       key={event.id}
                       name={event.display_name}
                       label={`${event.student_id === studentId ? 'You' : event.display_name} earned ${event.xp} XP`}
-                      meta={new Date(parseServerTime(event.created_at)).toLocaleDateString()}
+                      meta={shortDate.format(new Date(parseServerTime(event.created_at)))}
                     >
                       {event.student_id !== studentId ? (
                         <button
@@ -949,7 +958,7 @@ export function Profile({ session, onError }: ProfileProps) {
           <section className="ui-section" aria-labelledby="quests-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="quests-title">Friend quests</h2>
-              <span className="ui-count">100 XP together in a week</span>
+              <span className="ui-count">Earn XP together in a week</span>
             </div>
             <div className="ui-panel">
               {socialLoading ? <SkeletonRows rows={1} /> : (

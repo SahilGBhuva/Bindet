@@ -605,7 +605,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
           <section className="tasks-content" id="tasks-tabpanel" role="tabpanel" aria-labelledby={`tasks-tab-${tab}`}>
             {!loaded && !tasks.length ? <TasksSkeleton /> : (
               tab === 'calendar' ? <CalendarView tasks={visible} today={today} selectedId={activeId} onSelect={select} onCompose={(date) => compose({ due_date: date })} />
-                : view === 'board' ? <BoardView tasks={visible} card={card} onMove={(id, status) => void patchTask(id, { status })} />
+                : view === 'board' ? <BoardView tasks={visible} card={card} onMove={(id, status) => void patchTask(id, { status })} hiddenDone={showDone ? 0 : scoped.length - visible.length} onShowDone={() => setShowDone(true)} />
                   : tab === 'mine' ? (
                     <div className="tasks-boxes">
                       <TaskBox kind="todo" id="tasks-todo" tasks={myTodo} card={card} onCompose={() => compose({ group_id: null })} />
@@ -729,7 +729,7 @@ function GroupBoxes({ tasks, groups, isAssigned, card, onCompose }: {
 
 /* The ≡ toggle's other layout. Drag moves a card between statuses; the Status field
    under "+ Details" is the keyboard alternative. */
-function BoardView({ tasks, card, onMove }: { tasks: Task[]; card: CardProps; onMove: (id: string, status: TaskStatus) => void }) {
+function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Task[]; card: CardProps; onMove: (id: string, status: TaskStatus) => void; hiddenDone: number; onShowDone: () => void }) {
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<TaskStatus | null>(null)
   const drop = (event: DragEvent, status: TaskStatus) => {
@@ -744,13 +744,16 @@ function BoardView({ tasks, card, onMove }: { tasks: Task[]; card: CardProps; on
     <div className="tasks-board">
       {STATUSES.map((status) => {
         const items = sortTasks(tasks.filter((task) => task.status === status.id))
+        // With completed tasks hidden, Done still counts them and offers to show them, so a
+        // card dragged into Done doesn't look like it vanished.
+        const hidden = status.id === 'done' ? hiddenDone : 0
         return (
           <section key={status.id} className={`tasks-box tasks-board__column${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
             onDragOver={(event) => { if (dragging) { event.preventDefault(); setOver(status.id) } }}
             onDragLeave={() => setOver((current) => current === status.id ? null : current)}
             onDrop={(event) => drop(event, status.id)}>
             <header className="tasks-box__head">
-              <h2 id={`tasks-board-${status.id}`}>{status.label}<span className="tasks-box__count">{items.length}</span></h2>
+              <h2 id={`tasks-board-${status.id}`}>{status.label}<span className="tasks-box__count">{items.length + hidden}</span></h2>
             </header>
             {items.length ? (
               <ul className="task-cards">
@@ -762,7 +765,9 @@ function BoardView({ tasks, card, onMove }: { tasks: Task[]; card: CardProps; on
                   }} />
                 ))}
               </ul>
-            ) : <p className="tasks-box__empty">{dragging ? 'Drop here' : 'Nothing here'}</p>}
+            ) : dragging ? <p className="tasks-box__empty">Drop here</p>
+              : hidden ? <p className="tasks-box__empty">{hidden} completed, hidden. <button type="button" className="ui-link" onClick={onShowDone}>Show them</button></p>
+                : <p className="tasks-box__empty">Nothing here</p>}
           </section>
         )
       })}
@@ -1097,7 +1102,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
       <article className="task-detail-card" aria-label={task.title}>
         <div className="task-detail-card__top">
           {manageable ? (
-            <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
+            <input ref={titleRef} className="task-title-input" value={title} title={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => blurSave(() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) })}
               onKeyDown={(event) => {

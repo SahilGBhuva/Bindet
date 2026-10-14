@@ -1033,7 +1033,7 @@ def _overview(total: int, done: int, overdue: int, no_response: int, pace: str, 
     """A plain-language summary computed from the numbers above (no AI involved)."""
     if not total:
         return ["No group tasks yet. Add tasks and milestones to start tracking this project."]
-    lines = [f"{done} of {total} tasks are complete ({round(done / total * 100)}%)."]
+    lines = [f"{done} of {total} {'task is' if total == 1 else 'tasks are'} complete ({round(done / total * 100)}%)."]
     if overdue:
         lines.append(f"{overdue} {'task is' if overdue == 1 else 'tasks are'} past due.")
     if no_response:
