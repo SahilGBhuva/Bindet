@@ -1,45 +1,94 @@
-# Bindit
+# bindet
 
-Bindit is a learning platform that helps students connect ideas, organize what they learn, and build consistent study habits. The repo contains a Vite + React frontend, a FastAPI learning API, Supabase authentication, and persistent progress storage.
+**Everything you're learning, bound together.** bindet is a study workspace for high school students. You file your class notes into courses and units, and bindet turns them into flashcards, quizzes, practice tests and study guides. Otto, an AI tutor, has read your notes. Friends keep each other going with shared streaks, a weekly league and study groups.
 
-## Folders
+Live: **https://bindet-learn.vercel.app**
 
-- `frontend/` — Bindit web app built with Vite, React, and TypeScript
-- `backend/` — FastAPI API for questions, answers, authentication, and progress
+Built by Sahil Bhuva, Bryan Chen, Xingchen Song and Aryaman for the 2026 Congressional App Challenge.
 
-The pieces are connected end-to-end: the React experience requests questions, FastAPI checks answers and awards XP, and the database saves each learner's progress.
+## What it does
 
-## Frontend
+| Area | What a student can do |
+| --- | --- |
+| Notes | Add notes as a photo of handwriting, a PDF, a Word doc or pasted text. Each note is filed under a course and unit. A vision model reads photos and scanned PDFs. |
+| Flashcards and review | Every unit builds a deck from its own notes. Spaced review brings back cards you miss sooner. |
+| Quizzes and practice tests | Questions are written from the unit's notes. Written answers are graded with an explanation. |
+| Otto, the tutor | Ask about a course and unit. Otto answers from your notes first and names the file it used. It guides you through homework instead of handing over answers, and can turn notes into a study guide. |
+| Progress | Every unit gets a mastery score from your quiz history, so you can see what is sharp and what is stuck. |
+| Friends and groups | Daily streaks, friend streaks, a weekly league, friend quests, and study groups with chat and a shared task board. |
 
-```bash
-cd frontend
-npm install
-npm run dev
+## How it is built
+
+```
+Browser (React + TypeScript, Vite)
+   │  /api/*  with the student's sign-in token
+   ▼
+FastAPI backend (Python) ── OpenRouter ── Gemini Flash Lite (text, photos), Mistral OCR (scanned PDFs)
+   │
+   ▼
+Supabase: Postgres database, Auth, Storage, Realtime (group chat)
 ```
 
-Open http://localhost:5173.
+- **Frontend** (`frontend/`):
+  - React 19, TypeScript and Vite, with hash routes and no UI framework.
+  - Pages are split into chunks that load on demand.
+  - The logged-out landing page runs the real app on an in-memory demo student, so visitors can try it without an account.
+- **Backend** (`backend/`): a FastAPI app (`main.py`, 103 routes) with one module per feature: `note_ingestion.py`, `flashcards.py`, `review.py`, `practice_tests.py`, `tutor.py`, `otto.py`, `study_guides.py`, `tasks.py` and `help_bot.py`.
+- **Database:** Postgres on Supabase in production; SQLite for local development and tests. Schema changes live in `supabase/migrations/`.
+- **Hosting:** Vercel serves the frontend and runs the backend as a function (`vercel.json`).
 
-The frontend calls `/api/*` on the same host in production. For local development, copy `frontend/.env.example` to `frontend/.env.local` so those requests go to the FastAPI server on port 8000.
+### Design choices worth knowing
 
-## Backend
+- **Answers stay grounded.**
+  - Flashcards whose answers don't share enough words with the note are dropped (`ai_tutor.is_grounded`).
+  - Otto is given only the student's notes for the chosen unit, each labelled with its file name (`note_store.context_for`).
+- **AI cost is controlled.**
+  - Results are cached by a hash of the exact input (`ai_cache.py`).
+  - Small talk gets a fixed reply without calling a model.
+  - Every student has daily limits, and the whole site has a daily budget. One email inbox can use at most 2% of that budget.
+  - Temporary-email accounts are refused (`disposable_email.py`).
+- **Streaks use the student's own day.** The browser sends its time-zone offset, and the server counts days in that time zone (`database.local_today`).
 
-See `backend/README.md`. Short version:
+## Security and privacy
+
+- **Sign-in:** every request is verified with Supabase Auth (`auth.py`), and every query filters by the signed-in student's id.
+- **Group chat:** protected by row-level security in Postgres.
+- **Keys:** server-only keys (the Supabase service role, OpenRouter) never reach the browser. The browser only ever holds the public Supabase key.
+- **Headers:** `vercel.json` sets strict security headers: Content Security Policy, HSTS, `X-Frame-Options: DENY`, and a Permissions-Policy.
+- **Uploads:** size-limited, checked by their real bytes, and parsed in a time-limited child process.
+- **Account deletion:** students can delete their account and all of its data from Settings.
+
+## Run it locally
+
+You need Python 3.12+ and Node 22+.
 
 ```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload
+./run-dev.sh
 ```
 
-API: http://127.0.0.1:8000  
-Docs: http://127.0.0.1:8000/docs
+This creates the backend virtualenv, installs packages, and starts the API on http://127.0.0.1:8000 and the app on http://127.0.0.1:5173.
 
-## Vercel deployment
+To sign in and use the AI features, copy `backend/.env.example` to `backend/.env` and fill in the Supabase and OpenRouter settings. Without them, the landing page and its live demo still work.
 
-Import the repository with the root directory set to `./`. The root `vercel.json` deploys the Vite frontend and FastAPI backend together, routes `/api/*` to FastAPI, and sends every other request to the frontend.
+## Tests
 
-The backend uses PostgreSQL when `DATABASE_URL` is set. Local development and tests fall back to SQLite when it is not. In production (any Vercel deployment, or `APP_ENV=production`), the backend refuses to start unless `DATABASE_URL` is a valid PostgreSQL URL, because a SQLite file on serverless storage loses every write when the instance is replaced. This applies to Preview deployments too, so set `DATABASE_URL` for every Vercel environment you deploy.
+```bash
+cd backend && python -m pytest -q        # about 700 tests
+cd frontend && npx tsc -b && npm run lint && npm run build
+```
 
-Bindit uses Supabase Auth for account identity, so saved progress can stay attached to the authenticated learner rather than a browser-only identity.
+GitHub Actions runs the backend tests and the frontend type check, lint and build on every push (`.github/workflows/ci.yml`).
+
+## Project layout
+
+```
+frontend/src/pages        one file per screen (Home, Tools = Study, Tutor = Otto, Goals = Tasks, ...)
+frontend/src/components   shared UI, the landing page, the demo sandbox, Otto's chat parts
+frontend/src/lib          API client, auth, caching, and small pure helpers
+backend/                  FastAPI app, one module per feature, test_*.py beside them
+supabase/migrations/      database schema and security policies
+```
+
+## How we used AI
+
+We used AI coding tools (Claude Code and OpenAI Codex) for parts of the code, tests and reviews. Inside the app, bindet calls AI models through OpenRouter. Our full disclosure is in our Congressional App Challenge submission.
