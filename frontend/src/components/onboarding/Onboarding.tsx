@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 import { ApiError, saveAccountProfile } from '../../lib/api'
 import { accountDisplayName, suggestedUsername } from '../../lib/accountName'
 import type { AuthSession } from '../../lib/auth'
+import { useAnnounce } from '../../lib/announce'
 import { addClassesToBinder, binderHasUnits, COURSE_NAME_MAX, finishSetup, FIRST_UNIT, savedStep, saveStep, SUGGESTED_CLASSES } from '../../lib/onboarding'
 import { BrandMark } from '../../lib/SiteSidebar'
 import { OnboardingOttoStep } from './OnboardingOttoStep'
@@ -51,6 +52,8 @@ function NameStep({ session, headingRef, onNext, onSkip, onSaved }: OnboardingSt
   const [editingUsername, setEditingUsername] = useState(false)
   const [error, setError] = useState<{ field: 'name' | 'username' | 'form'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  // Errors go through the shared live regions (lib/announce.ts); the visual lines keep no live role.
+  useAnnounce(error?.text, { error: true })
   const nameInput = useRef<HTMLInputElement>(null)
   const usernameInput = useRef<HTMLInputElement>(null)
   // Until the student edits it, the username follows the name (a name with no Latin
@@ -135,7 +138,7 @@ function NameStep({ session, headingRef, onNext, onSkip, onSaved }: OnboardingSt
           }}
         />
       </label>
-      {error?.field === 'name' ? <p className="onb-error" id="onb-name-error" role="alert">{error.text}</p> : null}
+      {error?.field === 'name' ? <p className="onb-error" id="onb-name-error">{error.text}</p> : null}
       {editingUsername ? (
         <label className="onb-field">
           <span>Username</span>
@@ -167,7 +170,7 @@ function NameStep({ session, headingRef, onNext, onSkip, onSaved }: OnboardingSt
           <button className="ui-link onb-inline-link" type="button" onClick={() => openUsername()} disabled={busy}>Change</button>
         </p>
       ) : null}
-      {error && error.field !== 'name' ? <p className="onb-error" role="alert">{error.text}</p> : null}
+      {error && error.field !== 'name' ? <p className="onb-error">{error.text}</p> : null}
       <OnboardingActions primary={busy ? 'Saving…' : 'Continue'} onSkip={onSkip} busy={busy} />
     </form>
   )
@@ -180,6 +183,7 @@ function ClassesStep({ headingRef, onNext, onSkip, onPicked }: OnboardingStepPro
   const [custom, setCustom] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [hint, setHint] = useState('')
+  useAnnounce(hint)
   const options = [...SUGGESTED_CLASSES, ...picked.filter((name) => !SUGGESTED_CLASSES.includes(name))]
 
   function toggle(name: string) {
@@ -267,7 +271,7 @@ function ClassesStep({ headingRef, onNext, onSkip, onPicked }: OnboardingStepPro
         />
         <button className="ui-button onb-custom__add" type="button" onClick={addCustom} disabled={!custom.trim()}>Add</button>
       </div>
-      {hint ? <p className="onb-help" role="status">{hint}</p> : null}
+      {hint ? <p className="onb-help">{hint}</p> : null}
       <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
       <OnboardingActions primary={count ? `Add ${count} ${count === 1 ? 'class' : 'classes'}` : 'Continue'} onSkip={onSkip} />
     </form>
