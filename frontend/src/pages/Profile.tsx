@@ -10,6 +10,7 @@ import { useDrawer } from '../lib/useDrawer'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import { Icons } from '../components/Icons'
 import { canNudge, firstName, rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
+import { useAnnounce } from '../lib/announce'
 import './Profile.css'
 
 /*
@@ -99,6 +100,7 @@ export function Profile({ session, onError }: ProfileProps) {
   }
 
   const say = useCallback((text: string, error = false) => setNotice({ text, error }), [])
+  useAnnounce(notice?.text, { error: notice?.error })
 
   useEffect(() => {
     if (!notice || notice.error) return
@@ -1059,7 +1061,7 @@ export function Profile({ session, onError }: ProfileProps) {
       </div>
 
       {notice ? (
-        <div className="app-toast" role={notice.error ? 'alert' : 'status'}>
+        <div className="app-toast">
           <span>{notice.text}</span>
           <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
         </div>

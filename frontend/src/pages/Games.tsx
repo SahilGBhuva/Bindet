@@ -12,6 +12,7 @@ import {
 import { loadNotebook, withCourseTones } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
+import { useAnnounce } from '../lib/announce'
 import './Games.css'
 
 /*
@@ -116,6 +117,7 @@ export function Games({ session }: { session: AuthSession | null }) {
   const [game, setGame] = useState<Game | null>(null)
   const [finished, setFinished] = useState<Finished | null>(null)
   const [notice, setNotice] = useState('')
+  useAnnounce(notice)
 
   useEffect(() => {
     if (!notice) return
@@ -156,7 +158,7 @@ export function Games({ session }: { session: AuthSession | null }) {
       ) : (
         <Lobby token={token} selfId={selfId} onStart={setGame} onNotice={setNotice} />
       )}
-      {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
+      {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { ApiError, DELETE_ACCOUNT_PHRASE, getAccountProfile, getCachedProfile, saveAccountProfile, saveSocialPrivacy, type Profile } from '../lib/api'
 import { accountDisplayName, suggestedUsername } from '../lib/accountName'
 import { accountDeletionEnabled, requestPasswordReset, signIn, signOutAndReload, signOutWithNotice, signUp, type AuthSession } from '../lib/auth'
+import { useAnnounce } from '../lib/announce'
 import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
 import { InstallBindit } from '../components/AppPrompts'
@@ -76,6 +77,10 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [canDelete, setCanDelete] = useState<boolean | null>(null)
+  useAnnounce(message)
+  useAnnounce(profileStatus)
+  useAnnounce(goalStatus)
+  useAnnounce(privacyStatus, { error: true })
   // Quick taps send several saves: only the latest one may update or roll back the screen.
   const goalSave = useRef(0)
   const privacySave = useRef(0)
@@ -316,7 +321,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                   />
                 </label>
               ) : null}
-              {message ? <p className="settings__status" role="status">{message}</p> : null}
+              {message ? <p className="settings__status">{message}</p> : null}
               <button className="ui-button ui-button--primary settings__submit" type="submit" disabled={busy}>
                 {busy ? 'One moment…' : mode === 'login' ? 'Log in' : mode === 'signup' ? 'Create account' : 'Send reset email'}
               </button>
@@ -363,7 +368,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                 />
               </div>
               <div className="settings__footer">
-                {profileStatus ? <p className="settings__status" role="status">{profileStatus}</p> : null}
+                {profileStatus ? <p className="settings__status">{profileStatus}</p> : null}
                 <button className={`ui-button ui-button--primary${busy ? ' is-busy' : ''}`} type="submit" disabled={busy || !profileReady}>
                   {profile ? 'Update profile' : 'Save profile'}
                 </button>
@@ -390,7 +395,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                   ))}
                 </div>
                 {!profile && profileReady ? <p className="settings__hint">Save your profile first to set a goal.</p> : null}
-                {goalStatus ? <p className="settings__status" role="status">{goalStatus}</p> : null}
+                {goalStatus ? <p className="settings__status">{goalStatus}</p> : null}
               </div>
             </div>
           </Section>
@@ -439,7 +444,7 @@ export function Settings({ session, onSession }: SettingsProps) {
                   <span className="settings__hint">{profileReady ? 'Save your profile to choose who can find you.' : 'Loading your privacy settings…'}</span>
                 </div>
               )}
-              {privacyStatus ? <div className="settings__row"><p className="settings__status settings__status--error" role="alert">{privacyStatus}</p></div> : null}
+              {privacyStatus ? <div className="settings__row"><p className="settings__status settings__status--error">{privacyStatus}</p></div> : null}
             </div>
           </Section>
 

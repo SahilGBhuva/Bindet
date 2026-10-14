@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 // AppPrompts first: its stylesheet comes before the sidebar's, as it always has.
 import { UpdatePrompt } from './components/AppPrompts'
 import { AuthGate } from './components/AuthGate'
+import { LiveAnnouncer } from './components/LiveAnnouncer'
 import { loadAuthSession } from './lib/auth'
 import { BrandMark } from './lib/BrandMark'
 // The signed-in app's stylesheets stay in the entry stylesheet, in their original order,
@@ -28,6 +29,7 @@ function App() {
         </Suspense>
       </AuthGate>
       <UpdatePrompt />
+      <LiveAnnouncer />
     </>
   )
 }

@@ -13,6 +13,7 @@ import { OttoSheet, type OttoSheetTab } from '../components/otto/OttoSheet'
 import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
+import { useAnnounce } from '../lib/announce'
 import './Tutor.css'
 
 /*
@@ -355,6 +356,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     return () => window.clearTimeout(timer)
   }, [notice])
 
+  useAnnounce(notice)
+  useAnnounce(memoryNotice ? 'Otto saved a note about you.' : '')
   useEffect(() => {
     if (!memoryNotice) return
     const timer = window.setTimeout(() => setMemoryNotice(false), 9000)
@@ -1043,12 +1046,12 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
         {dragActive ? <div className="tutor__drop" aria-hidden="true"><span>Drop images to attach</span></div> : null}
         {memoryNotice ? (
-          <p className="app-toast otto-notice" role="status">
+          <p className="app-toast otto-notice">
             Otto saved a note about you ·
             <button type="button" className="ui-link" onClick={() => { setMemoryNotice(false); setSheet('memory') }}>Manage</button>
             <button type="button" onClick={() => setMemoryNotice(false)} aria-label="Dismiss">×</button>
           </p>
-        ) : notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
+        ) : notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       </section>
       {sheet && token ? (
         <OttoSheet token={token} tab={sheet} defaultName={displayName} onClose={() => setSheet(null)} onSaved={(profile) => setOttoName(profile.preferred_name)} />

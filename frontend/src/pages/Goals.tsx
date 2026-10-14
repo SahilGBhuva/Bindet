@@ -10,6 +10,7 @@ import { loadNotebook } from '../lib/session'
 import { formatClockTime, lowerMeridiem } from '../lib/time'
 import { toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
+import { useAnnounce } from '../lib/announce'
 import './Goals.css'
 
 /*
@@ -270,6 +271,8 @@ export function Goals({ session }: { session: AuthSession | null }) {
     if (token && loaded) setCachedTasks(token, tasks.filter((task) => !task.id.startsWith('temp-')))
   }, [token, loaded, tasks])
 
+  useAnnounce(toast?.text, { error: toast?.error })
+
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), toast.undo ? UNDO_MS : 6000)
@@ -509,6 +512,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const activeId = selectedId ?? autoId
   const selected = tasks.find((task) => task.id === activeId) ?? null
   const visibleNotice = notice && String(notice.id) !== dismissedNotice ? notice : null
+  useAnnounce(visibleNotice?.message)
   const todayDate = parseDay(today)
   const defaultGroup = tab === 'group' ? groups[0]?.id ?? null : null
 
@@ -543,7 +547,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
         <h1 className="tasks-title">Tasks</h1>
 
         {visibleNotice ? (
-          <div className="tasks-notice" role="status" title={lowerMeridiem(stamp.format(new Date(parseServerTime(visibleNotice.created_at))))}>
+          <div className="tasks-notice" title={lowerMeridiem(stamp.format(new Date(parseServerTime(visibleNotice.created_at))))}>
             <span className="tasks-notice__mark"><Icon name="bell" /></span>
             <p>{visibleNotice.message}</p>
             <button type="button" className="tasks-icon-button" onClick={dismissNotice} aria-label="Dismiss notification"><Icon name="close" /></button>
@@ -643,7 +647,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
       </div>
 
       {toast ? (
-        <div className="app-toast" role={toast.error ? 'alert' : 'status'}>
+        <div className="app-toast">
           <span>{toast.text}</span>
           {toast.undo ? <button type="button" className="tasks-toast__undo" onClick={() => { toast.undo?.(); setToast(null) }}>Undo</button> : null}
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss">×</button>

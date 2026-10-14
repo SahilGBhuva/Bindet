@@ -37,6 +37,7 @@ import {
   setCourseHidden,
 } from '../lib/studyPrefs'
 import type { InstructionKind } from '../lib/studyPrefs'
+import { useAnnounce } from '../lib/announce'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz' | 'guides'
@@ -597,6 +598,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     })
   }), [data])
 
+  useAnnounce(notice)
   // A status message clears itself; errors that need a decision are shown inline instead.
   useEffect(() => {
     if (!notice) return
@@ -1692,7 +1694,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   )
 
   const toast = notice ? (
-    <p className="app-toast" role="status">
+    <p className="app-toast">
       {notice}
       <button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button>
     </p>

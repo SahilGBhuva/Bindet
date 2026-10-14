@@ -5,6 +5,7 @@ import { GetStarted } from './components/onboarding/GetStarted'
 import { HelpBot } from './components/HelpBot'
 import { useAuth } from './lib/AuthContext'
 import { getStudyGroups, recordDailyLogin } from './lib/api'
+import { useAnnounce } from './lib/announce'
 import { cachedSetup, getOnboarding, rememberSetupDone, saveOnboarding } from './lib/onboarding'
 import { BrandMark } from './lib/SiteSidebar'
 import { rememberPage, SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
@@ -157,6 +158,8 @@ function AppShell() {
   const [navScreen, setNavScreen] = useState(currentScreen)
   const [adminRoute, setAdminRoute] = useState(isAdminRoute)
   const [notice, setNotice] = useState('')
+  // Only page errors (Profile's onError) land here.
+  useAnnounce(notice, { error: true })
   const [commandOpen, setCommandOpen] = useState(false)
   const { session, setSession } = useAuth()
   const [railChoice, setRailChoice] = useState(readRailChoice)
@@ -256,7 +259,7 @@ function AppShell() {
           {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
         </Suspense>
       </main>
-      {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
+      {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       <CommandPalette open={commandOpen} onClose={closeCommand} />
       {session && !adminRoute ? <HelpBot screen={navScreen} session={session} /> : null}
     </div>

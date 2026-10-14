@@ -11,6 +11,7 @@ import {
 import { formatClockTime } from '../lib/time'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
+import { useAnnounce } from '../lib/announce'
 import './Chat.css'
 
 /*
@@ -373,6 +374,9 @@ export function Chat({ session }: { session: AuthSession | null }) {
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [session, activeId])
+
+  useAnnounce(toast ? `New message in ${toast.groupName}. ${toast.preview}` : '')
+  useAnnounce(notice)
 
   useEffect(() => {
     if (!toast) return
@@ -794,7 +798,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
             <span className="chat__toast-open">Open</span>
           </button>
         ) : null}
-        {notice ? <p className="app-toast" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
+        {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       </section>
     </div>
   )
