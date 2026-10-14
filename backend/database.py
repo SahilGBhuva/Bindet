@@ -1310,6 +1310,12 @@ def record_daily_login(student_id: str, require_profile: bool = False) -> dict |
             select(student_progress).where(student_progress.c.student_id == student_id)
         ).mappings().first()
         if progress is None:
+            # The app often signs in with two requests at once: only one may create the row.
+            _advisory_lock(connection, f"xp:{student_id}")
+            progress = connection.execute(
+                select(student_progress).where(student_progress.c.student_id == student_id)
+            ).mappings().first()
+        if progress is None:
             connection.execute(student_progress.insert().values(
                 student_id=student_id, total_xp=0, attempts=0, correct_answers=0,
                 streak=0, best_streak=0, last_active_date=None,
@@ -1457,13 +1463,13 @@ def create_profile(student_id: str, username: str, display_name: str) -> dict:
             raise ValueError("profile_exists")
         if connection.execute(select(profiles).where(profiles.c.username == username)).first():
             raise ValueError("username_taken")
-        if not connection.execute(select(student_progress).where(student_progress.c.student_id == student_id)).first():
-            connection.execute(student_progress.insert().values(
-                student_id=student_id, total_xp=0, attempts=0, correct_answers=0,
-                streak=0, best_streak=0, last_active_date=None,
-                login_streak=0, best_login_streak=0, last_login_date=None,
-                updated_at=now,
-            ))
+        # A first answer or sign-in may be creating the progress row at the same moment.
+        _insert_ignore(connection, student_progress, [dict(
+            student_id=student_id, total_xp=0, attempts=0, correct_answers=0,
+            streak=0, best_streak=0, last_active_date=None,
+            login_streak=0, best_login_streak=0, last_login_date=None,
+            updated_at=now,
+        )], ["student_id"])
         friend_code = ""
         while not friend_code:
             candidate = secrets.token_hex(4).upper()
@@ -1529,10 +1535,10 @@ def onboard_account(
             select(student_progress).where(student_progress.c.student_id == account_id)
         ).mappings().first()
         if account_progress is None:
-            connection.execute(student_progress.insert().values(
+            _insert_ignore(connection, student_progress, [dict(
                 student_id=account_id, total_xp=0, attempts=0, correct_answers=0,
                 streak=0, best_streak=0, last_active_date=None, updated_at=now,
-            ))
+            )], ["student_id"])
             account_progress = connection.execute(
                 select(student_progress).where(student_progress.c.student_id == account_id)
             ).mappings().one()
