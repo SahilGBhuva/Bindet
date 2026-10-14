@@ -10,7 +10,7 @@ import './StudyGuides.css'
 
 /*
  * Study materials Otto makes from the student's notes: the list for a unit (or a whole
- * course) with a "Make a…" sheet, and the reader (print, copy, download, flashcards,
+ * course) with a "Make study material" sheet, and the reader (print, copy, download, flashcards,
  * rename, regenerate, delete). Every request goes through useData(), so the landing demo
  * runs the same components on its in-memory sandbox.
  */
@@ -70,7 +70,7 @@ type ListProps = {
   onCardsMade?: () => void
 }
 
-/* The guides for a unit (or the whole course) and the "Make a…" sheet. Opens a guide in place. */
+/* The guides for a unit (or the whole course) and the "Make study material" sheet. Opens a guide in place. */
 export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, onNotice, onCardsMade }: ListProps) {
   const data = useData()
   const scope = unit ?? `all of ${course}`
@@ -157,7 +157,7 @@ export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, 
           {onClose ? <button className="ui-button ui-button--ghost guides__back" type="button" onClick={onClose}>Back</button> : null}
           {!making ? (
             <button className="ui-button ui-button--primary guides__make" type="button" disabled={noNotes || list === null} onClick={() => setMaking(true)}>
-              Make a…
+              Make study material
             </button>
           ) : null}
         </div>
@@ -172,7 +172,7 @@ export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, 
                 const unavailable = item.id === 'timeline' && !list?.can_timeline
                 return (
                   <label key={item.id} className={`guides__kind ui-tone--${item.tone}${kind === item.id ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}>
-                    <input type="radio" name={`${formId}-kind`} value={item.id} checked={kind === item.id} disabled={unavailable} onChange={() => setKind(item.id)} />
+                    <input type="radio" name={`${formId}-kind`} value={item.id} checked={kind === item.id} disabled={unavailable} autoFocus={kind === item.id} onChange={() => setKind(item.id)} />
                     <KindIcon kind={item.id} />
                     <span className="guides__kind-name">{item.label}</span>
                     <span className="guides__kind-blurb">{unavailable ? 'Needs notes with dates in them.' : item.blurb}</span>
@@ -214,7 +214,7 @@ export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, 
         ) : list === null ? (
           <div className="guides__skeleton" aria-hidden="true"><span className="ui-skeleton" /><span className="ui-skeleton" /></div>
         ) : guides.length === 0 ? (
-          <p className="guides__hint">No study materials for {scope} yet. Choose “Make a…” and Otto will write one from your notes.</p>
+          <p className="guides__hint">No study materials for {scope} yet. Choose “Make study material” and Otto will write one from your notes.</p>
         ) : (
           <ul className="ui-list guides__list">
             {guides.map((guide) => {
