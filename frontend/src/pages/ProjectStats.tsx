@@ -495,7 +495,10 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
     setResult(null)
     try {
       const response = await notifyGroup(groupId, message.trim(), token)
-      setResult({ ok: true, text: `Sent to ${plural(response.notified, 'member')}.` })
+      setResult(response.notified
+        ? { ok: true, text: `Sent to ${plural(response.notified, 'member')}.` }
+        // The sender isn't notified, so a group of one has no one to tell.
+        : { ok: false, text: 'No one else is in this group yet. Share the invite code from Friends & groups first.' })
       setMode(null)
     } catch (error) {
       setResult({ ok: false, text: `Could not send the message. ${errorText(error, '')}` })
