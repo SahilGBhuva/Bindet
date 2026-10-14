@@ -46,7 +46,11 @@ export function relativeDue(dueAt: string | null, now: number) {
   const diff = Date.parse(dueAt) - now
   if (Number.isNaN(diff) || diff <= 0) return 'now'
   const minutes = Math.round(diff / 60_000)
-  if (minutes < 60) return `in ${Math.max(1, minutes)} minute${minutes === 1 ? '' : 's'}`
+  if (minutes < 60) {
+    // Under half a minute rounds to 0; it still reads as "in 1 minute", so pluralize what is shown.
+    const shown = Math.max(1, minutes)
+    return `in ${shown} minute${shown === 1 ? '' : 's'}`
+  }
   const hours = Math.round(minutes / 60)
   const due = new Date(Date.parse(dueAt))
   const today = new Date(now)
