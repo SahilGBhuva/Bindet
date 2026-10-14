@@ -668,6 +668,8 @@ class ProfileResponse(BaseModel):
     daily_goal: int = 20
     discoverable: bool = True
     allow_friend_requests: bool = True
+    # "Let friends nudge me": without it here, the switch read as on after every reload.
+    allow_nudges: bool = True
     total_xp: int = 0
     streak: int = 0
     best_streak: int = 0
