@@ -76,7 +76,7 @@ const GUIDES: Guide[] = [
         </ol>
         <div className="help__columns">
           <div>
-            <h4 className="help__subhead">It will help you</h4>
+            <h3 className="help__subhead">It will help you</h3>
             <ul className="help__bullets">
               <li>understand your notes and course material</li>
               <li>work through homework, with steps and a check question rather than just the final answer</li>
@@ -85,7 +85,7 @@ const GUIDES: Guide[] = [
             </ul>
           </div>
           <div>
-            <h4 className="help__subhead">It won’t</h4>
+            <h3 className="help__subhead">It won’t</h3>
             <ul className="help__bullets">
               <li>do things unrelated to studying, like personal or relationship advice, or writing and code that have nothing to do with schoolwork</li>
               <li>help with anything harmful</li>
