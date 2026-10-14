@@ -677,7 +677,9 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                                   aria-label={`Open ${project.name}`}
                                   title={project.name}
                                   onClick={() => openAt(index, true)}
-                                />
+                                >
+                                  <span className="home-fold__slice-name" aria-hidden="true">{project.name}</span>
+                                </button>
                               ) : null}
                             </li>
                           )
