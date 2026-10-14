@@ -1,4 +1,5 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useState } from 'react'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { OfflineNotice } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
 import { GetStarted } from './components/onboarding/GetStarted'
@@ -245,6 +246,8 @@ function AppShell() {
       </header>
       <main className={`sheet is-${adminRoute ? 'admin' : screen}`} id="main-content" tabIndex={-1} key={adminRoute ? 'admin' : screen}>
         {screen !== 'tools' && !adminRoute ? <OfflineNotice /> : null}
+        {/* One page failing shows a Reload card in its place; the sidebar and top bar keep working. */}
+        <ErrorBoundary label="This page">
         <Suspense fallback={<PageSkeleton sketch={!adminRoute && (screen === 'goals' || screen === 'stats')} />}>
           {adminRoute ? <Admin session={session} /> : null}
           {!adminRoute && screen === 'home' ? <Home session={session} firstRun={session ? <GetStarted session={session} /> : null} /> : null}
@@ -258,6 +261,7 @@ function AppShell() {
           {screen === 'profile' ? <Profile session={session} onError={setNotice} /> : null}
           {screen === 'settings' ? <Settings session={session} onSession={setSession} /> : null}
         </Suspense>
+        </ErrorBoundary>
       </main>
       {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       <CommandPalette open={commandOpen} onClose={closeCommand} />

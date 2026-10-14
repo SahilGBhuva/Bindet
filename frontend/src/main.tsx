@@ -6,8 +6,10 @@ import './styles/ui.css'
 import App from './App.tsx'
 import { pruneOfflineCards } from './lib/offlineCards'
 import { listenForInstallPrompt, registerServiceWorker } from './lib/pwa'
+import { listenForStaleChunks } from './lib/recover'
 import { applyTheme, watchSystemTheme } from './lib/theme'
 
+listenForStaleChunks()
 applyTheme()
 watchSystemTheme()
 listenForInstallPrompt()

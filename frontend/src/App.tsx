@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 // AppPrompts first: its stylesheet comes before the sidebar's, as it always has.
 import { UpdatePrompt } from './components/AppPrompts'
 import { AuthGate } from './components/AuthGate'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { LiveAnnouncer } from './components/LiveAnnouncer'
 import { loadAuthSession } from './lib/auth'
 import { BrandMark } from './lib/BrandMark'
@@ -23,11 +24,13 @@ const SignedInApp = lazy(() => signedInRequest ?? loadSignedInApp())
 function App() {
   return (
     <>
-      <AuthGate>
-        <Suspense fallback={<div className="onb-loading" role="status" aria-label="Opening bindet"><BrandMark size={32} /></div>}>
-          <SignedInApp />
-        </Suspense>
-      </AuthGate>
+      <ErrorBoundary label="bindet">
+        <AuthGate>
+          <Suspense fallback={<div className="onb-loading" role="status" aria-label="Opening bindet"><BrandMark size={32} /></div>}>
+            <SignedInApp />
+          </Suspense>
+        </AuthGate>
+      </ErrorBoundary>
       <UpdatePrompt />
       <LiveAnnouncer />
     </>
