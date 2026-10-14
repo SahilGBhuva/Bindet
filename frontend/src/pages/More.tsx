@@ -262,7 +262,7 @@ export function FeedbackForm({ session }: { session: AuthSession | null }) {
 
   return (
     <form className="ui-panel ui-panel--padded help__feedback" onSubmit={(event) => void submit(event)}>
-      <p className="help__note">Tell us what to fix or build next. Or email <a href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
+      <p className="help__note">Tell us what to fix or build next. Or email <a className="ui-link" href="mailto:officialbindet@gmail.com">officialbindet@gmail.com</a>.</p>
       <div className="help__field">
         <span className="help__label" id="feedback-kind">What is it about?</span>
         <div className="ui-segmented help__kinds" role="group" aria-labelledby="feedback-kind">
