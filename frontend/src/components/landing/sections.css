@@ -1424,3 +1424,11 @@
     transform: none;
   }
 }
+
+/* Course-colored labels in dark mode: the saturated course tones are fills, too dark for
+   text on dark surfaces (2.4–2.8:1). Half course, half ink keeps the hue and reaches at
+   least 4.8:1 for every course tone on the dark paper and card surfaces. */
+:root[data-theme="dark"] .lp-capture__card .lp-capture__tag,
+:root[data-theme="dark"] .lp-flash__label {
+  color: color-mix(in srgb, var(--course) 50%, var(--lp-ink));
+}
