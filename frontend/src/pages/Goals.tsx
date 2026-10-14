@@ -1117,7 +1117,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
       <article className="task-detail-card" aria-label={task.title}>
         <div className="task-detail-card__top">
           {manageable ? (
-            <input ref={titleRef} className="task-title-input" value={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
+            <input ref={titleRef} className="task-title-input" value={title} title={title} aria-label="Title" maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
               onChange={(event) => setTitle(event.target.value)}
               onBlur={() => blurSave(() => { if (title.trim() && title.trim() !== task.title) onPatch({ title: title.trim() }); else setTitle(task.title) })}
               onKeyDown={(event) => {

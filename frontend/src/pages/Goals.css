@@ -456,6 +456,9 @@
   text-underline-offset: 4px;
   overflow-wrap: anywhere;
 }
+/* An input can't wrap: a long title ends in an ellipsis instead of being cut mid-word (full text while editing). */
+.task-title-input { text-overflow: ellipsis; }
+.task-title-input:focus { text-overflow: clip; }
 .task-title-input:hover { border-color: var(--color-border); }
 .task-title-input:focus { border-color: var(--color-text-tertiary); outline: none; text-decoration: none; }
 .task-title-input::placeholder { color: var(--color-text-tertiary); text-decoration: none; }
