@@ -291,6 +291,12 @@ export function Tutor({ session }: { session: AuthSession | null }) {
           return sources ? { ...message, grounded: sources } : message
         })
         if (grounded.size) setCachedTutorMessages(token, activeId, merged)
+        // A question with no reply after it (the reply failed, or was stopped before any text)
+        // gets the same error and Retry it had when it failed; the server reuses the saved turn.
+        const last = merged[merged.length - 1]
+        if (!inFlight.length && last?.role === 'user' && !last.attachments?.length) {
+          merged[merged.length - 1] = { ...last, status: 'failed', error: 'Otto didn’t answer this message.' }
+        }
         return { ...current, [activeId]: [...merged, ...inFlight] }
       })
     }).catch((error: unknown) => {
