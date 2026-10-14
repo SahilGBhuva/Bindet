@@ -494,7 +494,7 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   box-shadow: var(--shadow-float);
   transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
 }
-.tutor__input:focus-within { border-color: var(--color-border-strong); box-shadow: var(--shadow-float), 0 0 0 3px color-mix(in srgb, var(--color-brand) 14%, transparent); }
+.tutor__input:focus-within { border-color: var(--color-brand); box-shadow: var(--shadow-float), 0 0 0 3px color-mix(in srgb, var(--color-brand) 14%, transparent); }
 .tutor__input textarea {
   display: block;
   width: 100%;
