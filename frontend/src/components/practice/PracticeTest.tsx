@@ -2,6 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { ApiError, isAbortError, parseServerTime, RequestTimeoutError } from '../../lib/api'
 import type { PracticeTest as PracticeTestData, PracticeTestOptions, PracticeTestSummary } from '../../lib/api'
+import { useAnnounce } from '../../lib/announce'
 import { useData } from '../../lib/dataSource'
 import { clearPracticeDraft, formatClock, loadPracticeDraft, savePracticeDraft, suggestedMinutes } from '../../lib/practice'
 import { INSTRUCTIONS_MAX } from '../../lib/studyPrefs'
@@ -104,6 +105,12 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const resultsHeading = useRef<HTMLHeadingElement>(null)
   const confirmButton = useRef<HTMLButtonElement>(null)
   const root = useRef<HTMLDivElement>(null)
+  // Inline alerts and status lines are announced through the shared live regions
+  // (lib/announce.ts); the visual elements keep no live role so nothing is read twice.
+  useAnnounce(instructionsError, { error: true })
+  useAnnounce(error, { error: true })
+  useAnnounce(submitError, { error: true })
+  useAnnounce(stage === 'loading' ? 'Opening your test…' : stage === 'starting' ? 'Writing your test. This takes about 10–20 seconds.' : stage === 'submitting' ? 'Grading your answers…' : '')
 
   useEffect(() => {
     mounted.current = true
@@ -391,7 +398,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
         {header(unit ?? 'The whole course', 'A timed test written from your notes. Answers and explanations appear after you submit.',
           <button className="ui-button ui-button--ghost practice__close" type="button" onClick={onClose}>Back</button>)}
         {stage === 'loading' ? (
-          <p className="practice__status" role="status"><span className="ui-spinner" />Opening your test…</p>
+          <p className="practice__status"><span className="ui-spinner" />Opening your test…</p>
         ) : (
           <div className="practice__setup" aria-busy={busy}>
             <fieldset className="practice__field">
@@ -458,14 +465,14 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                 <span>Steers which parts of your notes the test covers and how hard it is.</span>
                 <span className={instructions.length >= INSTRUCTIONS_MAX ? 'is-full' : ''}>{instructions.length}/{INSTRUCTIONS_MAX}</span>
               </p>
-              {instructionsError ? <p className="tools__field-error" id="practice-instructions-error" role="alert">{instructionsError}</p> : null}
+              {instructionsError ? <p className="tools__field-error" id="practice-instructions-error">{instructionsError}</p> : null}
             </div>
-            {error ? <div className="ui-alert" role="alert"><span>{error}</span></div> : null}
+            {error ? <div className="ui-alert"><span>{error}</span></div> : null}
             <div className="practice__actions">
               <button className={`ui-button ui-button--primary practice__start${stage === 'starting' ? ' is-busy' : ''}`} type="button" disabled={busy || !minutesValid} onClick={startFromSetup}>
                 {stage === 'starting' ? 'Writing your test…' : 'Start test'}
               </button>
-              {stage === 'starting' ? <span className="practice__hint" role="status">This takes about 10–20 seconds.</span> : null}
+              {stage === 'starting' ? <span className="practice__hint">This takes about 10–20 seconds.</span> : null}
             </div>
           </div>
         )}
@@ -555,7 +562,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
           <button className={`ui-button${weak.length ? '' : ' ui-button--primary'} practice__retake`} type="button" onClick={() => retake(false)}>Retake this test</button>
           <button className="ui-button practice__new" type="button" onClick={() => retake(true)}>New questions</button>
         </div>
-        {error ? <div className="ui-alert" role="alert"><span>{error}</span></div> : null}
+        {error ? <div className="ui-alert"><span>{error}</span></div> : null}
 
         <section className="practice__review" aria-labelledby="practice-review-title">
           <h3 className="practice__label" id="practice-review-title">Every question</h3>
@@ -704,8 +711,8 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
         </section>
       ) : null}
 
-      {submitError ? <div className="ui-alert" role="alert"><span>{submitError}</span></div> : null}
-      {submittingNow ? <p className="practice__status" role="status"><span className="ui-spinner" />Grading your answers…</p> : null}
+      {submitError ? <div className="ui-alert"><span>{submitError}</span></div> : null}
+      {submittingNow ? <p className="practice__status"><span className="ui-spinner" />Grading your answers…</p> : null}
       <p className="practice__hint practice__leave">
         Your answers are saved on this device as you go.{' '}
         <button className="practice__link practice__close" type="button" onClick={onClose}>Leave the test</button>
