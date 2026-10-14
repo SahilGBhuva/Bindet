@@ -120,7 +120,10 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
   }
 
   function add(questionText: string, answer: string, source: Source) {
-    setTurns((current) => [...current, { id: nextId++, question: questionText, answer, source }].slice(-MAX_TURNS))
+    // Kept at module level first: an AI answer that arrives after the panel was closed
+    // (it already counted against the day's questions) is there when it reopens.
+    savedTurns = [...savedTurns, { id: nextId++, question: questionText, answer, source }].slice(-MAX_TURNS)
+    setTurns(savedTurns)
   }
 
   function askSuggested(id: string) {
