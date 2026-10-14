@@ -175,7 +175,7 @@
 
   --color-text: #ecebe7;
   --color-text-secondary: #a8a7a1;
-  --color-text-tertiary: #9c9b95;
+  --color-text-tertiary: #a1a09a; /* 4.59:1 on --color-surface-active (pressed), 5.2+ on every other surface and tint */
 
   --color-accent: #ecebe7;
   --color-accent-hover: #ffffff;
