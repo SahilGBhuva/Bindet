@@ -19,6 +19,7 @@ import {
   type StudyGroup,
 } from '../lib/api'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { useAnnounce } from '../lib/announce'
 import './ProjectStats.css'
 
 type Pace = GroupAnalytics['pace']
@@ -153,6 +154,11 @@ export function ProjectStats({ session }: { session: AuthSession | null }) {
   const refresh = useCallback(() => setAnalyticsReload((value) => value + 1), [])
   const data = groupId ? analytics[groupId] ?? getCachedGroupAnalytics(groupId) : null
   const error = groupId ? analyticsError[groupId] ?? '' : ''
+  // Alerts go through the shared live regions (lib/announce.ts); the visual alerts keep no live role.
+  useAnnounce(session && !groups && groupsError ? `Could not load your study groups. ${groupsError}` : '', { error: true })
+  useAnnounce(session && groups?.length && error
+    ? `${data ? 'Could not refresh these statistics; showing the last loaded numbers.' : 'Could not load project statistics.'} ${error}`
+    : '', { error: true })
 
   const chooseGroup = (id: string) => {
     setHashGroup(id)
@@ -191,7 +197,7 @@ export function ProjectStats({ session }: { session: AuthSession | null }) {
       <div className="ui-page pst">
         {header}
         {groupsError ? (
-          <div className="ui-alert" role="alert">
+          <div className="ui-alert">
             <span>Could not load your study groups. {groupsError}</span>
             <button type="button" className="ui-button ui-button--sm" onClick={() => { setGroupsError(''); setGroupsReload((value) => value + 1) }}>Try again</button>
           </div>
@@ -217,7 +223,7 @@ export function ProjectStats({ session }: { session: AuthSession | null }) {
     <div className="ui-page pst">
       {header}
       {error ? (
-        <div className="ui-alert pst-alert" role="alert">
+        <div className="ui-alert pst-alert">
           <span>{data ? 'Could not refresh these statistics; showing the last loaded numbers.' : 'Could not load project statistics.'} {error}</span>
           <button type="button" className="ui-button ui-button--sm" onClick={refresh}>Try again</button>
         </div>
@@ -373,6 +379,7 @@ function ProjectProgress({ data, groupId, token, isOwner, onChanged }: { data: G
   const [busy, setBusy] = useState(false)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
+  useAnnounce(message, { error: true })
   const headingId = useId()
 
   const add = async (event: FormEvent) => {
@@ -464,7 +471,7 @@ function ProjectProgress({ data, groupId, token, isOwner, onChanged }: { data: G
           <button type="button" className="ui-button ui-button--ghost ui-button--sm" onClick={() => { setAdding(false); setMessage('') }}>Cancel</button>
         </form>
       ) : null}
-      {message ? <p className="pst-error" role="alert">{message}</p> : null}
+      {message ? <p className="pst-error">{message}</p> : null}
     </section>
   )
 }
@@ -480,6 +487,7 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [plan, setPlan] = useState<UrgentPlan | null>(null)
   const [note, setNote] = useState(WORKRATE_MESSAGE)
+  useAnnounce(result?.text, { error: result ? !result.ok : false })
   const notifyText = NOTIFY_MESSAGE[data.pace] ?? NOTIFY_MESSAGE.behind
   const memberCount = data.members.length
 
@@ -596,7 +604,7 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
         </form>
       ) : null}
 
-      {result ? <p className={result.ok ? 'pst-success' : 'pst-error'} role={result.ok ? 'status' : 'alert'}>{result.text}</p> : null}
+      {result ? <p className={result.ok ? 'pst-success' : 'pst-error'}>{result.text}</p> : null}
     </div>
   )
 }
