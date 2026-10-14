@@ -183,7 +183,7 @@ type LivePreviewProps = {
 
 export function LivePreview({ interactive, width, height, onLockedAction }: LivePreviewProps) {
   const root = useRef<HTMLDivElement>(null)
-  const main = useRef<HTMLElement>(null)
+  const main = useRef<HTMLDivElement>(null)
   const [page, setPage] = useState<DemoPage>('home')
   // Bumped by a "Review N flashcards" link: Study opens (again) in Review mode over every unit.
   const [reviewOpen, setReviewOpen] = useState(0)
@@ -257,7 +257,8 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
     >
       <DataProvider value={data}>
         <SiteSidebar active={page} />
-        <main className={`sheet is-${page}`} ref={main}>
+        {/* A div, not <main>: the landing page already has the document's one main landmark. */}
+        <div className={`sheet is-${page}`} ref={main}>
           <DemoBoundary key={generation} onReset={reset}>
             <div className="lp-demo__page" key={`${generation}-${page}-${reviewOpen}`}>
               {page === 'home' ? <Home session={DEMO_SESSION} /> : null}
@@ -266,7 +267,7 @@ export function LivePreview({ interactive, width, height, onLockedAction }: Live
               {page === 'profile' ? <Profile session={DEMO_SESSION} /> : null}
             </div>
           </DemoBoundary>
-        </main>
+        </div>
       </DataProvider>
     </div>
   )
