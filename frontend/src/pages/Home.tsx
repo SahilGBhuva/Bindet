@@ -560,8 +560,8 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
           <li className="home-today__card ui-tone--blue">
             <a href="#settings" className="home-today__link">
               <span className="home-today__icon"><Icon name="target" /></span>
-              <span className="home-today__label">Daily goal</span>
-              <span className="home-today__value">{todayXp}<small> / {goal} XP</small></span>
+              <span className="home-today__label">{todayXp >= goal ? 'Daily goal met' : 'Daily goal'}</span>
+              <span className="home-today__value">{todayXp}<small> / {goal} XP{todayXp >= goal ? ' ✓' : ''}</small></span>
               <span className="home-today__meter" aria-hidden="true"><span style={{ width: `${goalPercent}%` }} /></span>
             </a>
           </li>
