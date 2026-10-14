@@ -772,7 +772,7 @@ export function Profile({ session, onError }: ProfileProps) {
                       key={event.id}
                       name={event.display_name}
                       label={`${event.student_id === studentId ? 'You' : event.display_name} earned ${event.xp} XP`}
-                      meta={new Date(parseServerTime(event.created_at)).toLocaleDateString()}
+                      meta={shortDate.format(new Date(parseServerTime(event.created_at)))}
                     >
                       {event.student_id !== studentId ? (
                         <button
