@@ -19,6 +19,13 @@ const MAX_TURNS = 6
 let savedTurns: Turn[] = []
 let nextId = 1
 
+/* Kept at module level first: an AI answer that arrives after the panel was closed
+   (it already counted against the day's questions) is there when it reopens. */
+function keepTurn(turn: Omit<Turn, 'id'>) {
+  savedTurns = [...savedTurns, { id: nextId++, ...turn }].slice(-MAX_TURNS)
+  return savedTurns
+}
+
 function Answer({ text, onNavigate }: { text: string; onNavigate: () => void }) {
   const { pieces, links } = parseAnswer(text)
   return (
@@ -120,10 +127,7 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
   }
 
   function add(questionText: string, answer: string, source: Source) {
-    // Kept at module level first: an AI answer that arrives after the panel was closed
-    // (it already counted against the day's questions) is there when it reopens.
-    savedTurns = [...savedTurns, { id: nextId++, question: questionText, answer, source }].slice(-MAX_TURNS)
-    setTurns(savedTurns)
+    setTurns(keepTurn({ question: questionText, answer, source }))
   }
 
   function askSuggested(id: string) {
