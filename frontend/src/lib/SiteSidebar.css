@@ -556,3 +556,18 @@
 }
 
 @keyframes bindit-sheet-up { from { transform: translateY(24px); opacity: .6; } }
+
+/* Folded rail: study shortcuts and courses as a column of icons. */
+.bindit-rail__strip { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.bindit-rail__strip-link {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md, 10px);
+  color: inherit;
+  text-decoration: none;
+}
+.bindit-rail__strip-link:hover { background: var(--color-surface-hover); }
+.bindit-rail__strip-link.is-current { background: var(--color-surface-active); }
+.bindit-rail__strip-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }

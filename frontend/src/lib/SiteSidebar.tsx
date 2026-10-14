@@ -441,6 +441,13 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     )
   }
 
+  const studyLinks = [
+    { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
+    { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
+    { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
+    { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask Otto', current: active === 'tutor' },
+  ] as const
+
   const sections: Record<SectionId, { count?: number; hatch?: boolean; body: ReactNode }> = {
     highlighted: {
       body: tasksLoading && !reviewDue ? skeletonRows(2)
@@ -468,12 +475,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     study: {
       body: (
         <ul className="bindit-rail__entries">
-          {([
-            { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
-            { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
-            { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
-            { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask Otto', current: active === 'tutor' },
-          ] as const).map((item) => (
+          {studyLinks.map((item) => (
             <li key={item.key}>
               <a
                 className={`bindit-rail__entry bindit-rail__study ui-tone--${item.tone}${'current' in item && item.current ? ' is-current' : ''}`}
@@ -595,7 +597,32 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
           {handle}
         </div>
 
-        {isCollapsed ? null : (
+        {isCollapsed ? (
+          // The folded strip keeps the study shortcuts and courses as icons, so it never looks empty.
+          <ul className="bindit-rail__strip" aria-label="Shortcuts">
+            {studyLinks.map((item) => (
+              <li key={item.key}>
+                <a
+                  className={`bindit-rail__strip-link bindit-rail__study ui-tone--${item.tone}${'current' in item && item.current ? ' is-current' : ''}`}
+                  href={item.href}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={'current' in item && item.current ? 'page' : undefined}
+                  data-review-link={'review' in item ? '' : undefined}
+                >
+                  <span className="bindit-rail__study-icon">{item.glyph}</span>
+                </a>
+              </li>
+            ))}
+            {courses.map((course) => (
+              <li key={course.name}>
+                <a className="bindit-rail__strip-link" href="#tools" aria-label={course.name} title={course.name} onClick={() => openCourse(course)}>
+                  <span className="ui-course-mark ui-course-mark--sm bindit-rail__course" style={{ ['--course' as string]: course.tone }} aria-hidden="true">{courseInitial(course.name)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
           <>
             <div className="bindit-rail__account">
               <span className="bindit-rail__avatar" aria-hidden="true" />
