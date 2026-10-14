@@ -239,7 +239,8 @@ function AppShell() {
         </nav>
         <div className="app-bar__panels">
           <button type="button" className="app-bar__merge" aria-expanded={!railCollapsed} onClick={() => setRailCollapsed(!railCollapsed)} title={railCollapsed ? 'Show the full sidebar' : 'Shrink the sidebar to a strip of icons'}>{railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}</button>
-          <button type="button" className="app-bar__expand" aria-label="Expand sidebar" aria-pressed={!railCollapsed} title="Expand sidebar" onClick={() => setRailCollapsed(false)}>
+          {/* A pressed toggle: with the sidebar already full, it shrinks it (it used to do nothing then). */}
+          <button type="button" className="app-bar__expand" aria-label="Full sidebar" aria-pressed={!railCollapsed} title={railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setRailCollapsed(!railCollapsed)}>
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11M5 5.5 2.5 8 5 10.5M11 5.5 13.5 8 11 10.5" /></svg>
           </button>
         </div>
