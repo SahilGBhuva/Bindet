@@ -38,6 +38,7 @@ import {
 } from '../lib/studyPrefs'
 import type { InstructionKind } from '../lib/studyPrefs'
 import { useAnnounce } from '../lib/announce'
+import { isoDay } from '../lib/time'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz' | 'guides'
@@ -113,8 +114,7 @@ function movedDrafts(drafts: Record<string, string>, moves: [Place, Place][]) {
 
 /* The calendar day on this device, as YYYY-MM-DD (not the UTC day toISOString gives). */
 function localDay(time: number) {
-  const date = new Date(time)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return isoDay(new Date(time))
 }
 
 /* A card's front without case or spacing differences, so a duplicate card shows once. */

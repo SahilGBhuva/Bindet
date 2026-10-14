@@ -7,7 +7,7 @@ import {
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { loadNotebook } from '../lib/session'
-import { formatClockTime, lowerMeridiem } from '../lib/time'
+import { addDays, formatClockTime, isoDay, lowerMeridiem, parseDay } from '../lib/time'
 import { toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
 import { useAnnounce } from '../lib/announce'
@@ -55,21 +55,6 @@ const longDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'l
 const stamp = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 /* ---------- dates ---------- */
-
-function isoDay(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-function parseDay(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
-
-function addDays(value: string, days: number) {
-  const date = parseDay(value)
-  date.setDate(date.getDate() + days)
-  return isoDay(date)
-}
 
 function timeLabel(value: string | null) {
   if (!value) return ''

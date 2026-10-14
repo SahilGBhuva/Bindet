@@ -7,7 +7,7 @@ import { mergeNoteScopes, withCourseTones } from '../lib/session'
 import { loadHiddenCourses } from '../lib/studyPrefs'
 import { REVIEW_ALL_HASH, useReviewSummary } from '../lib/useReviewSummary'
 import { rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
-import { formatClockTime } from '../lib/time'
+import { formatClockTime, isoDay } from '../lib/time'
 import { toneClass, toneForName } from '../lib/tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
@@ -112,8 +112,7 @@ function badgeOf(task: Task, now: number): Badge {
 }
 
 function localDate(timestamp: number) {
-  const date = new Date(timestamp)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return isoDay(new Date(timestamp))
 }
 
 function firstWord(name: string) {

@@ -76,11 +76,6 @@ function longDate(value: string | null | undefined) {
   return `${date.toLocaleDateString('en-US', { month: 'long' })} ${ordinal(date.getDate())}`
 }
 
-function localISODate(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
 function percent(part: number, whole: number) {
   return whole > 0 ? Math.round((part / whole) * 100) : 0
 }
@@ -512,7 +507,7 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
       const tasks = await getTasks(token, true)
       const soon = new Date()
       soon.setDate(soon.getDate() + 3)
-      const cutoff = localISODate(soon)
+      const cutoff = localDay(soon)
       const candidates = tasks.filter((task) => task.group_id === groupId && task.status !== 'done' && task.priority !== 'urgent' && task.due_date && task.due_date <= cutoff)
       setPlan({ ids: candidates.filter((task) => task.can_edit).map((task) => task.id), locked: candidates.filter((task) => !task.can_edit).length })
     } catch (error) {

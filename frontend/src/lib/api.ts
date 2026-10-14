@@ -1,5 +1,6 @@
 import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, refreshAuthSession } from './auth'
 import { getStudentId } from './session'
+import { isoDay } from './time'
 
 export type Topic = 'addition' | 'subtraction' | 'multiplication' | 'division' | 'mixed'
 // choices is optional: when present, the quiz offers them as answer buttons (the demo questions use it).
@@ -1327,5 +1328,5 @@ export function deleteAccount(confirm: string, accessToken: string) {
 
 /* The student's local calendar day (YYYY-MM-DD), which the server uses for "today" and "overdue". */
 export function localDay(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return isoDay(date)
 }
