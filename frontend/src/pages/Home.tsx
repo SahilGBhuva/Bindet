@@ -778,7 +778,8 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
             </section>
           </div>
 
-          <aside className="home-team" aria-labelledby="home-team-title">
+          {/* A section, not an aside: Home sits inside the page's main landmark, and a complementary landmark must be top level. */}
+          <section className="home-team" aria-labelledby="home-team-title">
             {groups === null ? (
               <div className="home-team__loading" aria-busy="true" aria-label="Loading your group">
                 <span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" />
@@ -849,7 +850,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                 ))}
               </ul>
             </section>
-          </aside>
+          </section>
         </div>
       </div>
     </div>
