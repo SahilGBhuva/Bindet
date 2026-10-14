@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ReviewCard, ReviewGrade, ReviewSummary } from '../lib/api'
+import { useAnnounce } from '../lib/announce'
 import { useData } from '../lib/dataSource'
 import { announceReviewChange, formatInterval, GRADE_LABELS, GRADES, gradePreview, relativeDue, spokenInterval } from '../lib/review'
 import { MathText } from '../components/math/Math'
@@ -153,9 +154,29 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     return () => document.removeEventListener('keydown', onKey)
   })
 
+  // The finished-session summary and the done message. Computed here so the same words
+  // can be announced through the shared live regions (lib/announce.ts).
+  // Units have no "next due" of their own in the summary; this session's grades say it.
+  const upcoming = crossUnit
+    ? summary?.next_due_at ?? null
+    : nextDue.toSorted()[0] ?? null
+  const unitCounts = crossUnit ? null : summary?.by_unit.find((entry) => entry.course === scope.course && entry.unit === scope.unit)
+  const moreDue = crossUnit ? summary?.due ?? 0 : unitCounts?.due ?? 0
+  const moreNew = crossUnit ? summary?.new_available ?? 0 : unitCounts?.new ?? 0
+  const when = relativeDue(upcoming, data.now())
+  const doneTitle = done ? 'All caught up' : 'Nothing to review right now'
+  const doneCopy = `${done ? `You reviewed ${plural(done, 'card')}. ` : ''}${when ? `Next review ${when === 'now' ? 'is ready now' : when}.` : moreNew || moreDue ? '' : 'Cards you’ve studied come back here when they’re due.'}`
+
+  // Status and alerts keep no live role of their own, so nothing is read twice.
+  const unsavedText = unsaved.length === 1 ? 'A grade didn’t save. That card is back at the end of the queue.' : `${unsaved.length} grades didn’t save. Those cards are back at the end of the queue.`
+  useAnnounce(unsaved.length ? unsavedText : '', { error: true })
+  useAnnounce(status === 'loading' ? 'Loading cards to review…' : '')
+  useAnnounce(status === 'error' ? 'Your review cards didn’t load. Check your connection and try again.' : '', { error: true })
+  useAnnounce(status === 'ready' && !card ? `${doneTitle}. ${doneCopy}`.trim() : '')
+
   const notice = unsaved.length ? (
-    <div className="ui-alert tools__review-notice" role="alert">
-      <span>{unsaved.length === 1 ? 'A grade didn’t save. That card is back at the end of the queue.' : `${unsaved.length} grades didn’t save. Those cards are back at the end of the queue.`}</span>
+    <div className="ui-alert tools__review-notice">
+      <span>{unsavedText}</span>
       <button className="ui-button ui-button--ghost ui-button--sm tools__review-dismiss" type="button" onClick={() => setUnsaved([])}>Dismiss</button>
     </div>
   ) : null
@@ -168,7 +189,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
           <span className="ui-skeleton" />
           <span className="ui-skeleton" />
         </div>
-        <p className="tools__status" role="status"><span className="ui-spinner" />Loading cards to review…</p>
+        <p className="tools__status"><span className="ui-spinner" />Loading cards to review…</p>
       </div>
     )
   }
@@ -176,7 +197,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   if (status === 'error') {
     return (
       <div className="tools__cards-error">
-        <div className="ui-alert" role="alert">
+        <div className="ui-alert">
           <span>Your review cards didn’t load. Check your connection and try again.</span>
           <button className="ui-button ui-button--sm tools__review-more" type="button" onClick={again}>Retry</button>
         </div>
@@ -185,22 +206,11 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   }
 
   if (!card) {
-    // Units have no "next due" of their own in the summary; this session's grades say it.
-    const upcoming = crossUnit
-      ? summary?.next_due_at ?? null
-      : nextDue.toSorted()[0] ?? null
-    const unitCounts = crossUnit ? null : summary?.by_unit.find((entry) => entry.course === scope.course && entry.unit === scope.unit)
-    const moreDue = crossUnit ? summary?.due ?? 0 : unitCounts?.due ?? 0
-    const moreNew = crossUnit ? summary?.new_available ?? 0 : unitCounts?.new ?? 0
-    const when = relativeDue(upcoming, data.now())
     return (
-      <div className="tools__review-done" role="status">
+      <div className="tools__review-done">
         {notice}
-        <h3 className="tools__review-done-title">{done ? 'All caught up' : 'Nothing to review right now'}</h3>
-        <p className="tools__review-done-copy">
-          {done ? `You reviewed ${plural(done, 'card')}. ` : ''}
-          {when ? `Next review ${when === 'now' ? 'is ready now' : when}.` : moreNew || moreDue ? '' : 'Cards you’ve studied come back here when they’re due.'}
-        </p>
+        <h3 className="tools__review-done-title">{doneTitle}</h3>
+        <p className="tools__review-done-copy">{doneCopy}</p>
         {moreDue ? (
           <button className="ui-button ui-button--primary tools__review-more" type="button" onClick={again}>Review {plural(moreDue, 'more due card')}</button>
         ) : moreNew ? (

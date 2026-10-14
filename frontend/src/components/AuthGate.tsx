@@ -28,6 +28,7 @@ import {
   verifySignupCode,
   type AuthSession,
 } from '../lib/auth'
+import { useAnnounce } from '../lib/announce'
 import { AuthContext } from '../lib/AuthContext'
 import { BrandMark } from '../lib/BrandMark'
 import './GuestAuth.css'
@@ -164,6 +165,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const codeInput = useRef<HTMLInputElement>(null)
   const landingLoaded = useLandingLoaded(!session && view === 'landing')
   const emailInput = useRef<HTMLInputElement>(null)
+
+  // Notices and feedback go through the always-mounted live regions (lib/announce.ts);
+  // the visual elements below keep no live role so nothing is read twice. The confirm
+  // screen keeps its own always-mounted region for `message`, so it isn't repeated here.
+  useAnnounce(error, { error: true })
+  useAnnounce(view === 'confirm' ? '' : message)
+  useAnnounce(!loading && !session && view === 'landing' && notice === 'deleted' ? 'Your account and data were deleted.' : '')
+  useAnnounce(!loading && !session && view === 'auth' && mode === 'login' && notice === 'reauth-delete'
+    ? 'Sign in again to finish deleting your account. Then open Settings and choose Delete account.'
+    : '')
+  useAnnounce(!loading && !session && view === 'auth' && mode === 'signup' && signupReason
+    ? `“${signupReason.replace(/^\+\s*/, '')}” works in the full app. Create an account to use it with your own courses and notes.`
+    : '')
+  useAnnounce(!loading && linkGate?.kind === 'recovery' && linkGate.confirmed ? `This link is for ${linkGate.session.user.email ?? 'this account'}.` : '')
 
   useEffect(() => {
     localStorage.removeItem('bindit-guest-mode')
@@ -559,7 +574,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <AuthBrand />
           <p className="auth-eyebrow">Reset password</p>
           <h1 className="auth-title" id="auth-title">Set a new password</h1>
-          <p className="auth-reason" role="status">
+          <p className="auth-reason">
             <strong>This link is for {recoveringEmail}.</strong> Not you?{' '}
             <button className="auth-text-btn" type="button" disabled={busy} onClick={declineRecovery}>
               Not me
@@ -600,7 +615,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 onChange={(event) => setPasswordAgain(event.target.value)}
               />
             </label>
-            {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+            {error ? <div className="auth-feedback is-error">{error}</div> : null}
             <button className="auth-submit" type="submit" disabled={busy}>
               {busy ? 'Saving…' : 'Save password and enter'}
             </button>
@@ -745,7 +760,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 />
               </label>
               <p className="auth-help" id="auth-code-help">Not there after a minute? Check your spam or promotions folder.</p>
-              {error ? <div className="auth-feedback is-error" role="alert">{error}</div> : null}
+              {error ? <div className="auth-feedback is-error">{error}</div> : null}
               <div className="sr-only" role="status" aria-live="polite">{busy ? 'Checking the code…' : message}</div>
               {message ? <div className="auth-feedback is-ok" aria-hidden="true">{message}</div> : null}
               <button className="auth-submit" type="submit" disabled={busy} aria-busy={busy}>
@@ -791,12 +806,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
             </div>
             {mode === 'reset' ? <p className="auth-lead">Enter your email and we’ll send you a link to set a new password.</p> : null}
             {mode === 'login' && notice === 'reauth-delete' ? (
-              <p className="auth-reason" role="status">
+              <p className="auth-reason">
                 Sign in again to finish deleting your account. Then open <strong>Settings</strong> and choose <strong>Delete account</strong>.
               </p>
             ) : null}
             {mode === 'signup' && signupReason ? (
-              <p className="auth-reason" role="status">
+              <p className="auth-reason">
                 <strong>“{signupReason.replace(/^\+\s*/, '')}”</strong> works in the full app. Create an account to use it with your own courses and notes.
               </p>
             ) : null}
@@ -850,7 +865,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 </div>
               ) : null}
               {error ? (
-                <div className="auth-feedback is-error" role="alert">
+                <div className="auth-feedback is-error">
                   {error}
                   {taken ? (
                     <span className="auth-feedback__actions">
@@ -860,7 +875,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                   ) : null}
                 </div>
               ) : null}
-              {message ? <div className="auth-feedback is-ok" role="status">{message}</div> : null}
+              {message ? <div className="auth-feedback is-ok">{message}</div> : null}
               <button className="auth-submit" type="submit" disabled={busy}>
                 {busy ? (mode === 'login' ? 'Logging in…' : mode === 'reset' ? 'Sending…' : 'Creating account…') : mode === 'login' ? 'Log in' : mode === 'reset' ? 'Send reset link' : 'Create account'}
               </button>
@@ -897,7 +912,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return (
       <>
         {notice === 'deleted' ? (
-          <div className="auth-notice" role="status">
+          <div className="auth-notice">
             <span>Your account and data were deleted.</span>
             <button className="auth-notice__close" type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>×</button>
           </div>

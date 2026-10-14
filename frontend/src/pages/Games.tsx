@@ -179,6 +179,9 @@ function Lobby({ token, selfId, onStart, onNotice }: { token: string; selfId: st
   const [busy, setBusy] = useState<string | null>(null)
   const [startError, setStartError] = useState('')
   const [challengeDeck, setChallengeDeck] = useState<DeckCard[] | null>(null)
+  // Inline alerts go through the shared live regions (lib/announce.ts); the visual alerts keep no live role.
+  useAnnounce(error && !data ? error : '', { error: true })
+  useAnnounce(startError, { error: true })
 
   useEffect(() => {
     let live = true
@@ -277,7 +280,7 @@ function Lobby({ token, selfId, onStart, onNotice }: { token: string; selfId: st
     return (
       <>
         {header}
-        <div className="ui-alert" role="alert"><span>{error}</span><button type="button" className="ui-button" onClick={() => setReload((value) => value + 1)}>Try again</button></div>
+        <div className="ui-alert"><span>{error}</span><button type="button" className="ui-button" onClick={() => setReload((value) => value + 1)}>Try again</button></div>
       </>
     )
   }
@@ -380,7 +383,7 @@ function Lobby({ token, selfId, onStart, onNotice }: { token: string; selfId: st
                   ? <span>Your best here: <b>{best.best_score} {best.best_score === 1 ? 'point' : 'points'}</b>, {best.best_accuracy}% right, {shortDate(best.achieved_at)}</span>
                   : <span>No best yet for this unit, length and mode.</span>}
               </p>
-              {startError ? <div className="ui-alert" role="alert"><span>{startError}</span></div> : null}
+              {startError ? <div className="ui-alert"><span>{startError}</span></div> : null}
               <div className="practice__actions">
                 <button type="button" className={`ui-button ui-button--primary${busy === 'start' ? ' is-busy' : ''}`} disabled={!!busy || !cardCount} onClick={() => void start()}>Start round</button>
                 <button type="button" className={`ui-button${busy === 'challenge' ? ' is-busy' : ''}`} disabled={!!busy || !cardCount} onClick={() => void openChallenge()}>
@@ -679,6 +682,7 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
   const [challenge, setChallenge] = useState<Challenge | null>(null)
   const [xp, setXp] = useState<number | null>(null)
   const [saveError, setSaveError] = useState('')
+  useAnnounce(saveError, { error: true })
   const [attempt, setAttempt] = useState(0)
   const [challengeOpen, setChallengeOpen] = useState(false)
   const [challengeSent, setChallengeSent] = useState(false)
@@ -748,7 +752,7 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
       )}
 
       {saveError ? (
-        <div className="ui-alert" role="alert">
+        <div className="ui-alert">
           <span>{saveError}</span>
           <button type="button" className="ui-button" onClick={() => { setSaveError(''); setAttempt((value) => value + 1) }}>Try again</button>
         </div>
@@ -843,6 +847,8 @@ function ChallengeDialog({ token, selfId, course, unit, length, mode, deck, answ
   const [chosen, setChosen] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  useAnnounce(loadError, { error: true })
+  useAnnounce(error, { error: true })
   const cancel = () => { if (!busy) onClose() }
   useDrawer({ open: true, onClose: cancel, panel })
   const challengeMode: RoundMode = mode === 'choice' && deck.length < CHOICE_MIN_CARDS ? 'self' : mode
@@ -900,7 +906,7 @@ function ChallengeDialog({ token, selfId, course, unit, length, mode, deck, answ
           <div className="ui-alert ui-alert--info practice__share-note">
             <span><b>Your friend will see these flashcards.</b> The question and answer text of these cards is copied into the challenge and shared only with the person you pick. Your notes stay private.</span>
           </div>
-          {loadError ? <div className="ui-alert" role="alert"><span>{loadError}</span></div> : null}
+          {loadError ? <div className="ui-alert"><span>{loadError}</span></div> : null}
           {people === null && !loadError ? <div className="practice__people" aria-busy="true"><span className="ui-skeleton practice__skeleton" /><span className="ui-skeleton practice__skeleton" /></div> : null}
           {people && !people.length ? (
             <p className="practice__dialog-lede">You can challenge friends and people in your study groups. Add a friend in <a className="ui-link" href="#profile">Friends &amp; groups</a> first.</p>
@@ -920,7 +926,7 @@ function ChallengeDialog({ token, selfId, course, unit, length, mode, deck, answ
               ))}
             </fieldset>
           ) : null}
-          {error ? <div className="ui-alert" role="alert"><span>{error}</span></div> : null}
+          {error ? <div className="ui-alert"><span>{error}</span></div> : null}
         </div>
         <footer className="ui-dialog__footer">
           <button type="button" className="ui-button ui-button--ghost" disabled={busy} onClick={cancel}>Cancel</button>

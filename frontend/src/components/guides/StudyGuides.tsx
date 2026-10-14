@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ApiError, isAbortError, parseServerTime, RequestTimeoutError } from '../../lib/api'
+import { useAnnounce } from '../../lib/announce'
 import { useData } from '../../lib/dataSource'
 import { GUIDE_KINDS, guideFileName, guideKind, guideMarkdown, guidePlainText } from '../../lib/studyGuides'
 import type { GuideKind, GuideSection, StudyGuide, StudyGuideList } from '../../lib/studyGuides'
@@ -86,6 +87,10 @@ export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, 
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
   const formId = useId()
+  // Status lines and errors are announced through the shared live regions (lib/announce.ts);
+  // the visual lines keep no live role so nothing is read twice.
+  useAnnounce(error, { error: true })
+  useAnnounce(busy ? 'Otto is reading your notes. This takes about 15–30 seconds.' : '')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -193,13 +198,13 @@ export function StudyGuides({ course, unit, accessToken, fallbackUnit, onClose, 
               autoComplete="off"
             />
           </label>
-          {error ? <p className="ui-alert" role="alert"><span>{error}</span></p> : null}
+          {error ? <p className="ui-alert"><span>{error}</span></p> : null}
           <div className="guides__actions">
             <button className={`ui-button ui-button--primary guides__submit${busy ? ' is-busy' : ''}`} type="submit" disabled={busy}>
               {busy ? `Making your ${chosen.label.toLowerCase()}…` : `Make ${chosen.label.toLowerCase()}`}
             </button>
             <button className="ui-button ui-button--ghost guides__cancel" type="button" disabled={busy} onClick={() => { setMaking(false); setError('') }}>Cancel</button>
-            {busy ? <span className="guides__hint" role="status"><span className="ui-spinner" />Otto is reading your notes. This takes about 15–30 seconds.</span> : null}
+            {busy ? <span className="guides__hint"><span className="ui-spinner" />Otto is reading your notes. This takes about 15–30 seconds.</span> : null}
           </div>
         </form>
       ) : null}
@@ -275,6 +280,11 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
   const base = useId()
   const loaded = useEffectEvent((result: StudyGuide) => onLoaded?.(result))
   const loadedId = guide?.id
+  useAnnounce(loadError, { error: true })
+  useAnnounce(!guide && !loadError ? 'Opening the study guide…' : '')
+  useAnnounce(guide ? status : '')
+  useAnnounce(busy === 'regenerate' || busy === 'fresh' ? 'Otto is checking your notes…' : '')
+  useAnnounce(unchanged ? 'Your notes haven’t changed since this was made, so it’s the same guide. A fresh version counts toward today’s limit.' : '')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -292,7 +302,7 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
   if (loadError) {
     return (
       <div className="guide" role="region" aria-label="Study guide">
-        <div className="ui-alert" role="alert">
+        <div className="ui-alert">
           <span>{loadError}</span>
           <button className="ui-button ui-button--sm guides__retry" type="button" onClick={() => { setLoadError(''); setReload((count) => count + 1) }}>Try again</button>
           <button className="ui-button ui-button--sm ui-button--ghost guide__back" type="button" onClick={onBack}>Back</button>
@@ -304,7 +314,7 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
     return (
       <div className="guide" role="region" aria-label="Study guide" aria-busy="true">
         <div className="guides__skeleton"><span className="ui-skeleton" /><span className="ui-skeleton" /><span className="ui-skeleton" /></div>
-        <p className="sr-only" role="status">Opening the study guide…</p>
+        <p className="sr-only">Opening the study guide…</p>
       </div>
     )
   }
@@ -480,7 +490,7 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
         <p className="guide__print-note">Made by Otto in bindet from your own notes. Check anything important against them.</p>
       </header>
 
-      {status && statusAt === 'top' ? <p className="guide__status" role="status">{status}</p> : null}
+      {status && statusAt === 'top' ? <p className="guide__status">{status}</p> : null}
 
       <div className="guide__actions">
         <button
@@ -571,10 +581,10 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
           Regenerate
         </button>
         <button className="ui-button ui-button--sm ui-button--ghost ui-button--danger guide__delete" type="button" disabled={Boolean(busy)} onClick={() => void remove()}>Delete</button>
-        {busy === 'regenerate' || busy === 'fresh' ? <span className="guides__hint" role="status"><span className="ui-spinner" />Otto is checking your notes…</span> : null}
-        {status && statusAt === 'end' ? <p className="guide__status" role="status">{status}</p> : null}
+        {busy === 'regenerate' || busy === 'fresh' ? <span className="guides__hint"><span className="ui-spinner" />Otto is checking your notes…</span> : null}
+        {status && statusAt === 'end' ? <p className="guide__status">{status}</p> : null}
         {unchanged ? (
-          <div className="ui-alert ui-alert--info guide__unchanged" role="status">
+          <div className="ui-alert ui-alert--info guide__unchanged">
             <span>Your notes haven’t changed since this was made, so it’s the same guide. A fresh version counts toward today’s limit.</span>
             <button className={`ui-button ui-button--sm guide__fresh${busy === 'fresh' ? ' is-busy' : ''}`} type="button" disabled={Boolean(busy)} onClick={() => void regenerate(true)}>
               Make a fresh version

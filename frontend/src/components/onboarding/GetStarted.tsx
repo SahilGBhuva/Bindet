@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AuthSession } from '../../lib/auth'
+import { useAnnounce } from '../../lib/announce'
 import { getOnboarding, ONBOARDING_CHANGED_EVENT, saveOnboarding, type OnboardingState, type OnboardingSteps } from '../../lib/onboarding'
 import './GetStarted.css'
 
@@ -27,6 +28,8 @@ export function GetStarted({ session }: { session: AuthSession }) {
   const [state, setState] = useState<OnboardingState | null>(null)
   const [hidden, setHidden] = useState(false)
   const [error, setError] = useState('')
+  // Errors go through the shared live regions (lib/announce.ts); the visual alert keeps no live role.
+  useAnnounce(error, { error: true })
   const live = useRef(true)
 
   useEffect(() => {
@@ -55,7 +58,7 @@ export function GetStarted({ session }: { session: AuthSession }) {
   }, [token])
 
   if (!state || hidden || !state.tracked || !state.setup_done || state.checklist_dismissed) {
-    return error ? <p className="get-started__error ui-alert" role="alert">{error}</p> : null
+    return error ? <p className="get-started__error ui-alert">{error}</p> : null
   }
 
   const doneCount = ITEMS.filter((item) => state.steps[item.key]).length
@@ -89,7 +92,7 @@ export function GetStarted({ session }: { session: AuthSession }) {
       <div className="ui-meter get-started__meter" role="progressbar" aria-label="Get started progress" aria-valuemin={0} aria-valuemax={ITEMS.length} aria-valuenow={doneCount}>
         <span style={{ width: `${(doneCount / ITEMS.length) * 100}%` }} />
       </div>
-      {error ? <p className="get-started__error" role="alert">{error}</p> : null}
+      {error ? <p className="get-started__error">{error}</p> : null}
       {allDone ? null : (
         <ol className="get-started__list">
           {ITEMS.map((item, index) => {
