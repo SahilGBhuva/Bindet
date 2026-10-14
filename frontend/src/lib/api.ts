@@ -843,7 +843,18 @@ export function readSocialNotifications(accessToken: string) {
 export function saveSocialPrivacy(discoverable: boolean, allowFriendRequests: boolean, accessToken: string, allowNudges?: boolean) {
   return request<{ discoverable: boolean; allow_friend_requests: boolean; allow_nudges?: boolean }>('/api/social/privacy', {
     method: 'PUT', body: JSON.stringify({ discoverable, allow_friend_requests: allowFriendRequests, allow_nudges: allowNudges }),
-  }, accessToken)
+  }, accessToken).then((saved) => {
+    // The cached profile carries these switches too: without this, reopening Settings
+    // showed the old choice until the cache expired.
+    const identity = tokenSubject(accessToken)
+    const cached = profileCache.get(identity)?.data ?? readSessionCache<Profile>(`bindit:profile:${identity}`)?.data
+    if (cached) {
+      const next: Profile = { ...cached, discoverable: saved.discoverable, allow_friend_requests: saved.allow_friend_requests, ...(saved.allow_nudges === undefined ? {} : { allow_nudges: saved.allow_nudges }) }
+      profileCache.set(identity, { savedAt: profileCache.get(identity)?.savedAt ?? Date.now(), data: next })
+      writeSessionCache(`bindit:profile:${identity}`, next)
+    }
+    return saved
+  })
 }
 
 export function blockSocialUser(userId: string, accessToken: string) {
