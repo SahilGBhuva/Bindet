@@ -3,6 +3,7 @@ import type { AuthSession } from '../../lib/auth'
 import type { DataSource } from '../../lib/dataSource'
 import { nextValues, previewFor, stateName, type SchedulerState } from '../../lib/review'
 import { COURSE_TONES } from '../../lib/session'
+import { formatClockTime } from '../../lib/time'
 import type { NoteDeposit, Notebook, UnitAttempt } from '../../lib/types'
 import type { NoteScope } from '../../lib/api'
 import type { StudyGuide, StudyGuideSummary } from '../../lib/studyGuides'
@@ -15,7 +16,8 @@ import type { StudyGuide, StudyGuideSummary } from '../../lib/studyGuides'
 
 const DAY = 86_400_000
 // A fixed moment so the demo never depends on the visitor's clock. Noon UTC keeps the same
-// calendar date from UTC−11 to UTC+11; the greeting hour is pinned separately below.
+// calendar date from UTC−11 to UTC+11; the hour of day is pinned separately below, so the
+// demo's clock reads 3:00 pm in every time zone instead of noon UTC (5:00 am in California).
 export const DEMO_NOW = Date.UTC(2026, 8, 15, 12, 0)
 const DEMO_HOUR = 15
 const iso = (daysAgo: number) => new Date(DEMO_NOW - daysAgo * DAY).toISOString()
@@ -569,6 +571,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
 
     now: () => DEMO_NOW,
     hourOf: () => DEMO_HOUR,
+    clockOf: () => formatClockTime(new Date(2026, 8, 15, DEMO_HOUR, 0)),
     confirm: () => false,
     // The demo's notes, counted per course and unit, in memory.
     listNoteScopes: () => {

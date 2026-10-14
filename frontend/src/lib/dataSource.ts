@@ -4,6 +4,7 @@ import * as offlineCards from './offlineCards'
 import * as progress from './progress'
 import * as session from './session'
 import * as studyGuides from './studyGuides'
+import { formatClockTime } from './time'
 
 /*
  * Everything the study pages read, write or request, in one place.
@@ -62,6 +63,8 @@ export type DataSource = {
   // Environment
   now: () => number
   hourOf: (timestamp: number) => number
+  /* The time of day shown for a timestamp, e.g. "10:43 am". */
+  clockOf: (timestamp: number) => string
   confirm: (message: string) => boolean
 
   // Server data (added later)
@@ -139,6 +142,7 @@ export const realData: DataSource = {
   startFriendQuest: api.startFriendQuest,
   now: () => Date.now(),
   hourOf: (timestamp) => new Date(timestamp).getHours(),
+  clockOf: (timestamp) => formatClockTime(timestamp),
   confirm: (message) => window.confirm(message),
   listNoteScopes: api.listNoteScopes,
   deleteStudyGroup: api.deleteStudyGroup,

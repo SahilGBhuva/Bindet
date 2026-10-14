@@ -519,7 +519,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
               <h1 className="home-hello__title">
                 Hello{firstName ? `, ${firstName}` : ''} <Icon name="smile" />
               </h1>
-              <time className="home-hello__clock" dateTime={new Date(now).toISOString()}>{clock(now)}</time>
+              <time className="home-hello__clock" dateTime={new Date(now).toISOString()}>{data.clockOf(now)}</time>
             </div>
           </section>
 
