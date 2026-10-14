@@ -38,3 +38,33 @@ class DisposableEmailTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class InboxTests(unittest.TestCase):
+    def test_aliases_of_one_inbox_match(self):
+        from disposable_email import inbox_of
+        same = {inbox_of(e) for e in ('kid@gmail.com', 'Kid+1@gmail.com', 'k.i.d+x@googlemail.com', ' KID@GMAIL.COM. ')}
+        self.assertEqual(same, {'kid@gmail.com'})
+        self.assertEqual(inbox_of('a.b+c@school.org'), 'a.b@school.org')  # dots only ignored by Gmail
+        self.assertEqual(inbox_of('no-at'), '')
+        self.assertEqual(inbox_of('+tag@gmail.com'), '')
+
+    def test_ai_share_is_counted_per_inbox(self):
+        import database
+        import main
+        calls = []
+        with mock.patch.object(database, 'check_social_rate_limit', lambda key, *rest: calls.append(key)):
+            token = main.ai_inbox.set('inbox:abc')
+            try:
+                self.assertTrue(main.account_ai_share_available('student-1'))
+                self.assertTrue(main.account_ai_share_available('student-2'))
+            finally:
+                main.ai_inbox.reset(token)
+            self.assertTrue(main.account_ai_share_available('student-3'))
+        self.assertEqual(calls, ['inbox:abc', 'inbox:abc', 'student-3'])
+
+
+class MigrationListTests(unittest.TestCase):
+    def test_chat_block_migration_lists_the_same_domains(self):
+        sql = (Path(__file__).resolve().parent.parent / 'supabase/migrations/20261021_block_temp_email_chat.sql').read_text()
+        self.assertEqual(set(re.findall(r"\('([a-z0-9.-]+)'\)", sql)), set(DISPOSABLE_DOMAINS))

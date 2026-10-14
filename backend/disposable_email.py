@@ -54,3 +54,20 @@ def is_disposable(email: str | None) -> bool:
         return False
     parts = domain.split('.')
     return any('.'.join(parts[i:]) in DISPOSABLE_DOMAINS for i in range(len(parts) - 1))
+
+
+_DOTLESS_DOMAINS = {'gmail.com': 'gmail.com', 'googlemail.com': 'gmail.com'}
+
+
+def inbox_of(email: str | None) -> str:
+    """The real inbox behind an address: lowercase, '+tag' removed, and Gmail's ignored dots
+    removed, so kid+1@gmail.com and k.i.d@gmail.com both come back as kid@gmail.com."""
+    email = (email or '').strip().lower().rstrip('.')
+    if '@' not in email:
+        return ''
+    local, domain = email.rsplit('@', 1)
+    local = local.split('+', 1)[0]
+    if domain in _DOTLESS_DOMAINS:
+        domain = _DOTLESS_DOMAINS[domain]
+        local = local.replace('.', '')
+    return f'{local}@{domain}' if local else ''

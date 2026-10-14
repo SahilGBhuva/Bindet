@@ -37,6 +37,7 @@ import ai_cache
 import ai_tutor
 import auth
 import database
+import disposable_email
 import feedback
 import flashcards
 import help_bot
@@ -1034,6 +1035,8 @@ def ai_user(authorization: str | None) -> dict:
     user = auth.authenticated_user(authorization)
     if not auth.may_use_ai(user):
         raise HTTPException(status_code=403, detail={"code": "email_unconfirmed", "message": EMAIL_UNCONFIRMED})
+    inbox = disposable_email.inbox_of(user.get("email"))
+    ai_inbox.set(f"inbox:{hashlib.sha256(inbox.encode()).hexdigest()[:40]}" if inbox else None)
     return user
 
 
@@ -1183,13 +1186,19 @@ def ai_account_daily_limit() -> int:
     return max(1, ai_daily_global_limit() * AI_ACCOUNT_SHARE_PERCENT // 100)
 
 
+# The inbox behind the signed-in account for this request (set by ai_user). The share is
+# counted per inbox, not per account: kid+1@gmail.com, kid+2@gmail.com and k.i.d@gmail.com
+# are all one inbox, so opening many aliases doesn't multiply the share.
+ai_inbox: contextvars.ContextVar[str | None] = contextvars.ContextVar("ai_inbox", default=None)
+
+
 def account_ai_share_available(student_id: str | None) -> bool:
     """Spend one call from this account's share of the shared daily budget. False once it is
-    used up. Owners are never limited (check_social_rate_limit skips them)."""
-    if not student_id:
+    used up. Owners are never limited."""
+    if not student_id or rate_limit.is_owner(student_id):
         return True
     try:
-        database.check_social_rate_limit(student_id, "ai_global_share", ai_account_daily_limit(), 1440)
+        database.check_social_rate_limit(ai_inbox.get() or student_id, "ai_global_share", ai_account_daily_limit(), 1440)
     except ValueError:
         return False
     return True
