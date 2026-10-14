@@ -116,6 +116,10 @@ export function Settings({ session, onSession }: SettingsProps) {
   const profile = current?.profile ?? null
   const profileReady = Boolean(current?.ready)
 
+  // The name fields are filled once per account: a later reload (the sign-in token refreshes
+  // about hourly) must not overwrite a name the student is in the middle of typing.
+  const filledFor = useRef<string | null>(null)
+
   // Cached profile renders first; the saved one replaces it in the background.
   useEffect(() => {
     if (!session) return
@@ -125,6 +129,8 @@ export function Settings({ session, onSession }: SettingsProps) {
       .then((saved) => {
         if (!live) return
         setLoaded({ userId, profile: saved, ready: true })
+        if (filledFor.current === userId) return
+        filledFor.current = userId
         if (saved) {
           setDisplayName(saved.display_name)
           setUsername(saved.username)
