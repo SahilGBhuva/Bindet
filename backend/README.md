@@ -1,56 +1,44 @@
-# bindet Backend
+# bindet backend
 
-This service connects the bindet student experience, learning logic, authentication, and progress tracking through one API.
+The FastAPI service behind bindet: notes, flashcards, review, quizzes and practice tests, Otto the tutor, study guides, friends, groups and tasks. It runs as a Vercel function in production and with uvicorn locally.
 
 ## Start locally
 
-1. Open a terminal in this folder: `cd backend`
-2. Create an environment: `python3 -m venv venv`
-3. Activate it: `source venv/bin/activate`
-4. Install packages: `pip install -r requirements.txt`
-5. Start the API: `uvicorn main:app --reload`
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env      # fill in Supabase and OpenRouter settings
+uvicorn main:app --reload
+```
 
-API: http://127.0.0.1:8000
-Interactive docs: http://127.0.0.1:8000/docs
+API: http://127.0.0.1:8000. Interactive docs are at `/docs` locally; they are turned off in production.
 
-## Frontend connection
+Without `DATABASE_URL` the backend uses a local SQLite file (`BINDIT_DB_PATH`, default `backend/bindit.db`). Production refuses to start without a PostgreSQL `DATABASE_URL`, because a SQLite file on serverless storage loses its writes.
 
-Use `http://127.0.0.1:8000` as the API base URL. For Vite, copy `.env.example` to `.env.local` and set `VITE_API_URL`. Local apps on ports 3000 and 5173 are allowed by CORS.
+## Modules
 
-## API contract
+| File | What it does |
+| --- | --- |
+| `main.py` | Routes, request limits, the AI budget and the time-zone middleware |
+| `auth.py` | Verifies Supabase sign-in tokens, owner and admin checks, temporary-email refusal |
+| `database.py` | Tables, progress, XP, streaks, friends, rate limits |
+| `note_ingestion.py`, `note_store.py` | Reading uploaded files and storing notes per course and unit |
+| `ai_tutor.py` | Every model call: prompts, streaming, grounding checks |
+| `ai_cache.py` | Caches AI results by a hash of the exact input |
+| `flashcards.py`, `review.py` | Flashcard decks and spaced review |
+| `practice.py`, `practice_tests.py`, `questions.py` | Practice lab rounds, timed tests, the question bank |
+| `tutor.py`, `otto.py` | Otto conversations, memory and personality |
+| `study_guides.py` | Study guides written from a unit's notes |
+| `tasks.py` | Personal and group tasks, milestones, group statistics |
+| `help_bot.py` | The in-app help bot with strict limits |
+| `account_deletion.py` | Deletes a student's data, images and login |
 
-### Generate a question
+## Tests
 
-`POST /generate-question`
+```bash
+python -m pytest -q
+```
 
-Request: `{"topic":"mixed","difficulty":1}`
-
-Returns `question`, `correct_answer`, `topic`, and `difficulty`. Topics are addition, subtraction, multiplication, division, or mixed. Difficulty is 1 to 3.
-
-### Analyze an answer
-
-`POST /analyze-answer`
-
-Request: `{"question":"What is 2 + 2?","student_answer":"4","correct_answer":"4","student_id":"student-123","topic":"addition"}`
-
-Returns correctness, mistake type, explanation, hint, XP earned, total XP, and streak.
-
-### Read progress
-
-`GET /progress/{student_id}`
-
-Returns XP, attempts, accuracy, streaks, and weak topics.
-
-### Health check
-
-`GET /health` returns service status.
-
-## Verify changes
-
-Run `python -m unittest -v test_main.py`.
-
-## Data storage
-
-Student XP, attempts, streaks, accuracy, and topic performance are stored in `backend/bindit.db` when using the local SQLite fallback. The database is created automatically and is ignored by Git. Set `BINDIT_DB_PATH` to use a different local database path; the old `POCKET_TUTOR_DB_PATH` name remains supported for compatibility.
-
-SQLite is useful for local development. For production, use hosted PostgreSQL or Supabase through `DATABASE_URL` so progress persists across Vercel instances.
+Each module has a `test_*.py` beside it. Tests run on SQLite with the AI faked, so they need no keys.
