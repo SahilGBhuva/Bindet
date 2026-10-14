@@ -734,6 +734,9 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   return (
     <div className={`tutor${listOpen ? ' is-list-open' : ''}`}>
+      {/* The page heading comes first, before the conversation list's group headings.
+          The visible conversation title below is an h2 under it. */}
+      <h1 className="sr-only">Otto</h1>
       <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
           <span className="tutor__list-brand"><img src={MASCOT} alt="" width="24" height="24" decoding="async" />Otto</span>
@@ -804,7 +807,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               </form>
             ) : (
               <div className="tutor__title-row">
-                <h1>{active?.title ?? 'New chat'}</h1>
+                <h2>{active?.title ?? 'New chat'}</h2>
                 {active ? (
                   <span className="tutor__title-tools">
                     <button type="button" className="tutor__head-icon" onClick={() => setRenaming(active.title)} aria-label="Rename conversation" title="Rename"><Icon name="edit" /></button>

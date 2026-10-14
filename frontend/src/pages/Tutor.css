@@ -137,7 +137,7 @@
 .tutor__list-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .tutor__title { flex: 1 1 160px; min-width: 0; }
 .tutor__title-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.tutor__title h1 { margin: 0; overflow: hidden; font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.tutor__title h2 { margin: 0; overflow: hidden; font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .tutor__title-tools { display: inline-flex; flex: none; margin-left: 4px; opacity: .0; transition: opacity var(--duration-fast) var(--ease-standard); }
 .tutor__title-row:hover .tutor__title-tools,
 .tutor__title-tools:focus-within,
