@@ -949,7 +949,7 @@ export function Profile({ session, onError }: ProfileProps) {
           <section className="ui-section" aria-labelledby="quests-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="quests-title">Friend quests</h2>
-              <span className="ui-count">100 XP together in a week</span>
+              <span className="ui-count">Earn XP together in a week</span>
             </div>
             <div className="ui-panel">
               {socialLoading ? <SkeletonRows rows={1} /> : (
