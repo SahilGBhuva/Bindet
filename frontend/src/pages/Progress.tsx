@@ -30,6 +30,9 @@ export function Progress({ session }: ProgressProps) {
   const studentId = session?.user.id ?? data.getStudentId()
   const [stats, setStats] = useState<ProgressData | null>(() => data.getCachedProgress(studentId))
   const [statsFailed, setStatsFailed] = useState(false)
+  // The server answers 404 (null here) for an account with no progress row yet: that is
+  // "nothing earned", not "still loading".
+  const [statsChecked, setStatsChecked] = useState(false)
   const [reload, setReload] = useState(0)
   const [notebook, setNotebook] = useState(() => {
     const loaded = data.loadNotebook()
@@ -48,6 +51,7 @@ export function Progress({ session }: ProgressProps) {
       .then((value) => {
         if (!active) return
         setStats(value)
+        setStatsChecked(true)
         setStatsFailed(false)
         // Quiz answers recorded elsewhere may have landed since the page opened.
         setAttempts(data.loadUnitAttempts())
@@ -155,6 +159,7 @@ export function Progress({ session }: ProgressProps) {
 
       <AccountSummary
         stats={stats}
+        loading={!stats && !statsChecked && !statsFailed}
         failed={statsFailed && !stats}
         onRetry={() => {
           setStatsFailed(false)
@@ -575,8 +580,7 @@ function RoadNode({
   )
 }
 
-function AccountSummary({ stats, failed, onRetry }: { stats: ProgressData | null; failed: boolean; onRetry: () => void }) {
-  const loading = !stats && !failed
+function AccountSummary({ stats, loading, failed, onRetry }: { stats: ProgressData | null; loading: boolean; failed: boolean; onRetry: () => void }) {
   const recent = stats?.recent_xp ?? []
   const week = recent.slice(-7).reduce((sum, day) => sum + day.xp, 0)
   const value = (content: ReactNode) => loading ? <span className="ui-skeleton progress__stat-skeleton" /> : content
@@ -602,7 +606,7 @@ function AccountSummary({ stats, failed, onRetry }: { stats: ProgressData | null
             </div>
             <div className="ui-stat">
               <span className="ui-stat__label">Total XP</span>
-              <span className="ui-stat__value">{value(stats?.total_xp.toLocaleString())}</span>
+              <span className="ui-stat__value">{value((stats?.total_xp ?? 0).toLocaleString())}</span>
               {stats && recent.length ? <span className="ui-stat__meta">{week.toLocaleString()} in the last 7 days</span> : null}
             </div>
             <div className="ui-stat">
@@ -612,7 +616,7 @@ function AccountSummary({ stats, failed, onRetry }: { stats: ProgressData | null
             </div>
             <div className="ui-stat">
               <span className="ui-stat__label">Answers</span>
-              <span className="ui-stat__value">{value(stats?.attempts.toLocaleString())}</span>
+              <span className="ui-stat__value">{value((stats?.attempts ?? 0).toLocaleString())}</span>
               {stats ? <span className="ui-stat__meta">{stats.correct_answers.toLocaleString()} correct</span> : null}
             </div>
           </div>
