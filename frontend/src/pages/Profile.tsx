@@ -61,6 +61,8 @@ export function Profile({ session, onError }: ProfileProps) {
   const [profile, setProfile] = useState<ProfileData | null>(() => token ? data.getCachedProfile(token) : null)
   const [stats, setStats] = useState<ProgressData | null>(() => data.getCachedProgress(studentId))
   const [courses, setCourses] = useState<Course[]>(() => withCourseTones(data.loadNotebook().courses))
+  // Phones and tablets open the system share sheet; computers copy to the clipboard instead.
+  const [nativeShare] = useState(() => typeof navigator !== 'undefined' && typeof navigator.share === 'function' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
   const [activeCourse, setActiveCourse] = useState(() => data.loadNotebook().activeCourse)
   const [social, setSocial] = useState<FriendsHub | null>(() => token ? data.getCachedFriends(token) : null)
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? data.getCachedStudyGroups(token) : null)
@@ -221,14 +223,14 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!profile?.friend_code) return
     const share = { title: 'Add me on bindet', text: `Add me on bindet with friend ID ${profile.friend_code}`, url: window.location.origin }
     try {
-      if (navigator.share) await navigator.share(share)
+      if (nativeShare) await navigator.share(share)
       else {
         await navigator.clipboard.writeText(`${share.text} — ${share.url}`)
-        say('Friend ID copied. Paste it into Messages, Instagram, or any app.')
+        say('Friend ID copied. Paste it into a message, email, or any app.')
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
-      say('Could not open sharing. You can copy the ID from the top of this page.', true)
+      say(nativeShare ? 'Could not open sharing. You can copy the ID from the top of this page.' : 'Could not copy your friend ID. You can copy it from the top of this page.', true)
     }
   }
 
@@ -937,7 +939,7 @@ export function Profile({ session, onError }: ProfileProps) {
                 </div>
               ) : null}
               <p className="profile__hint">
-                {session && profileMissing ? 'Finish setting up your profile to get a friend ID you can share.' : !session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : 'Share friend ID sends it with your phone’s share menu.'}
+                {session && profileMissing ? 'Finish setting up your profile to get a friend ID you can share.' : !session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : nativeShare ? 'Share friend ID sends it with your phone’s share menu.' : 'Share friend ID copies your ID and a link to bindet, ready to paste into a message.'}
               </p>
             </div>
           </section>
