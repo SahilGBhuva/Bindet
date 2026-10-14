@@ -897,10 +897,11 @@
   color: var(--color-green-text);
 }
 
+/* The readable green, with the surface color on it: at least 4.7:1 in both themes. */
 .lp-quiz__choice.is-correct .lp-quiz__key {
-  border-color: var(--color-green);
-  background: var(--color-green);
-  color: #ffffff;
+  border-color: var(--color-green-text);
+  background: var(--color-green-text);
+  color: var(--lp-surface);
 }
 
 .lp-quiz__choice.is-incorrect {
