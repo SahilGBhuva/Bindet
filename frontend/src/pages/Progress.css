@@ -537,7 +537,7 @@
   .progress__node-index { display: none; }
 
   /* Touch: chart legend toggles are 40px tall. */
-  .progress__legend-item { height: 40px; }
+  .progress__legend-item { height: 44px; }
 
   .progress__node-verdict {
     display: flex;

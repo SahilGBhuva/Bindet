@@ -664,14 +664,14 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   /* No hover on touch: pin and delete are always shown, at a 44px tap size. */
   .tutor__list-actions { right: 4px; gap: 0; }
   .tutor__list-action { width: 44px; height: 44px; opacity: 1; }
-  .tutor__search input { height: 40px; font-size: 16px; }
+  .tutor__search input { height: 44px; font-size: 16px; }
 
   /* One row, like a mobile chat app: menu, title, settings chip. */
   .tutor__head { position: relative; flex-wrap: nowrap; gap: 4px; min-height: 52px; padding: 6px 10px 6px 6px; border-bottom: 1px solid var(--color-border); }
   .tutor__head::after { display: none; }
   .tutor__title { flex: 1 1 0; }
   .tutor__title-tools { display: none; }
-  .tutor__head-icon { width: 40px; height: 40px; }
+  .tutor__head-icon { width: 44px; height: 44px; }
   /* The sheet drops down from the head, over the thread. */
   .tutor__controls.is-sheet {
     position: absolute;
@@ -689,7 +689,7 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
     animation: ui-pop var(--duration-base) var(--ease-out);
   }
   .tutor__controls.is-sheet .tutor__mode { display: flex; width: 100%; }
-  .tutor__controls.is-sheet .tutor__mode .ui-segmented__item { flex: 1; justify-content: center; min-height: 40px; padding-inline: 10px; font-size: var(--text-sm); }
+  .tutor__controls.is-sheet .tutor__mode .ui-segmented__item { flex: 1; justify-content: center; min-height: 44px; padding-inline: 10px; font-size: var(--text-sm); }
   .tutor__controls.is-sheet .tutor__context { display: grid; gap: 8px; }
   .tutor__controls.is-sheet .tutor__context .ui-select { width: 100%; max-width: none; height: 44px; font-size: 16px; }
 
@@ -698,8 +698,8 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .tutor-message.is-user .tutor-message__body { max-width: 85%; }
   .tutor-message__avatar { width: 26px; height: 26px; }
   .tutor-actions { margin-left: -9px; }
-  .tutor-actions__icon { width: 40px; height: 40px; }
-  .tutor-followups__chip { min-height: 40px; }
+  .tutor-actions__icon { width: 44px; height: 44px; }
+  .tutor-followups__chip { min-height: 44px; }
 
   /* Phones: the composer stays docked at the bottom, with the starters above it. */
   .tutor__welcome { gap: 8px; padding-top: 20px; }
@@ -715,11 +715,11 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .tutor__input textarea { padding: 13px 16px 2px; }
   .tutor__camera { display: grid; }
   .tutor__tool,
-  .tutor__send { width: 40px; height: 40px; }
+  .tutor__send { width: 44px; height: 44px; }
   .tutor__tools { gap: 2px; padding: 2px 6px 6px; }
   .tutor__disclaimer { margin-top: 6px; }
   .tutor__attachments li { max-width: 100%; }
-  .tutor__attachments button { width: 40px; height: 40px; }
+  .tutor__attachments button { width: 44px; height: 44px; }
   .tutor-message__images img { width: 96px; height: 96px; }
 }
 

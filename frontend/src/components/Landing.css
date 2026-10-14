@@ -530,7 +530,9 @@
   .lp-footer { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
   .lp-footer nav { gap: 0 8px; }
   .lp-footer nav button,
-  .lp-footer nav a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 6px; }
+  .lp-footer nav a { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding-inline: 6px; }
+  /* Its 12px text is shorter than the rest, so the invisible padding is a little taller. */
+  .lp-product__strip .lp-textlink { padding-block: 13px; margin-block: -13px; }
   .lp-mark { font-size: var(--text-xs); }
 }
 

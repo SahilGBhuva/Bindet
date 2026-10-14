@@ -711,7 +711,7 @@
   .practice__bar-top { top: var(--phone-topbar, 0px); margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0; padding: var(--space-3) var(--space-4); }
   .practice__question { padding: var(--space-4); }
   .practice__nav-item { width: 44px; height: 44px; }
-  .practice__segmented .ui-segmented__item { min-height: 40px; }
+  .practice__segmented .ui-segmented__item { min-height: 44px; }
   .practice__minutes-input,
   .practice__instructions .ui-input { min-height: 44px; font-size: 16px; }
   .practice__bar-actions .tools__focus-toggle,

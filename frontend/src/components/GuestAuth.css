@@ -284,12 +284,12 @@
   .auth-card__mascot--corner { width: 56px; }
   .auth-card__top { margin-bottom: 40px; }
 
-  /* Touch: 16px fields (no iOS zoom on focus) and 40px tall text actions. */
+  /* Touch: 16px fields (no iOS zoom on focus) and 44px tall text actions. */
   .auth-input { height: 46px; font-size: 16px; }
   .auth-code { height: 58px; font-size: 26px; }
   .auth-links { flex-wrap: wrap; }
   .auth-google__btn { min-height: 48px; font-size: 16px; }
-  .auth-pass button { top: 3px; height: 40px; }
+  .auth-pass button { top: 1px; height: 44px; }
   .auth-text-btn { min-height: 44px; }
   /* The Log in / Sign up switch is a full 44px target, not just its line of text. */
   .auth-switch .auth-text-btn { display: inline-flex; align-items: center; min-width: 44px; padding: 0 4px; }
