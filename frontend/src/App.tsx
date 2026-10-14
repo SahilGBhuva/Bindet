@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react'
-import { AuthGate } from './components/AuthGate'
+// AppPrompts first: its stylesheet comes before the sidebar's, as it always has.
 import { UpdatePrompt } from './components/AppPrompts'
+import { AuthGate } from './components/AuthGate'
 import { loadAuthSession } from './lib/auth'
-import { BrandMark } from './lib/SiteSidebar'
+import { BrandMark } from './lib/BrandMark'
 // The signed-in app's stylesheets stay in the entry stylesheet, in their original order,
 // so moving its code into a lazy chunk changes nothing about the cascade.
 import './components/CommandPalette.css'

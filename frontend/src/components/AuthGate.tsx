@@ -29,7 +29,7 @@ import {
   type AuthSession,
 } from '../lib/auth'
 import { AuthContext } from '../lib/AuthContext'
-import { BrandMark } from '../lib/SiteSidebar'
+import { BrandMark } from '../lib/BrandMark'
 import './GuestAuth.css'
 
 type Mode = 'login' | 'signup' | 'reset'
