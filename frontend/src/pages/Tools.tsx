@@ -2150,7 +2150,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               )}
             </div>
           ) : (<>
-          <div className="ui-tabs tools__unit-tabs" role="tablist" aria-label={`Units in ${activeCourse}`}>
+          <div className="ui-tabs tools__unit-tabs">
+            {/* Only the unit tabs belong to the tablist; "Add unit" sits beside it. */}
+            <div className="tools__unit-tablist" role="tablist" aria-label={`Units in ${activeCourse}`}>
             {units.map((item) =>
               item === renamingUnit ? (
                 <form key={item} className="tools__unit-form" onSubmit={commitRename}>
@@ -2193,6 +2195,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                 </button>
               ),
             )}
+            </div>
             {addingUnit ? (
               <form className="tools__unit-form" onSubmit={addUnit}>
                 <input

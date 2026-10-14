@@ -200,6 +200,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       document.removeEventListener('pointerdown', onPointer)
     }
   }, [settingsSheet, closeSettings])
+  // On phones the settings open as a modal sheet: keep Tab inside it while it is open.
+  useDrawer({ open: settingsSheet, onClose: closeSettings, panel: settingsPanel, returnFocus: settingsChip, autoFocus: false })
   const [dragActive, setDragActive] = useState(false)
   const [notice, setNotice] = useState('')
   const stopRef = useRef<(() => void) | null>(null)
@@ -693,7 +695,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   }, [review, stats, tasks, notebook, now, toneOf])
 
   const generic: Starter[] = unit
-    ? [{ key: 'g1', kicker: 'Explain', label: `Explain ${unit} like I'm seeing it for the first time`, prompt: `Explain ${unit} like I'm seeing it for the first time` }, { key: 'g4', kicker: 'Study guide', label: `Make a study guide for ${unit}`, prompt: `Make me a study guide for ${unit}` }, { key: 'g2', kicker: 'Quiz', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', kicker: 'Avoid mistakes', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
+    ? [{ key: 'g1', kicker: 'Explain', label: `Explain ${unit} like I’m seeing it for the first time`, prompt: `Explain ${unit} like I’m seeing it for the first time` }, { key: 'g4', kicker: 'Study guide', label: `Make a study guide for ${unit}`, prompt: `Make me a study guide for ${unit}` }, { key: 'g2', kicker: 'Quiz', label: `Quiz me with three questions on ${unit}`, prompt: `Quiz me with three questions on ${unit}` }, { key: 'g3', kicker: 'Avoid mistakes', label: `What are the most common mistakes in ${unit}?`, prompt: `What are the most common mistakes in ${unit}?` }]
     : [{ key: 'g1', kicker: 'Plan', label: 'Help me make a study plan for this week', prompt: 'Help me make a study plan for this week' }, { key: 'g2', kicker: 'Explain', label: 'Explain a concept step by step', prompt: 'Explain a concept step by step' }, { key: 'g3', kicker: 'Check-in', label: 'Check my understanding with a few questions', prompt: 'Check my understanding with a few questions' }]
   const startersShown = (starters.length ? [...starters, ...generic] : generic)
     .filter((item, index, all) => all.findIndex((other) => other.label === item.label) === index)
@@ -834,6 +836,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
             className={`tutor__controls${settingsSheet ? ' is-sheet' : ''}`}
             role={settingsSheet ? 'dialog' : undefined}
             aria-label={settingsSheet ? 'Chat settings' : undefined}
+            aria-modal={settingsSheet || undefined}
           >
             {settingsSheet ? <p className="tutor__sheet-label" aria-hidden="true">Study mode</p> : null}
             <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">

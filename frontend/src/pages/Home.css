@@ -358,6 +358,24 @@
   cursor: pointer;
   transition: opacity var(--duration-fast) var(--ease-standard);
 }
+/* Each folded slice shows its name, read bottom to top along the spine. */
+.home-fold__slice-name {
+  position: absolute;
+  inset: 12px 0 12px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  text-align: start;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
 .home-fold__card:has(.home-fold__slice:hover) { background: var(--color-surface-hover); }
 .home-fold__slice:focus-visible { outline: 2px solid var(--color-focus); outline-offset: -4px; }
 

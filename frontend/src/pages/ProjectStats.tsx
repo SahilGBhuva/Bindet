@@ -48,7 +48,7 @@ const NOTIFY_MESSAGE: Record<Pace, string> = {
   stalled: 'Nothing has moved recently. Please check your tasks and update their status.',
   on_track: "We're on track. Keep going and mark tasks done as you finish them.",
   done: 'Everything is finished. Great work, everyone.',
-  not_started: "Let's get started. Please check the board and pick up your tasks.",
+  not_started: "Let’s get started. Please check the board and pick up your tasks.",
 }
 
 const WORKRATE_MESSAGE = 'We need to pick up the pace. Please aim to finish at least one more task this week and update your task status as you go.'
@@ -534,7 +534,7 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
     setPlan(null)
     setResult({
       ok: failed === 0,
-      text: `Marked ${plural(done, 'task')} urgent.${failed ? ` ${failed} could not be updated.` : ''}${plan.locked ? ` ${plan.locked} you can't edit ${plan.locked === 1 ? 'was' : 'were'} left as is.` : ''}`,
+      text: `Marked ${plural(done, 'task')} urgent.${failed ? ` ${failed} could not be updated.` : ''}${plan.locked ? ` ${plan.locked} you can’t edit ${plan.locked === 1 ? 'was' : 'were'} left as is.` : ''}`,
     })
     if (done) onChanged()
   }
@@ -569,7 +569,7 @@ function PaceLine({ data, groupId, token, isOwner, onChanged }: { data: GroupAna
             <>
               <p className="pst-inline__text">
                 Mark {plural(plan.ids.length, 'open task')} that {plan.ids.length === 1 ? 'is' : 'are'} overdue or due within 3 days as urgent?
-                {plan.locked ? ` (${plan.locked} more you can't edit will be skipped.)` : ''}
+                {plan.locked ? ` (${plan.locked} more you can’t edit will be skipped.)` : ''}
               </p>
               <div className="pst-inline__actions">
                 <button type="button" className={`ui-button ui-button--primary ui-button--sm ${busy ? 'is-busy' : ''}`} disabled={busy} onClick={applyUrgent}>Mark urgent</button>

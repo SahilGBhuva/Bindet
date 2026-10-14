@@ -674,14 +674,14 @@
   /* Touch: 40px targets for the tiny tools, tabs and task bars. */
   .tasks-icon-button,
   .tasks-icon-button.is-tiny,
-  .tasks-box__head .tasks-icon-button { width: 40px; height: 40px; }
+  .tasks-box__head .tasks-icon-button { width: 44px; height: 44px; }
   .tasks-box__head .tasks-icon-button { margin-block: -6px; }
-  .tasks-notice .tasks-icon-button { width: 40px; height: 40px; margin: -8px -8px -8px 0; }
-  .tasks-switch { min-width: 44px; height: 40px; }
+  .tasks-notice .tasks-icon-button { width: 44px; height: 44px; margin: -8px -8px -8px 0; }
+  .tasks-switch { min-width: 44px; height: 44px; }
   /* The drawn inline fields keep their look; they just get a finger-sized hit area. */
   .task-title-input,
-  .task-location__input { min-height: 40px; }
-  .tasks-tab { min-height: 40px; }
+  .task-location__input { min-height: 44px; }
+  .tasks-tab { min-height: 44px; }
   .task-card__main { min-height: 44px; padding: 10px 12px; }
   /* The drawn pills stay small; an invisible margin makes them easy to tap. */
   .task-pill { position: relative; }
@@ -691,9 +691,9 @@
   .task-details,
   .task-inline-add input,
   .task-comment-form .ui-textarea { font-size: 16px; }
-  .task-inline-add input { height: 40px; }
+  .task-inline-add input { height: 44px; }
   .task-checklist li,
-  .task-links li { min-height: 40px; }
+  .task-links li { min-height: 44px; }
 
   .tasks-boxes { flex-direction: column; align-items: stretch; }
   .tasks-box,

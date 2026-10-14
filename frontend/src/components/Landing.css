@@ -26,6 +26,10 @@
   --lp-shadow-paper: 0 1px 2px rgba(24, 22, 16, .05), 0 12px 28px -16px rgba(24, 22, 16, .2);
   --lp-shadow-object: 0 0 0 1px var(--lp-line), 0 30px 60px -32px rgba(24, 22, 16, .24), 0 80px 140px -80px rgba(24, 22, 16, .22);
   --lp-ease: cubic-bezier(.2, .7, .1, 1);
+  /* Study artifacts: a sheet of paper on a desk. Dark theme dims both so the ink tokens stay readable. */
+  --lp-paper: #fffefb;
+  --lp-desk-top: #f4f2ec;
+  --lp-desk-bottom: #f0ede6;
 
   position: relative;
   min-height: 100vh;
@@ -39,6 +43,9 @@
 }
 
 :root[data-theme="dark"] .lp {
+  --lp-paper: var(--color-surface-raised);
+  --lp-desk-top: var(--color-surface-sunken);
+  --lp-desk-bottom: var(--color-bg);
   --lp-shadow-paper: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 28px -16px rgba(0, 0, 0, .6);
   --lp-shadow-object: 0 0 0 1px var(--lp-line), 0 30px 60px -32px rgba(0, 0, 0, .7), 0 80px 140px -80px rgba(0, 0, 0, .6);
 }
@@ -523,7 +530,9 @@
   .lp-footer { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
   .lp-footer nav { gap: 0 8px; }
   .lp-footer nav button,
-  .lp-footer nav a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 6px; }
+  .lp-footer nav a { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding-inline: 6px; }
+  /* Its 12px text is shorter than the rest, so the invisible padding is a little taller. */
+  .lp-product__strip .lp-textlink { padding-block: 13px; margin-block: -13px; }
   .lp-mark { font-size: var(--text-xs); }
 }
 

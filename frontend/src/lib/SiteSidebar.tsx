@@ -665,8 +665,8 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             {editing ? <p className="bindit-rail__hint">Drag <span aria-hidden="true">⋮⋮</span> to move a section, or use the arrows. The eye hides one.</p> : null}
 
             <div className="bindit-rail__footer">
-              <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} aria-pressed={editing} onClick={() => setEditing((value) => !value)} aria-label={editing ? 'Done editing the sidebar' : 'Edit the sidebar'}>
-                <span className="bindit-rail__lock-state">
+              <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} onClick={() => setEditing((value) => !value)}>
+                <span className="bindit-rail__lock-state" aria-hidden="true">
                   <small>{editing ? 'Editing' : 'Locked'}</small>
                   <span className="bindit-rail__lock-box">
                     <svg viewBox="0 0 16 16" aria-hidden="true">
@@ -675,7 +675,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                     </svg>
                   </span>
                 </span>
-                <span className="bindit-rail__lock-action">{editing ? 'Done' : 'Edit sidebar'}</span>
+                <span className="bindit-rail__lock-action">{editing ? <>Done<span className="sr-only"> editing the sidebar</span></> : 'Edit sidebar'}</span>
               </button>
               {editing ? (
                 <button type="button" className="bindit-rail__mini" onClick={() => updateLayout(() => DEFAULT_LAYOUT)} aria-label="Reset sidebar layout" title="Reset layout">

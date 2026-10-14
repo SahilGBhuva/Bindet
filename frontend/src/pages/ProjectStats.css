@@ -607,11 +607,11 @@
   /* Touch: the drawn text actions and chips keep their look with 40px tall targets. */
   .pst-link,
   .pst-textbtn,
-  .pst-reports-toggle { min-height: 40px; }
+  .pst-reports-toggle { min-height: 44px; }
   .pst-group__select,
-  .pst-view { min-height: 40px; font-size: var(--text-sm); }
+  .pst-view { min-height: 44px; font-size: var(--text-sm); }
   .pst-group__select { padding-inline: 10px; }
-  .pst-view select { align-self: stretch; min-height: 40px; }
+  .pst-view select { align-self: stretch; min-height: 44px; }
   /* Selects at 16px so iOS does not zoom in when one is opened. */
   .pst-group__select,
   .pst-view select { font-size: 16px; }
