@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
-import { LivePreview } from './demo/LivePreview'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Binding } from './landing/Binding'
 import { Capture } from './landing/Capture'
 import { Mastery, Together } from './landing/Mastery'
 import { Constellation } from './landing/Constellation'
 import { TutorStory } from './landing/TutorStory'
-import { BrandMark } from '../lib/SiteSidebar'
+import { BrandMark } from '../lib/BrandMark'
 import { prefersReducedMotion, useReveal, useScrollProgress } from './landing/motion'
 import { FlashcardStage, QuizStage } from './landing/Practice'
 import './Landing.css'
 import './landing/sections.css'
+
+// The hero demo runs the real app pages (Study, Progress, Profile), which are most of the
+// landing page's code. They live in their own chunk, fetched only once the headline has
+// painted and the page is idle (when HeroProduct mounts the demo into its reserved space),
+// so on a slow phone connection they never compete with the first paint.
+const LivePreview = lazy(() => import('./demo/LivePreview').then((module) => ({ default: module.LivePreview })))
 
 /*
  * The logged-out landing page. It tells one visual story as you scroll:
@@ -91,7 +96,11 @@ function HeroProduct({ onLocked }: { onLocked: (action: string) => void }) {
         </figcaption>
         <div className="lp-product__stage" ref={stage} style={{ height: size.height * scale }}>
           <div className="lp-product__scaler" style={{ width: size.width, height: size.height, transform: `scale(${scale})` }}>
-            {ready ? <LivePreview key={phone ? 'phone' : 'desktop'} interactive={!phone} width={size.width} height={size.height} onLockedAction={onLocked} /> : null}
+            {ready ? (
+              <Suspense fallback={null}>
+                <LivePreview key={phone ? 'phone' : 'desktop'} interactive={!phone} width={size.width} height={size.height} onLockedAction={onLocked} />
+              </Suspense>
+            ) : null}
           </div>
         </div>
       </figure>

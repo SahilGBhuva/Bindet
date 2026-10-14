@@ -8,12 +8,14 @@ import { defineConfig, type Plugin } from 'vite'
  * Fills in public/sw.js for this build: the files to keep for offline use and a
  * version taken from their contents, so each deploy that changes anything installs
  * a new cache (and offers the "new version" prompt). Only the app shell is listed:
- * the entry, the Study page and what it loads (offline flashcards, math) and the
- * static public files. Other
+ * the entry, the signed-in app (a lazy chunk so the landing page never loads it), the
+ * Study page and what it loads (offline flashcards, math) and the static public files. Other
  * hashed chunks are cached the first time they load.
  */
 function serviceWorkerManifest(): Plugin {
   const OFFLINE_PAGES = [/\/src\/pages\/Tools\.tsx$/]
+  // Lazy chunks the app shell needs offline, with what they import statically (not their own lazy pages).
+  const SHELL_CHUNKS = [/\/src\/SignedInApp\.tsx$/]
   const PUBLIC_SHELL = [
     '/index.html',
     '/privacy/index.html',
@@ -51,7 +53,8 @@ function serviceWorkerManifest(): Plugin {
         if (chunk.type !== 'chunk') continue
         const offlinePage = chunk.moduleIds.some((id) => OFFLINE_PAGES.some((page) => page.test(id)))
         // The Study page loads math rendering on demand: flashcards with formulas need it offline too.
-        if (chunk.isEntry || offlinePage) visit(chunk.fileName, offlinePage)
+        const shellChunk = chunk.moduleIds.some((id) => SHELL_CHUNKS.some((shell) => shell.test(id)))
+        if (chunk.isEntry || offlinePage || shellChunk) visit(chunk.fileName, offlinePage)
       }
       // Fonts the shell's stylesheets use (woff2 only: every supported browser takes it).
       for (const item of Object.values(bundle)) if (/\.woff2$/.test(item.fileName)) files.add(item.fileName)

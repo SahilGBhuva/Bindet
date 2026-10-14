@@ -29,7 +29,7 @@ import {
   type AuthSession,
 } from '../lib/auth'
 import { AuthContext } from '../lib/AuthContext'
-import { BrandMark } from '../lib/SiteSidebar'
+import { BrandMark } from '../lib/BrandMark'
 import './GuestAuth.css'
 
 type Mode = 'login' | 'signup' | 'reset'
@@ -58,9 +58,33 @@ function needsConfirmation(error: unknown) {
 
 // The landing page (and its demo and 3D scene) is only downloaded by signed-out visitors.
 // Without a saved session the download starts as soon as this module runs, in parallel with the first render.
-const loadLanding = () => import('./Landing').then((module) => ({ default: module.Landing }))
-const landingRequest = typeof window !== 'undefined' && !loadAuthSession() ? loadLanding() : null
-const Landing = lazy(() => landingRequest ?? loadLanding())
+// Once downloaded, the page renders directly instead of through Suspense: React holds back a
+// Suspense reveal for up to 300 ms after its fallback shows, which delayed the headline.
+type LandingModule = typeof import('./Landing')
+let landingModule: LandingModule | null = null
+let landingLoad: Promise<LandingModule> | null = null
+const loadLanding = () => {
+  landingLoad ??= import('./Landing').then((module) => (landingModule = module))
+  // Forget a failed download so the next attempt tries again.
+  landingLoad.catch(() => { landingLoad = null })
+  return landingLoad
+}
+if (typeof window !== 'undefined' && !loadAuthSession()) void loadLanding().catch(() => undefined)
+const Landing = lazy(() => loadLanding().then((module) => ({ default: module.Landing })))
+
+/* True once the landing page's code is here (it starts downloading only when shown). */
+function useLandingLoaded(wanted: boolean) {
+  const [loaded, setLoaded] = useState(() => landingModule !== null)
+  useEffect(() => {
+    if (!wanted || loaded) return
+    let live = true
+    // On failure, fall back to the Suspense path, which surfaces the error as before.
+    const done = () => { if (live) setLoaded(true) }
+    loadLanding().then(done, done)
+    return () => { live = false }
+  }, [wanted, loaded])
+  return loaded
+}
 // A one-time notice left by Settings before it signed out (account deleted, or sign in again to delete).
 // Read once per page load, outside React, so a double render can't lose it.
 const initialNotice = typeof window !== 'undefined' ? takeAccountNotice() : null
@@ -138,6 +162,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Sign-up hit an email that already has an account: offer Log in and Reset password.
   const [taken, setTaken] = useState(false)
   const codeInput = useRef<HTMLInputElement>(null)
+  const landingLoaded = useLandingLoaded(!session && view === 'landing')
   const emailInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -877,9 +902,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <button className="auth-notice__close" type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>×</button>
           </div>
         ) : null}
-        <Suspense fallback={<div className="auth-backdrop" aria-hidden="true" />}>
-          <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
-        </Suspense>
+        {landingModule ? (
+          <landingModule.Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
+        ) : landingLoaded ? (
+          <Suspense fallback={<div className="auth-backdrop" aria-hidden="true" />}>
+            <Landing onSignUp={(reason) => openAuth('signup', reason)} onLogIn={() => openAuth('login')} />
+          </Suspense>
+        ) : (
+          <div className="auth-backdrop" aria-hidden="true" />
+        )}
       </>
     )
   }
