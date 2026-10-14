@@ -314,10 +314,16 @@ export function Profile({ session, onError }: ProfileProps) {
 
   async function beginQuest(friendId: string) {
     if (!session) return
+    // Only one quest runs per friend: starting another would just return the running one.
+    const running = social?.quests.find((quest) => quest.friend_id === friendId && quest.status === 'active')
+    if (running) {
+      say(`You already have a quest with ${running.friend_name}: ${running.progress_xp} of ${running.target_xp} XP so far.`)
+      return
+    }
     setSocialBusy(true)
     try {
-      await data.startFriendQuest(friendId, session.access_token)
-      say('Friend quest started. Earn 100 XP together this week.')
+      const quest = await data.startFriendQuest(friendId, session.access_token)
+      say(`Friend quest started. Earn ${quest?.target_xp ?? 100} XP together this week.`)
       await refreshSocial()
     } catch (error) {
       say(error instanceof Error ? error.message : 'Could not start that quest.', true)
