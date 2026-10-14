@@ -197,8 +197,11 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session || peopleQuery.trim().length < 2) return
     setSocialBusy(true)
     try {
-      setPeopleResults(await data.searchFriends(peopleQuery, session.access_token))
+      const found = await data.searchFriends(peopleQuery, session.access_token)
+      setPeopleResults(found)
       setSearched(peopleQuery.trim())
+      // An empty result used to look like the button did nothing.
+      if (!found.length) say(`No one found for “${peopleQuery.trim()}”. Try their username, or ask for their friend ID.`)
     } catch {
       say('Search is not working right now. Try again in a moment.', true)
     } finally {
