@@ -76,6 +76,9 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [canDelete, setCanDelete] = useState<boolean | null>(null)
+  // Quick taps send several saves: only the latest one may update or roll back the screen.
+  const goalSave = useRef(0)
+  const privacySave = useRef(0)
 
   // "#settings?help" (old Help links, the command palette) opens on Help & feedback.
   useEffect(() => {
@@ -198,13 +201,16 @@ export function Settings({ session, onSession }: SettingsProps) {
     if (!session || !profile || goal === profile.daily_goal) return
     const previous = profile
     const userId = session.user.id
+    const attempt = ++goalSave.current
     setLoaded({ userId, profile: { ...profile, daily_goal: goal }, ready: true })
     setGoalStatus('')
     try {
       const saved = await saveAccountProfile(session.access_token, { username: previous.username, display_name: previous.display_name, daily_goal: goal })
+      if (attempt !== goalSave.current) return
       setLoaded((value) => value?.userId === userId ? { ...value, profile: saved } : value)
       setGoalStatus(`Daily goal set to ${goal} XP.`)
     } catch {
+      if (attempt !== goalSave.current) return
       setLoaded((value) => value?.userId === userId ? { ...value, profile: previous } : value)
       setGoalStatus('Could not change your daily goal. It is back to what it was.')
     }
@@ -215,11 +221,14 @@ export function Settings({ session, onSession }: SettingsProps) {
     const previous = profile
     const userId = session.user.id
     const next = { ...profile, [field]: !(profile[field] ?? true) }
+    const attempt = ++privacySave.current
     setLoaded({ userId, profile: next, ready: true })
     setPrivacyStatus('')
     try {
       await saveSocialPrivacy(next.discoverable, next.allow_friend_requests, session.access_token, next.allow_nudges ?? true)
     } catch {
+      // Each save sends all three switches, so a later save already carries this one.
+      if (attempt !== privacySave.current) return
       setLoaded((value) => value?.userId === userId ? { ...value, profile: previous } : value)
       setPrivacyStatus('Could not save that change. Try again.')
     }
