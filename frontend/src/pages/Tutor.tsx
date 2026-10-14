@@ -200,6 +200,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       document.removeEventListener('pointerdown', onPointer)
     }
   }, [settingsSheet, closeSettings])
+  // On phones the settings open as a modal sheet: keep Tab inside it while it is open.
+  useDrawer({ open: settingsSheet, onClose: closeSettings, panel: settingsPanel, returnFocus: settingsChip, autoFocus: false })
   const [dragActive, setDragActive] = useState(false)
   const [notice, setNotice] = useState('')
   const stopRef = useRef<(() => void) | null>(null)
@@ -834,6 +836,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
             className={`tutor__controls${settingsSheet ? ' is-sheet' : ''}`}
             role={settingsSheet ? 'dialog' : undefined}
             aria-label={settingsSheet ? 'Chat settings' : undefined}
+            aria-modal={settingsSheet || undefined}
           >
             {settingsSheet ? <p className="tutor__sheet-label" aria-hidden="true">Study mode</p> : null}
             <div className="ui-segmented tutor__mode" role="group" aria-label="Study mode">
