@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -83,6 +84,11 @@ export default defineConfig({
     // The CSP allows fonts only from this origin (font-src 'self'), so fonts such as
     // KaTeX's must be emitted as files, never inlined as data: URLs.
     assetsInlineLimit: (filePath) => (/\.(woff2?|ttf|otf|eot)$/i.test(filePath) ? false : undefined),
+  },
+  test: {
+    // Unit tests cover pure logic in src/lib, so they run in plain Node (no DOM).
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
   },
   server: {
     host: '127.0.0.1',
