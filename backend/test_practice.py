@@ -103,6 +103,19 @@ class ScoringTests(PracticeTestCase):
         self.assertEqual(len(every_unit), 8)
         self.assertEqual(self.client.get("/api/practice/scopes").status_code, 401)
 
+    def test_a_round_pool_has_each_front_once(self):
+        now = datetime.now(timezone.utc)
+        with database.engine().begin() as connection:
+            for index, front in enumerate(["Cells question 0", "  cells QUESTION 0?", "What is a ribosome?"]):
+                connection.execute(insert(flashcards.cards).values(
+                    id=f"dup-{index}", owner_id=ALEX, note_id="note-dup", course="Bio", unit="Genes",
+                    front=front, back=f"answer {index}", topic="genes", front_key=f"dup-{index}", position=10 + index, created_at=now))
+        every_unit = self.client.get("/api/practice/cards", params={"course": "Bio"}, headers=headers("alex")).json()["cards"]
+        fronts = [card["front"] for card in every_unit]
+        self.assertEqual(len(every_unit), 9)  # 8 originals + the ribosome card; both copies of "question 0" dropped
+        self.assertEqual(fronts.count("Cells question 0"), 1)
+        self.assertNotIn("dup-0", [card["id"] for card in every_unit])
+
 
 class RoundValidationTests(PracticeTestCase):
     def test_server_derives_the_score(self):

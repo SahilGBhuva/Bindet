@@ -6,7 +6,7 @@ import type { AuthSession } from '../lib/auth'
 import {
   CHALLENGE_MAX_CARDS, CHOICE_MIN_CARDS, ROUND_LENGTHS, STREAK_BONUS_FROM,
   createChallenge, declineChallenge, getBests, getChallenge, getChallenges, getPracticeCards, getPracticeScopes, getRecentRounds,
-  lengthLabel, modeLabel, scopeLabel, scoreAnswers, submitChallengeResult, submitRound,
+  avoidOpeningWith, lengthLabel, modeLabel, scopeLabel, scoreAnswers, submitChallengeResult, submitRound,
   type Challenge, type PracticeBest, type PracticeRound, type PracticeScope, type RoundLength, type RoundMode, type RoundResult,
 } from '../lib/practiceLab'
 import { loadNotebook, withCourseTones } from '../lib/session'
@@ -713,7 +713,9 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
   }, [game, results, token, nothing, attempt])
 
   function again(deck: DeckCard[], source: Game['source']) {
-    const order = shuffle(deck)
+    // The card on screen when the round ended (answered, or cut off by the clock) never opens the next one.
+    const lastShown = game.deck[Math.min(results.length, game.deck.length - 1)]
+    const order = avoidOpeningWith(shuffle(deck), [lastShown, game.deck[results.length - 1]])
     onAgain({ ...game, source, deck: order, choices: game.mode === 'choice' ? buildChoices(order, game.pool) : [], startedAt: Date.now(), challenge: undefined })
   }
 

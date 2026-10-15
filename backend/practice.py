@@ -32,6 +32,7 @@ from sqlalchemy import (
 
 import database
 import flashcards
+from questions import question_fingerprint
 
 practice_metadata = MetaData()
 
@@ -185,14 +186,26 @@ def scopes(owner_id: str) -> list[dict]:
 
 
 def cards_for(owner_id: str, course: str, unit: str = "") -> list[dict]:
-    """The student's own saved cards for a unit, or every unit of a course when unit is ""."""
+    """The student's own saved cards for a unit, or every unit of a course when unit is "".
+
+    Cards with the same front (ignoring case, spacing and punctuation), e.g. the same
+    fact made from two notes, appear once, so a round never asks the same thing twice.
+    """
     init_practice()
     cards = flashcards.cards
     with database.engine().connect() as connection:
         rows = connection.execute(select(cards.c.id, cards.c.unit, cards.c.front, cards.c.back).where(
             *_scope_filter(owner_id, course, unit),
         ).order_by(cards.c.unit, cards.c.position, cards.c.created_at, cards.c.id)).mappings().all()
-    return [dict(row) for row in rows]
+    seen: set[str] = set()
+    result: list[dict] = []
+    for row in rows:
+        fingerprint = question_fingerprint(row["front"])
+        if fingerprint and fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        result.append(dict(row))
+    return result
 
 
 def _owned_cards(connection, owner_id: str, course: str, unit: str, card_ids: list[str]) -> list[dict]:

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearPracticeDraft, formatClock, loadPracticeDraft, savePracticeDraft, suggestedMinutes } from './practice'
-import { lengthLabel, scopeLabel, scoreAnswers } from './practiceLab'
+import { avoidOpeningWith, lengthLabel, scopeLabel, scoreAnswers } from './practiceLab'
 
 // practiceLab imports api.ts, which listens on window when it loads (vi.hoisted runs before imports).
 vi.hoisted(() => vi.stubGlobal('window', new EventTarget()))
@@ -90,5 +90,22 @@ describe('Practice lab labels', () => {
     expect(lengthLabel(300)).toBe('5 min')
     expect(scopeLabel('Biology', 'Cells')).toBe('Biology · Cells')
     expect(scopeLabel('Biology', '')).toBe('Biology · All units')
+  })
+})
+
+describe('avoidOpeningWith (Play again)', () => {
+  const card = (front: string) => ({ id: front, front })
+  const [a, b, c] = [card('A'), card('B'), card('C')]
+
+  it('never opens the new round on the card the last round ended on', () => {
+    expect(avoidOpeningWith([c, a, b], [c]).map((item) => item.front)).toEqual(['A', 'C', 'B'])
+    expect(avoidOpeningWith([c, b, a], [c, b]).map((item) => item.front)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('keeps an order that already opens on another card, and a one-card deck', () => {
+    expect(avoidOpeningWith([a, b, c], [c])).toEqual([a, b, c])
+    expect(avoidOpeningWith([c], [c])).toEqual([c])
+    expect(avoidOpeningWith([], [c])).toEqual([])
+    expect(avoidOpeningWith([a, b], [undefined])).toEqual([a, b])
   })
 })

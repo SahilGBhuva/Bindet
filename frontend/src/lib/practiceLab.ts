@@ -88,6 +88,21 @@ export function scoreAnswers(results: boolean[]) {
   return { score, correct, total: results.length, bestStreak: best }
 }
 
+/*
+ * A new round's order that doesn't open on a card the student just saw (the card the last
+ * round ended on). The first card that wasn't just seen swaps to the front; the rest of the
+ * order is kept. Cards are matched on their front, so a replayed challenge deck matches too.
+ */
+export function avoidOpeningWith<T extends { front: string }>(order: T[], justSeen: (T | undefined)[]): T[] {
+  const seen = new Set(justSeen.filter((card): card is T => !!card).map((card) => card.front))
+  if (!order.length || !seen.has(order[0].front)) return order
+  const swap = order.findIndex((card) => !seen.has(card.front))
+  if (swap <= 0) return order
+  const copy = [...order]
+  ;[copy[0], copy[swap]] = [copy[swap], copy[0]]
+  return copy
+}
+
 export function lengthLabel(seconds: number) {
   return seconds === 60 ? '1 min' : `${Math.round(seconds / 60)} min`
 }
