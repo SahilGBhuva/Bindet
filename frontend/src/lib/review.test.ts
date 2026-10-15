@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CardReview, ReviewGrade } from './api'
-import { formatInterval, gradePreview, relativeDue, spokenInterval, stateName } from './review'
+import { formatInterval, gradePreview, pendingGrades, relativeDue, spokenInterval, stateName, withFailedGrade, withoutCard } from './review'
 import { nextValues, previewFor, type SchedulerState } from './reviewSchedule'
 
 /*
@@ -142,5 +142,37 @@ describe('gradePreview and stateName', () => {
     expect(stateName(null)).toBe('new')
     expect(stateName(0.5)).toBe('learning')
     expect(stateName(1)).toBe('review')
+  })
+})
+
+describe('pendingGrades (Review more waits for grades still saving)', () => {
+  it('settles only after every tracked grade has finished, saved or not', async () => {
+    const grades = pendingGrades()
+    let save!: () => void
+    let fail!: (error: Error) => void
+    void grades.track(new Promise<void>((resolve) => { save = resolve }))
+    grades.track(new Promise<void>((_, reject) => { fail = reject })).catch(() => {})
+    let settled = false
+    const waiting = grades.settled().then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    save()
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    fail(new Error('offline'))
+    await waiting
+    expect(settled).toBe(true)
+    expect(grades.size).toBe(0)
+  })
+})
+
+describe('failed grades (kept for Retry, never re-queued)', () => {
+  it('keeps one grade per card, the newest', () => {
+    const card = { id: 'a' }
+    let failed = withFailedGrade([], card, 'again')
+    failed = withFailedGrade(failed, { id: 'b' }, 'good')
+    failed = withFailedGrade(failed, card, 'easy')
+    expect(failed.map((item) => [item.card.id, item.grade])).toEqual([['b', 'good'], ['a', 'easy']])
+    expect(withoutCard(failed, 'a').map((item) => item.card.id)).toEqual(['b'])
   })
 })

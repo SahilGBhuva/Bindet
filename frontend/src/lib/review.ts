@@ -19,6 +19,37 @@ export function announceReviewChange() {
   window.dispatchEvent(new Event(REVIEW_CHANGED_EVENT))
 }
 
+/*
+ * Grades still being saved. Review mode waits on settled() before asking for more cards,
+ * so a card graded a moment ago can't come back in the next queue.
+ */
+export function pendingGrades() {
+  const inFlight = new Set<Promise<unknown>>()
+  return {
+    track<T>(promise: Promise<T>): Promise<T> {
+      inFlight.add(promise)
+      const forget = () => { inFlight.delete(promise) }
+      promise.then(forget, forget)
+      return promise
+    },
+    settled(): Promise<void> {
+      return Promise.allSettled([...inFlight]).then(() => undefined)
+    },
+    get size() { return inFlight.size },
+  }
+}
+
+/* A grade that didn't save, kept to retry. One per card: a newer grade replaces an older one. */
+export type FailedGrade<C extends { id: string }> = { card: C; grade: ReviewGrade }
+
+export function withFailedGrade<C extends { id: string }>(failed: FailedGrade<C>[], card: C, grade: ReviewGrade): FailedGrade<C>[] {
+  return [...withoutCard(failed, card.id), { card, grade }]
+}
+
+export function withoutCard<C extends { id: string }>(failed: FailedGrade<C>[], cardId: string): FailedGrade<C>[] {
+  return failed.filter((item) => item.card.id !== cardId)
+}
+
 /* "10m", "12h", "1d", "3w", "4mo", "1y": compact, for the grade buttons. */
 export function formatInterval(days: number) {
   const minutes = Math.round(days * 1440)

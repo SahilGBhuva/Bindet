@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { ReviewCard, ReviewGrade, ReviewSummary } from '../lib/api'
 import { useAnnounce } from '../lib/announce'
 import { useData } from '../lib/dataSource'
-import { announceReviewChange, formatInterval, GRADE_LABELS, GRADES, gradePreview, relativeDue, spokenInterval } from '../lib/review'
+import { announceReviewChange, formatInterval, GRADE_LABELS, GRADES, gradePreview, pendingGrades, relativeDue, spokenInterval, withFailedGrade, withoutCard, type FailedGrade } from '../lib/review'
 import { MathText } from '../components/math/Math'
 
 /*
@@ -12,7 +12,9 @@ import { MathText } from '../components/math/Math'
  * the interval it would give, computed from the card's schedule (lib/reviewSchedule.ts).
  *
  * Grading is optimistic: the next card shows at once and the grade is saved behind it.
- * If saving fails, the card goes back to the end of the queue and a small notice says so.
+ * If saving fails, a notice says so and offers Retry, which sends the same grade again
+ * (the card is not shown again, so it can't come straight back). "Review more" waits for
+ * grades still saving (and retries failed ones) before it asks for the next cards.
  * Every saved grade announces REVIEW_CHANGED_EVENT, so due counts elsewhere refresh.
  *
  * scope: one unit, or every unit when course and unit are left out (cards then show
@@ -48,8 +50,10 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   const [request, setRequest] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [done, setDone] = useState(0)
-  // Cards whose last grade didn't save (they wait at the end of the queue).
-  const [unsaved, setUnsaved] = useState<string[]>([])
+  // Grades that didn't save, to retry.
+  const [unsaved, setUnsaved] = useState<FailedGrade<ReviewCard>[]>([])
+  const [retrying, setRetrying] = useState(false)
+  const pending = useRef(pendingGrades())
   // When each card graded in this session is next due, for "next review …" in a unit.
   const [nextDue, setNextDue] = useState<string[]>([])
   const root = useRef<HTMLDivElement>(null)
@@ -95,12 +99,39 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     else showButton.current?.focus({ preventScroll: true })
   }, [revealed, cardId, data])
 
-  function again() {
+  function save(graded: ReviewCard, choice: ReviewGrade) {
+    return pending.current.track(data.gradeReviewCard(graded.id, choice, accessToken)
+      .then((result) => {
+        if (mounted.current) {
+          setNextDue((current) => [...current, result.next_due_at])
+          setUnsaved((current) => withoutCard(current, graded.id))
+        }
+        announceReviewChange()
+      })
+      .catch(() => {
+        // Not saved: kept for Retry rather than shown again straight away.
+        if (mounted.current) setUnsaved((current) => withFailedGrade(current, graded, choice))
+      }))
+  }
+
+  function retry() {
+    const failed = unsaved
+    if (!failed.length || retrying) return Promise.resolve()
+    setRetrying(true)
+    setUnsaved([])
+    return Promise.all(failed.map((item) => save(item.card, item.grade))).finally(() => {
+      if (mounted.current) setRetrying(false)
+    })
+  }
+
+  async function again() {
     setStatus('loading')
     setDone(0)
     setNextDue([])
-    setUnsaved([])
-    setRequest((value) => value + 1)
+    // Ask for more only once every grade is saved (or has failed), so none comes back.
+    void retry()
+    await pending.current.settled()
+    if (mounted.current) setRequest((value) => value + 1)
   }
 
   function grade(choice: ReviewGrade) {
@@ -109,21 +140,8 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
     setQueue((current) => current.slice(1))
     setDone((value) => value + 1)
     setRevealed(false)
-    data.gradeReviewCard(graded.id, choice, accessToken)
-      .then((result) => {
-        if (mounted.current) {
-          setNextDue((current) => [...current, result.next_due_at])
-          setUnsaved((current) => current.filter((id) => id !== graded.id))
-        }
-        announceReviewChange()
-      })
-      .catch(() => {
-        if (!mounted.current) return
-        // Not saved: the card comes back at the end of the queue to grade again.
-        setQueue((current) => [...current.filter((item) => item.id !== graded.id), graded])
-        setDone((value) => Math.max(0, value - 1))
-        setUnsaved((current) => (current.includes(graded.id) ? current : [...current, graded.id]))
-      })
+    setUnsaved((current) => withoutCard(current, graded.id))
+    void save(graded, choice)
   }
 
   // Space/Enter shows the answer; 1–4 grade it. Typing in a field, or a key meant for
@@ -168,7 +186,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   const doneCopy = `${done ? `You reviewed ${plural(done, 'card')}. ` : ''}${when ? `Next review ${when === 'now' ? 'is ready now' : when}.` : moreNew || moreDue ? '' : 'Cards you’ve studied come back here when they’re due.'}`
 
   // Status and alerts keep no live role of their own, so nothing is read twice.
-  const unsavedText = unsaved.length === 1 ? 'A grade didn’t save. That card is back at the end of the queue.' : `${unsaved.length} grades didn’t save. Those cards are back at the end of the queue.`
+  const unsavedText = unsaved.length === 1 ? 'A grade didn’t save. Check your connection and retry.' : `${unsaved.length} grades didn’t save. Check your connection and retry.`
   useAnnounce(unsaved.length ? unsavedText : '', { error: true })
   useAnnounce(status === 'loading' ? 'Loading cards to review…' : '')
   useAnnounce(status === 'error' ? 'Your review cards didn’t load. Check your connection and try again.' : '', { error: true })
@@ -177,6 +195,7 @@ export function ReviewSession({ scope, accessToken, summary, focusControls, tone
   const notice = unsaved.length ? (
     <div className="ui-alert tools__review-notice">
       <span>{unsavedText}</span>
+      <button className="ui-button ui-button--sm" type="button" onClick={() => { void retry() }} disabled={retrying}>Retry</button>
       <button className="ui-button ui-button--ghost ui-button--sm tools__review-dismiss" type="button" onClick={() => setUnsaved([])}>Dismiss</button>
     </div>
   ) : null
