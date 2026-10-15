@@ -227,6 +227,7 @@ def purge_user_ai_data_in(connection, owner_id: str) -> int:
     guide_table = _table("study_guide_cache")
     removed += connection.execute(delete(guide_table).where(guide_table.c.owner_id == owner_id)).rowcount or 0
     connection.execute(delete(questions.generated_questions).where(questions.generated_questions.c.student_id == owner_id))
+    connection.execute(delete(questions.seen_questions).where(questions.seen_questions.c.student_id == owner_id))
     return removed
 
 

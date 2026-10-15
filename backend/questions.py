@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, delete, select, update
+from sqlalchemy import Column, DateTime, Index, Integer, MetaData, String, Table, delete, select, update
 
 import database
 
@@ -38,8 +39,23 @@ question_bank = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# What each student has been served, per course and unit (scope), so a unit quiz does not
+# repeat a question for SEEN_DAYS. Kept apart from generated_questions, which only holds
+# the last few dozen questions (for answer checking) across every course and math drill.
+seen_questions = Table(
+    "seen_questions",
+    metadata,
+    Column("seen_id", String(64), primary_key=True),
+    Column("student_id", String(100), nullable=False, index=True),
+    Column("scope", String(64), nullable=False),
+    Column("fingerprint", String(64), nullable=False),
+    Column("question", String(500), nullable=False),
+    Column("seen_at", DateTime(timezone=True), nullable=False),
+    Index("seen_questions_student_scope_idx", "student_id", "scope", "seen_at"),
+)
 
-QUESTION_TABLES = ("generated_questions", "question_bank")
+
+QUESTION_TABLES = ("generated_questions", "question_bank", "seen_questions")
 # Column sizes. AI output and unit names can run longer, and Postgres rejects oversize values.
 MAX_QUESTION_CHARS = 500
 MAX_ANSWER_CHARS = 200
@@ -87,12 +103,17 @@ def save_question(student_id: str, question: str, correct_answer: str, topic: st
     return question_id
 
 
-# A student is never served one of their last RECENT_WINDOW questions again, and the
-# model is shown the same number of them (AVOID_IN_PROMPT) so it knows every question
-# that would be rejected as a repeat.
+# RECENT_WINDOW: how many of a student's last questions (any course, math included) count
+# as recent for callers without a scope. Unit quizzes use the per-scope history instead
+# (seen_in_scope): nothing seen in the last SEEN_DAYS for that course and unit, up to
+# SEEN_PER_SCOPE questions. The model is shown the newest AVOID_IN_PROMPT of them.
 RECENT_WINDOW = 20
 AVOID_IN_PROMPT = RECENT_WINDOW
-BANK_CANDIDATES = 60
+SEEN_DAYS = 30
+SEEN_PER_SCOPE = 300
+# Bank rows read per lookup: enough to get past every question a student may have seen
+# in the scope and still find unseen ones.
+BANK_CANDIDATES = SEEN_PER_SCOPE + 60
 
 
 def question_fingerprint(text: str) -> str:
@@ -124,6 +145,68 @@ def recent_questions(student_id: str, limit: int = RECENT_WINDOW) -> list[str]:
             .order_by(generated_questions.c.created_at.desc())
             .limit(limit)
         ).scalars().all())
+
+
+def question_scope(course: str, unit: str) -> str:
+    """Stable key for a course and unit (case- and spacing-insensitive)."""
+    value = "\x1f".join(" ".join(part.split()).casefold() for part in (course or "", unit or ""))
+    return hashlib.blake2s(value.encode("utf-8"), digest_size=16).hexdigest()
+
+
+def _fingerprint_key(question: str) -> str:
+    return hashlib.blake2s(question_fingerprint(question).encode("utf-8"), digest_size=16).hexdigest()
+
+
+def seen_in_scope(student_id: str, scope: str, limit: int = SEEN_PER_SCOPE) -> list[str]:
+    """Questions this student was served in this scope in the last SEEN_DAYS, newest first."""
+    init_questions()
+    with database.engine().connect() as connection:
+        return list(connection.execute(
+            select(seen_questions.c.question)
+            .where(
+                seen_questions.c.student_id == student_id,
+                seen_questions.c.scope == scope,
+                seen_questions.c.seen_at >= datetime.now(timezone.utc) - timedelta(days=SEEN_DAYS),
+            )
+            .order_by(seen_questions.c.seen_at.desc())
+            .limit(limit)
+        ).scalars().all())
+
+
+def mark_seen(student_id: str, scope: str, question: str) -> None:
+    """Record that the student was served this question in this scope (newest first).
+
+    A question already recorded moves to the front. Rows older than SEEN_DAYS, and rows
+    past SEEN_PER_SCOPE in this scope, are dropped.
+    """
+    init_questions()
+    question = question[:MAX_QUESTION_CHARS]
+    fingerprint = _fingerprint_key(question)
+    now = datetime.now(timezone.utc)
+    with database.engine().begin() as connection:
+        connection.execute(delete(seen_questions).where(
+            seen_questions.c.student_id == student_id,
+            seen_questions.c.seen_at < now - timedelta(days=SEEN_DAYS),
+        ))
+        connection.execute(delete(seen_questions).where(
+            seen_questions.c.student_id == student_id,
+            seen_questions.c.scope == scope,
+            seen_questions.c.fingerprint == fingerprint,
+        ))
+        older_ids = connection.execute(select(seen_questions.c.seen_id).where(
+            seen_questions.c.student_id == student_id,
+            seen_questions.c.scope == scope,
+        ).order_by(seen_questions.c.seen_at.desc()).offset(SEEN_PER_SCOPE - 1)).scalars().all()
+        if older_ids:
+            connection.execute(delete(seen_questions).where(seen_questions.c.seen_id.in_(older_ids)))
+        connection.execute(seen_questions.insert().values(
+            seen_id=uuid4().hex,
+            student_id=student_id,
+            scope=scope,
+            fingerprint=fingerprint,
+            question=question,
+            seen_at=now,
+        ))
 
 
 def _bank_rows(connection, cache_key: str) -> list[dict]:
@@ -303,3 +386,4 @@ def reset_questions() -> None:
     with database.engine().begin() as connection:
         connection.execute(delete(generated_questions))
         connection.execute(delete(question_bank))
+        connection.execute(delete(seen_questions))

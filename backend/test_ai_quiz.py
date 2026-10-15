@@ -211,13 +211,15 @@ class PersonalizedQuizTests(unittest.TestCase):
         self.assertEqual(ai.call_args_list[0].kwargs['avoid'], [])
         self.assertEqual(ai.call_args_list[1].kwargs['avoid'], ['What is a centromere?'])
 
-    def test_private_prompt_avoids_all_of_the_students_recent_questions(self):
+    def test_private_prompt_avoids_the_students_questions_from_this_unit_only(self):
         note_store = main.note_store
         note_store.save_note('noter', 'Biology', 'Cell Cycle', 'n.txt', 'text/plain', 'Mitosis has four phases.', 24)
-        main.questions.save_question('noter', 'A question from another unit?', 'x', 'Other', 1)
+        main.questions.mark_seen('noter', main.questions.question_scope('Biology', 'Cell Cycle'), 'A question from this unit?')
+        main.questions.mark_seen('noter', main.questions.question_scope('Biology', 'Genetics'), 'A question from another unit?')
+        main.questions.save_question('noter', 'What is 2 + 2?', '4', 'addition', 1)
         with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What are the phases of mitosis?')) as ai:
             self._ask('noter')
-        self.assertEqual(ai.call_args.kwargs['avoid'], ['A question from another unit?'])
+        self.assertEqual(ai.call_args.kwargs['avoid'], ['A question from this unit?'])
 
     def test_math_practice_redraws_a_recent_sum(self):
         repeat = main.GeneratedQuestion(question='What is 2 + 2?', correct_answer='4', topic='addition', difficulty=1)
@@ -303,7 +305,7 @@ class PersonalizedQuizTests(unittest.TestCase):
     def test_repeating_model_falls_back_to_an_unseen_banked_question_first(self):
         unit_key = main.question_cache_key('x', 'Biology', 'Cell Cycle', 'mixed', 1, '')
         main.questions.save_to_bank(unit_key, 'What is a spindle fibre?', 'A protein structure', 'Cell Cycle', 1)
-        main.questions.save_question('nocache', 'What is cytokinesis?', 'x', 'Cell Cycle', 1)
+        main.questions.mark_seen('nocache', main.questions.question_scope('Biology', 'Cell Cycle'), 'What is cytokinesis?')
         with patch.dict(os.environ, {'AI_CACHE_ENABLED': '0'}), \
                 patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is cytokinesis?')):
             response = self._ask('nocache')
@@ -316,8 +318,9 @@ class PersonalizedQuizTests(unittest.TestCase):
 
     def test_private_prompt_avoids_the_whole_repeat_window(self):
         main.note_store.save_note('window', 'Biology', 'Cell Cycle', 'n.txt', 'text/plain', 'Mitosis has four phases.', 24)
+        scope = main.questions.question_scope('Biology', 'Cell Cycle')
         for index in range(main.questions.RECENT_WINDOW + 5):
-            main.questions.save_question('window', f'Earlier question number {index}?', 'x', 'Other', 1)
+            main.questions.mark_seen('window', scope, f'Earlier question number {index}?')
         with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What are the phases of mitosis?')) as ai:
             self._ask('window')
         self.assertEqual(len(ai.call_args.kwargs['avoid']), main.questions.RECENT_WINDOW)
@@ -343,6 +346,92 @@ class PersonalizedQuizTests(unittest.TestCase):
                                             personalization={}, avoid=avoid)
         settings = main.json.loads(captured['messages'][1]['content'].split('Quiz settings: ', 1)[1].split('\n')[0])
         self.assertEqual(settings['avoid'], avoid)
+
+
+    # --- No repeats within a course and unit for SEEN_DAYS ------------------------------
+
+    def _bank(self, texts, unit='Cell Cycle'):
+        key = main.question_cache_key('x', 'Biology', unit, 'mixed', 1, '')
+        for text in texts:
+            main.questions.save_to_bank(key, text, 'x', unit, 1)
+        return key
+
+    def test_a_bank_bigger_than_the_old_window_still_asks_for_new_questions(self):
+        # Every banked question has been served to this student: the model writes a new one
+        # instead of the student cycling through the same bank.
+        banked = [f'Banked question number {index}?' for index in range(main.questions.RECENT_WINDOW + 5)]
+        self._bank(banked)
+        scope = main.questions.question_scope('Biology', 'Cell Cycle')
+        for text in banked:
+            main.questions.mark_seen('cycler', scope, text)
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is a kinetochore?')) as ai:
+            response = self._ask('cycler')
+        ai.assert_called_once()
+        self.assertEqual(response.question, 'What is a kinetochore?')
+        self.assertFalse(response.repeat)
+
+    def test_bank_serves_the_unseen_question_past_the_old_window(self):
+        banked = [f'Banked question number {index}?' for index in range(main.questions.RECENT_WINDOW + 10)]
+        self._bank(banked)
+        scope = main.questions.question_scope('Biology', 'Cell Cycle')
+        for text in banked[:-1]:
+            main.questions.mark_seen('almost', scope, text)
+        with patch.object(main.ai_tutor, 'generate_question') as ai:
+            response = self._ask('almost')
+        ai.assert_not_called()
+        self.assertEqual(response.question, banked[-1])
+
+    def test_a_student_never_sees_a_unit_question_twice_while_new_ones_can_be_made(self):
+        made = iter(f'New question number {index}?' for index in range(100))
+        with patch.object(main.ai_tutor, 'generate_question', side_effect=lambda **_: self._q(next(made))):
+            served = [self._ask('long-run').question for _ in range(main.questions.RECENT_WINDOW * 2)]
+        self.assertEqual(len(set(served)), len(served))
+
+    def test_other_units_and_math_do_not_push_questions_out_of_a_units_history(self):
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is cytokinesis?')):
+            self._ask('busy')
+        made = iter(f'Genetics question number {index}?' for index in range(100))
+        with patch.object(main.ai_tutor, 'generate_question', side_effect=lambda **_: self._q(next(made))):
+            for _ in range(main.questions.RECENT_WINDOW + 5):
+                self._ask('busy', unit='Genetics')
+        for index in range(main.questions.RECENT_WINDOW + 5):
+            main.questions.save_question('busy', f'What is {index} + 1?', str(index + 1), 'addition', 1)
+        # Back in Cell Cycle, the bank's only question is one this student has seen.
+        with patch.object(main.ai_tutor, 'generate_question', return_value=self._q('What is G1 for?')) as ai:
+            response = self._ask('busy')
+        self.assertEqual(response.question, 'What is G1 for?')
+        self.assertIn('What is cytokinesis?', ai.call_args.kwargs['avoid'])
+
+    def test_out_of_ai_questions_serves_a_flagged_repeat_instead_of_an_error(self):
+        with patch.object(main.ai_tutor, 'generate_question', side_effect=[self._q('What is cytokinesis?'), self._q('What is G1 for?')]):
+            self._ask('limited')
+            self._ask('limited')
+        with patch.object(main, '_rate_limited', side_effect=lambda student, action, *rest: (
+                    (_ for _ in ()).throw(main.HTTPException(status_code=429, detail='limit')) if action == 'ai_question' else None)), \
+                patch.object(main.ai_tutor, 'generate_question') as ai:
+            response = self._ask('limited')
+        ai.assert_not_called()
+        self.assertEqual(response.question, 'What is cytokinesis?')
+        self.assertTrue(response.repeat)
+
+    def test_seen_history_is_capped_per_scope_and_expires(self):
+        scope = main.questions.question_scope('Biology', 'Cell Cycle')
+        with patch.object(main.questions, 'SEEN_PER_SCOPE', 3):
+            for index in range(5):
+                main.questions.mark_seen('capped', scope, f'Question {index}?')
+            self.assertEqual(main.questions.seen_in_scope('capped', scope), ['Question 4?', 'Question 3?', 'Question 2?'])
+        # Seeing a question again moves it to the front instead of adding a copy.
+        main.questions.mark_seen('capped', scope, 'question 2')
+        self.assertEqual(main.questions.seen_in_scope('capped', scope)[0], 'question 2')
+        self.assertEqual(len(main.questions.seen_in_scope('capped', scope)), 3)
+        old = main.questions.datetime.now(main.questions.timezone.utc) - main.questions.timedelta(days=main.questions.SEEN_DAYS + 1)
+        with main.database.engine().begin() as connection:
+            connection.execute(main.questions.seen_questions.update().values(seen_at=old))
+        self.assertEqual(main.questions.seen_in_scope('capped', scope), [])
+
+    def test_scope_ignores_case_and_spacing(self):
+        self.assertEqual(main.questions.question_scope('Biology ', ' cell  cycle'), main.questions.question_scope('biology', 'Cell Cycle'))
+        self.assertNotEqual(main.questions.question_scope('Biology', 'Genetics'), main.questions.question_scope('Biology', 'Cell Cycle'))
 
 
 if __name__ == '__main__':

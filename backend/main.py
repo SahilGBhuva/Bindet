@@ -2914,7 +2914,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             (_rate_limited, student_id, "question_request", 80, 1440),
             (quiz_personalization, student_id, data.difficulty, target_topic),
             (note_store.context_for, student_id, course, unit),
-            (questions.recent_questions, student_id),
+            (questions.seen_in_scope, student_id, questions.question_scope(course, unit)),
         )
         steering = ai_tutor.instructions_hash(instructions)
         cache_key = question_cache_key(student_id, course, unit, data.topic, difficulty, source_text, steering)
@@ -2924,14 +2924,24 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
             # key) adapts to the student.
             personalization = neutral_personalization(target_topic)
         # A banked question costs no AI call, no ai_question quota and no global AI budget.
-        # It is never one this student was served recently (Skip must show something new).
+        # It is never one this student was served in this course and unit within
+        # questions.SEEN_DAYS; once the bank has none left, the model writes a new one.
         cached = questions.cached_question(cache_key, student_id, recent) if ai_cache.enabled() else None
         if ai_cache.enabled():
             ai_tutor.log_ai_event("generate_quiz", outcome="cache_hit" if cached else "cache_miss", student_id=student_id, tier="text")
+        if not cached:
+            try:
+                _rate_limited(student_id, "ai_question", 40, 1440)
+            except HTTPException:
+                # Out of new AI questions for today: a question seen before (flagged as a
+                # repeat) beats no question at all.
+                fallback = questions.fallback_question(cache_key, recent) if recent else None
+                if fallback is None:
+                    raise
+                cached = {**fallback[0], "repeat": fallback[1]}
         if cached:
             ai_question = cached
         else:
-            _rate_limited(student_id, "ai_question", 40, 1440)
             ai_question = fresh_quiz_question(
                 student_id=student_id, cache_key=cache_key, recent=recent, shared=shared, instructions=instructions,
                 course=course, unit=unit, source_labels=source_labels, focus=data.topic, difficulty=difficulty,
@@ -2951,6 +2961,7 @@ def generate_question(data: QuestionRequest, authorization: Annotated[str | None
                 background.add_task(questions.save_to_bank, cache_key, question_text, correct_answer, topic, difficulty, bank_owner)
             else:
                 questions.save_to_bank(cache_key, question_text, correct_answer, topic, difficulty, bank_owner)
+        questions.mark_seen(student_id, questions.question_scope(course, unit), question_text)
         generated = GeneratedQuestion(
             question=question_text,
             correct_answer=correct_answer,

@@ -226,6 +226,8 @@ class AccountDeletionTests(unittest.TestCase):
         ai_cache.store_tutor_reply("c" * 64, ALEX, "Energy currency")
         ai_cache.add_ref("tutor_reply_cache", "c" * 64, ALEX, ai_cache.conversation_source(conversation["id"]))
         questions.save_question(ALEX, "1+1?", "2", "addition", 1)
+        questions.mark_seen(ALEX, questions.question_scope("Biology", "Cells"), "Alex note question?")
+        questions.mark_seen(SAM, questions.question_scope("Biology", "Cells"), "Sam note question?")
         questions.save_to_bank("private-bank-key", "Alex note question?", "Yes", "cells", 1, owner_id=ALEX)
         questions.save_to_bank("shared-bank-key", "Shared question?", "Yes", "addition", 1)
         # Practice tests (with their items) and a cached test tied to Alex's note; Sam's stay.
@@ -301,7 +303,7 @@ class AccountDeletionTests(unittest.TestCase):
                      "study_groups", "study_group_members", "xp_events", "social_reactions", "social_notifications",
                      "social_blocks", "social_reports", "social_action_events", "uploaded_images", "cache_refs",
                      "tutor_reply_cache", "progress_claims", "study_tasks", "study_notes", "flashcards",
-                     "flashcard_jobs", "flashcard_styles", "flashcard_reviews", "generated_questions", "tutor_conversations",
+                     "flashcard_jobs", "flashcard_styles", "flashcard_reviews", "generated_questions", "seen_questions", "tutor_conversations",
                      "workspace_tasks", "workspace_task_assignees", "workspace_task_comments",
                      "workspace_task_activity", "workspace_task_attachments", "workspace_group_milestones",
                      "practice_tests", "practice_test_cache", "study_guides", "study_guide_cache",
