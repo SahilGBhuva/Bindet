@@ -419,6 +419,43 @@ class LimitAndCacheTests(PracticeTestCase):
         self.create(instructions="focus on the Calvin cycle")
         self.assertEqual(self.model.ops(), ["practice_test"] * 4)
 
+    def test_new_questions_avoid_and_drop_the_previous_tests_prompts(self):
+        first = self.create().json()
+        fresh = [
+            mc("Which pigment absorbs light energy in plant cells?", ["Chlorophyll", "Keratin", "Melanin", "Insulin"], "Chlorophyll", "Light"),
+            short("What do guard cells close to reduce water loss?", "Stomata", "Leaves"),
+            short("Which two energy carriers do the light-dependent reactions produce?", "ATP and NADPH", "Light reactions"),
+        ]
+        # The model repeats two earlier questions (one reworded) alongside three new ones.
+        self.model.questions = [dict(GOOD[0], prompt="WHERE does photosynthesis happen in plant cells"), GOOD[1], *fresh]
+        second = self.create(new_questions=True).json()
+        sent = self.model.calls[-1]["messages"][1]["content"]
+        for item in first["items"]:
+            self.assertIn(item["prompt"], sent)
+        self.assertEqual(sorted(item["prompt"] for item in second["items"]), sorted(question["prompt"] for question in fresh))
+        # A plain retake is still the cached test, unchanged.
+        retake = self.create().json()
+        self.assertEqual(len(self.model.calls), 2)
+        self.assertEqual(len(retake["items"]), len(second["items"]))
+
+    def test_new_questions_top_up_with_repeats_only_when_too_few_are_new(self):
+        self.create()
+        second = self.create(new_questions=True)  # the model repeats every question
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(len(second.json()["items"]), ai_tutor.practice_min_kept(5))
+
+    def test_new_questions_only_avoid_prompts_from_the_same_scope(self):
+        self.note(text=CELLS_TEXT, unit="Cells", name="cells.txt")
+        self.model.questions = [mc("Which organelle holds the cell's DNA?", ["Nucleus", "Ribosome", "Cell wall", "Stroma"], "Nucleus", "Cells")] * 1 + [
+            short("What do ribosomes build proteins from?", "Amino acids", "Cells"),
+            short("What is the plant cell wall made of?", "Cellulose", "Cells"),
+            short("Where does aerobic respiration take place?", "Mitochondria", "Cells"),
+        ]
+        self.create(unit="Cells", count=4)
+        self.model.questions = GOOD
+        self.create(new_questions=True)
+        self.assertNotIn("ribosomes build proteins", self.model.calls[-1]["messages"][1]["content"])
+
     def test_the_cache_is_per_student(self):
         self.create()
         self.note("sam")

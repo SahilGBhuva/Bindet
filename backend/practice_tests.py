@@ -313,6 +313,26 @@ def list_tests(owner_id: str, course: str, unit: str | None = None, limit: int =
     return [_summary(row) for row in rows]
 
 
+def recent_prompts(owner_id: str, course: str, unit: str | None, limit: int = 40) -> list[str]:
+    """Prompts from the owner's newest tests in exactly this scope (one unit, or the whole
+    course when unit is None), newest test first, without duplicates; at most `limit`."""
+    init_practice()
+    scope = [tests.c.owner_id == owner_id, tests.c.course == course,
+             tests.c.unit == unit if unit is not None else tests.c.unit.is_(None)]
+    recent_tests = select(tests.c.id).where(*scope).order_by(tests.c.created_at.desc()).limit(HISTORY_LIMIT)
+    with database.engine().connect() as connection:
+        test_order = list(connection.execute(recent_tests).scalars().all())
+        rows = connection.execute(select(items.c.test_id, items.c.position, items.c.prompt).where(items.c.test_id.in_(test_order))).all()
+    rank = {test_id: index for index, test_id in enumerate(test_order)}
+    prompts: list[str] = []
+    for row in sorted(rows, key=lambda row: (rank[row.test_id], row.position)):
+        if row.prompt not in prompts:
+            prompts.append(row.prompt)
+        if len(prompts) >= limit:
+            break
+    return prompts
+
+
 def move_scope(owner_id: str, course: str, unit: str | None, new_course: str, new_unit: str | None) -> int:
     """Follow a course or unit rename on the Study page, like the notes do."""
     init_practice()

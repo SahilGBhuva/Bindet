@@ -3608,9 +3608,11 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
             raise practice_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
         try:
             ai_tutor.warm_connection()
+            # "New questions": steer away from (and drop) prompts of this student's earlier tests here.
+            avoid = practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX) if data.new_questions else None
             batch = ai_tutor.generate_practice_test(
                 course=course, unit=unit or "", note_text=text, count=count, instructions=instructions,
-                session_id=ai_session_id(owner, course, unit or "", "practice"),
+                session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid,
             )
         except ai_tutor.AIBadOutput as exc:
             log("bad_output", error=exc)
