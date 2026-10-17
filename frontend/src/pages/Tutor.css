@@ -11,6 +11,7 @@
   --otto-gutter: clamp(16px, 3vw, 32px);
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
+  transition: grid-template-columns var(--duration-base) var(--ease-out);
   height: 100vh;
   height: 100dvh;
   min-height: 0;
@@ -19,7 +20,14 @@
 
 /* Conversation history */
 
-.tutor__list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--color-border); background: var(--color-bg); }
+.tutor__list { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--color-border); background: var(--color-bg); }
+/* Folded away on desktop: the reading column takes the full width. */
+.tutor.is-list-hidden { grid-template-columns: 0 minmax(0, 1fr); }
+.tutor.is-list-hidden .tutor__list { visibility: hidden; border-right: 0; }
+.tutor.is-list-hidden .tutor__list-toggle.tutor__head-icon { display: grid; }
+.tutor__list-tools { display: inline-flex; align-items: center; gap: 2px; }
+.tutor__list-hide svg,
+.tutor__list-toggle svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .tutor__list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 10px 8px 14px; }
 .tutor__list-brand { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-md); font-weight: var(--weight-semibold); letter-spacing: -.01em; }
 .tutor__list-brand img { width: 26px; height: 26px; border-radius: 50%; background: var(--color-brand-tint); object-fit: cover; object-position: 50% 12%; }
@@ -48,7 +56,7 @@
   display: grid;
   gap: 2px;
   width: 100%;
-  padding: 7px 64px 7px 10px;
+  padding: 7px 10px;
   border: 0;
   border-radius: var(--radius-md);
   background: none;
@@ -78,6 +86,10 @@
 }
 .tutor__list-item time { flex: none; }
 .tutor__list-actions { position: absolute; top: 50%; right: 6px; display: flex; gap: 2px; transform: translateY(-50%); }
+/* Titles use the full row; on hover the pin and delete fade in over the end of it. */
+.tutor__list li:hover .tutor__list-item > span,
+.tutor__list li:focus-within .tutor__list-item > span,
+.tutor__list li:has(.tutor__list-action.is-on) .tutor__list-item > span { padding-right: 52px; }
 .tutor__list-action {
   display: grid;
   place-items: center;

@@ -132,6 +132,8 @@ function Icon({ name }: { name: 'pin' | 'pinned' | 'edit' | 'trash' | 'copy' | '
   return <svg className="tutor-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>
 }
 
+const LIST_HIDDEN_KEY = 'bindet:otto-list-hidden'
+
 export function Tutor({ session }: { session: AuthSession | null }) {
   const token = session?.access_token ?? ''
   const data = useData()
@@ -153,6 +155,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const [course, setCourse] = useState(notebook.activeCourse || '')
   const [unit, setUnit] = useState(notebook.activeUnit || '')
   const [listOpen, setListOpen] = useState(false)
+  // Desktop: the chat list can be folded away for a wider reading column (remembered per browser).
+  const [listHidden, setListHidden] = useState(() => { try { return localStorage.getItem(LIST_HIDDEN_KEY) === '1' } catch { return false } })
   const [query, setQuery] = useState('')
   const [newMode, setNewMode] = useState<StudyMode>('explain')
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -174,6 +178,11 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const listPanel = useRef<HTMLElement>(null)
   const closeList = useCallback(() => setListOpen(false), [])
   useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
+  const hideList = useCallback((hidden: boolean) => {
+    setListHidden(hidden)
+    try { localStorage.setItem(LIST_HIDDEN_KEY, hidden ? '1' : '0') } catch { /* private window: not remembered */ }
+  }, [])
+  const showConversations = () => { if (narrow) setListOpen(true); else hideList(false) }
   // Phones: mode, course, unit and Personalize live in a small sheet under a one-row head.
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsChip = useRef<HTMLButtonElement>(null)
@@ -739,16 +748,23 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const empty = !thread.length && loadingThread !== activeId
 
   return (
-    <div className={`tutor${listOpen ? ' is-list-open' : ''}`}>
+    <div className={`tutor${listOpen ? ' is-list-open' : ''}${listHidden && !narrow ? ' is-list-hidden' : ''}`}>
       {/* The page heading comes first, before the conversation list's group headings.
           The visible conversation title below is an h2 under it. */}
       <h1 className="sr-only">Otto</h1>
-      <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
+      <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow ? !listOpen : listHidden} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
           <span className="tutor__list-brand"><img src={MASCOT} alt="" width="24" height="24" decoding="async" />Otto</span>
-          <button type="button" className="tutor__new" onClick={newConversation}>
-            <Icon name="edit" /><span>New chat</span>
-          </button>
+          <span className="tutor__list-tools">
+            <button type="button" className="tutor__new" onClick={newConversation}>
+              <Icon name="edit" /><span>New chat</span>
+            </button>
+            {narrow ? null : (
+              <button type="button" className="tutor__head-icon tutor__list-hide" onClick={() => hideList(true)} aria-label="Hide chats" title="Hide chats">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15M15.5 10l-2 2 2 2" /></svg>
+              </button>
+            )}
+          </span>
         </div>
         <label className="tutor__search">
           <Icon name="search" />
@@ -801,9 +817,14 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         onDrop={onDrop}
       >
         <header className="tutor__head">
-          <button type="button" className="tutor__list-toggle tutor__head-icon" onClick={() => setListOpen(true)} aria-label="Show conversations">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
+          <button type="button" className="tutor__list-toggle tutor__head-icon" onClick={showConversations} aria-label="Show chats" title="Show chats">
+            {narrow
+              ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
+              : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15M13.5 10l2 2-2 2" /></svg>}
           </button>
+          {listHidden && !narrow ? (
+            <button type="button" className="tutor__head-icon tutor__head-new" onClick={newConversation} aria-label="New chat" title="New chat"><Icon name="edit" /></button>
+          ) : null}
           <div className="tutor__title">
             {renaming !== null && active ? (
               <form className="tutor__rename" onSubmit={submitRename}>
