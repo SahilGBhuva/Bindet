@@ -312,6 +312,9 @@
 .otto-rich.is-live tr,
 .otto-rich.is-live hr { animation: otto-word-in 420ms var(--ease-out) both; }
 @keyframes otto-word-in { from { opacity: 0; } }
+/* Words streaming in come into focus, like ChatGPT: a soft blur and fade over ~0.6s. */
+.otto-rich.is-live .otto-word { animation: otto-word-focus 620ms var(--ease-out) both; }
+@keyframes otto-word-focus { from { opacity: 0; filter: blur(3px); } 60% { opacity: .85; } to { opacity: 1; filter: blur(0); } }
 .otto-rich.is-writing > :is(p, h3, h4):last-child::after,
 .otto-rich.is-writing > :is(ul, ol):last-child > li:last-child::after,
 .otto-rich.is-writing > blockquote:last-child > p::after {
@@ -756,6 +759,7 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
   .otto-rich.is-writing > :is(p, h3, h4):last-child::after,
   .otto-rich.is-writing > :is(ul, ol):last-child > li:last-child::after,
   .otto-rich.is-writing > blockquote:last-child > p::after { animation: none; }
+  .otto-rich.is-live .otto-word { animation: otto-word-in 200ms linear both; }
 }
 
 /* Otto's chat card that links to a guide it made. */

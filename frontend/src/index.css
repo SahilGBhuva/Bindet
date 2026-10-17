@@ -22,13 +22,13 @@
   --color-surface-active: #e9e7e1;
 
   /* Rules */
-  --color-border: #e5e2da;
-  --color-border-strong: #d1cdc3;
+  --color-border: #dcd8ce;
+  --color-border-strong: #c3beb2;
 
   /* Ink */
   --color-text: #18181b;
   --color-text-secondary: #4b4a46;
-  --color-text-tertiary: #67665f;
+  --color-text-tertiary: #5f5e57;
 
   /* Primary action: solid ink. */
   --color-accent: #1c1d24;
@@ -164,18 +164,18 @@
   color-scheme: dark;
 
   --color-bg: #1b1c20;
-  --color-surface: #232429;
-  --color-surface-raised: #2a2b31;
+  --color-surface: #26272d;
+  --color-surface-raised: #2e2f36;
   --color-surface-sunken: #1f2024;
-  --color-surface-hover: #2c2d33;
-  --color-surface-active: #35363d;
+  --color-surface-hover: #2f3037;
+  --color-surface-active: #383940;
 
-  --color-border: #33343b;
-  --color-border-strong: #45464e;
+  --color-border: #3b3c44;
+  --color-border-strong: #56575f;
 
   --color-text: #ecebe7;
-  --color-text-secondary: #a8a7a1;
-  --color-text-tertiary: #a1a09a; /* 4.59:1 on --color-surface-active (pressed), 5.2+ on every other surface and tint */
+  --color-text-secondary: #bdbcb6;
+  --color-text-tertiary: #adaca6; /* 5.05:1 on --color-surface-active (pressed), 5.7+ on every other surface */
 
   --color-accent: #ecebe7;
   --color-accent-hover: #ffffff;
