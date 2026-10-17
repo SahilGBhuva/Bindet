@@ -91,6 +91,15 @@ class FriendsTests(unittest.TestCase):
         database.respond_to_friend_request(resent["request_id"], "sam-id", True)
         self.assertEqual([row["student_id"] for row in database.list_friends("alex-id")], ["sam-id"])
 
+    def test_simultaneous_duplicate_request_is_request_pending_not_a_500(self):
+        from sqlalchemy.exc import IntegrityError
+        with patch.object(database, "_send_friend_request", side_effect=IntegrityError("insert", {}, Exception("unique"))):
+            with self.assertRaisesRegex(ValueError, "request_pending"):
+                database.send_friend_request("alex-id", self.sam["friend_code"])
+        with patch.object(database, "_advisory_lock", wraps=database._advisory_lock) as lock:
+            database.send_friend_request("sam-id", self.alex["friend_code"])
+        self.assertIn("friend:alex-id:sam-id", [call.args[1] for call in lock.call_args_list])
+
     def test_friend_quest_tracks_combined_xp(self):
         self.become_friends()
         quest = database.create_friend_quest("alex-id", "sam-id", 100)

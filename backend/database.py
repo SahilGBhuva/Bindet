@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy.exc import ArgumentError
+from sqlalchemy.exc import ArgumentError, IntegrityError
 
 
 load_dotenv(Path(__file__).with_name(".env"))
@@ -1634,6 +1634,15 @@ def onboard_account(
 
 def send_friend_request(requester_id: str, friend_code: str) -> dict:
     init_db()
+    try:
+        return _send_friend_request(requester_id, friend_code)
+    except IntegrityError as error:
+        # Two requests between the same pair at the same instant: the unique index
+        # caught the second one, which is simply a request that is already waiting.
+        raise ValueError("request_pending") from error
+
+
+def _send_friend_request(requester_id: str, friend_code: str) -> dict:
     with engine().begin() as connection:
         recipient = connection.execute(
             select(profiles).where(profiles.c.friend_code == friend_code.upper())
@@ -1652,6 +1661,9 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
             and_(social_blocks.c.blocker_id == recipient_id, social_blocks.c.blocked_id == requester_id),
         ))).first():
             raise ValueError("friend_not_found")
+        # Without the lock, two students adding each other at once could both see no row
+        # and insert one each (two pending requests), or race on the unique index.
+        _advisory_lock(connection, "friend:" + ":".join(sorted((requester_id, recipient_id))))
         existing = connection.execute(select(friendships).where(or_(
             and_(friendships.c.requester_id == requester_id, friendships.c.recipient_id == recipient_id),
             and_(friendships.c.requester_id == recipient_id, friendships.c.recipient_id == requester_id),
