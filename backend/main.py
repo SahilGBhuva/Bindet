@@ -1283,6 +1283,19 @@ class StreamSlots:
 tutor_streams = StreamSlots()
 
 
+def without_refusals(turns: list[dict]) -> list[dict]:
+    """The history without Otto's fixed refusals and the turns they answered, so one refusal
+    (right or wrong) doesn't steer the model into refusing the follow-ups too."""
+    kept: list[dict] = []
+    for turn in turns:
+        if turn["role"] == "assistant" and turn["content"].strip() == ai_tutor.TUTOR_REFUSAL:
+            if kept and kept[-1]["role"] == "user":
+                kept.pop()
+            continue
+        kept.append(turn)
+    return kept
+
+
 def trim_history(history: list[dict], max_chars: int = TUTOR_HISTORY_MAX_CHARS) -> list[dict]:
     """The most recent turns whose text adds up to at most max_chars."""
     kept: list[dict] = []
@@ -2139,6 +2152,10 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     # with a link to it instead of a long chat reply (otto_guide_reply). A pattern, not a model
     # call; the guide's own limits, cache and budget apply, so the tutor's cache and budget don't.
     guide_intent = None if fixed_reply is not None or image_parts else study_guides.detect_intent(content)
+    if guide_intent is not None and not guide_uses_notes(owner, guide_intent, requested_course, requested_unit, data.conversation_id):
+        # "Cheat sheet on the French Revolution" with no notes on it: Otto writes it from general
+        # knowledge in the chat (saying so) instead of refusing or using unrelated notes.
+        guide_intent = None
     # Otto's personalization for this student (name, personality, about text, memory).
     otto_ctx = otto_context(otto_pending)
     personal = otto_personal_key(otto_ctx, data.study_mode or "explain")
@@ -2189,7 +2206,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     study_mode = data.study_mode or conversation.get("study_mode") or "explain"
     if data.study_mode and data.study_mode != conversation.get("study_mode"):
         conversation = tutor.update_settings(owner, conversation["id"], study_mode=data.study_mode)
-    history = trim_history([{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)])
+    history = trim_history(without_refusals([{"role": item["role"], "content": item["content"]} for item in (recent[:-1] if retry_of else recent)]))
     course = requested_course or conversation["course"]
     unit = requested_unit or conversation["unit"]
     if grounding is not None:
@@ -4020,6 +4037,33 @@ def save_study_guide_as_note(guide_id: GuideId, data: StudyGuideNote, authorizat
 
 
 # --- Otto: "make me a study guide for cells" -------------------------------------------------
+
+def guide_uses_notes(owner: str, intent: "study_guides.GuideIntent", course: str, unit: str, conversation_id: str | None = None) -> bool:
+    """Whether "make me a cheat sheet ..." should become a saved guide from the student's notes.
+    No when the student names a topic and there are no notes to write it from (no course, an
+    empty unit, or notes that never mention it): Otto then answers in the chat from general
+    knowledge. Without a named topic it stays a guide request (Otto asks for a course or notes)."""
+    if not intent.target:
+        return True
+    if not course and conversation_id:
+        try:
+            conversation = tutor.get_conversation(owner, conversation_id)
+            course, unit = conversation["course"], conversation["unit"]
+        except ValueError:
+            return False
+    scope = study_guides.resolve_target(intent.target, course, unit, note_store.note_scopes(owner))
+    if scope is None:
+        return False
+    guide_course, guide_unit = scope
+    if study_guides.WHOLE_COURSE.match(intent.target) or (
+            guide_unit and study_guides._name_key(intent.target) in study_guides._name_key(guide_unit)) or (
+            study_guides._name_key(intent.target) == study_guides._name_key(guide_course)):
+        return True  # the student named one of their units or courses
+    _, text, _ = note_store.practice_context(owner, guide_course, guide_unit, study_guides.GUIDE_NOTE_CHARS,
+                                             exclude_prefix=study_guides.GUIDE_NOTE_PREFIX)
+    wanted = ai_tutor._content_tokens(intent.target)
+    return bool(text.strip()) and (not wanted or bool(wanted & ai_tutor._content_tokens(text)))
+
 
 def otto_guide_reply(owner: str, intent: "study_guides.GuideIntent", course: str, unit: str) -> tuple[str, list[str]]:
     """Otto's short reply to a request for study material, and the message attachment that links
