@@ -4,9 +4,29 @@
  * Shared building blocks live in styles/ui.css.
  */
 
-/* Header: identity on the left, Share and Settings on the right. */
+/*
+ * Header: a soft blue-to-violet band behind who you are, your avatar in its own tone ring,
+ * and the friend ID as a violet chip that copies itself.
+ */
 
-.profile__header { align-items: center; }
+.profile__hero {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-5);
+  padding: var(--space-6);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-violet) 24%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(115deg,
+      color-mix(in srgb, var(--color-blue) 13%, var(--color-surface)) 0%,
+      color-mix(in srgb, var(--color-violet) 15%, var(--color-surface)) 60%,
+      color-mix(in srgb, var(--color-pink) 9%, var(--color-surface)) 100%);
+}
 
 .profile__identity {
   display: flex;
@@ -15,30 +35,58 @@
   min-width: 0;
 }
 
+.profile__avatar-ring {
+  display: grid;
+  flex: none;
+  padding: 3px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(140deg, var(--tone), var(--color-violet));
+}
+
+.profile__avatar-ring .avatar { border: 3px solid var(--color-surface); }
+
 .profile__identity-text { display: grid; gap: var(--space-1); min-width: 0; }
+.profile__name-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); min-width: 0; }
 .profile__name { overflow-wrap: anywhere; }
+.profile__plan { height: 22px; padding: 0 9px; font-size: var(--text-xs); font-weight: var(--weight-semibold); }
 
 .profile__handle {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  margin: var(--space-1) 0 0;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-1);
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
 }
 
-.profile__handle > span + span::before {
-  content: "·";
-  margin-right: var(--space-3);
-  color: var(--color-text-tertiary);
+.profile__username { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+
+.profile__id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-violet) 38%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--color-violet-tint);
+  color: var(--color-violet-text);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard), transform var(--duration-instant) var(--ease-standard);
 }
 
+.profile__id-chip:hover { border-color: var(--color-violet); }
+.profile__id-chip:active { transform: scale(.98); }
+.profile__id-label { font-weight: var(--weight-medium); }
+
 .profile__code {
-  color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: .92em;
-  font-weight: var(--weight-semibold);
-  letter-spacing: .02em;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: .04em;
 }
 
 .profile__header-actions {
@@ -47,7 +95,8 @@
   gap: var(--space-2);
 }
 
-.profile__inline-icon {
+.profile__inline-icon,
+.profile__id-chip svg {
   width: 13px;
   height: 13px;
   fill: none;
@@ -57,11 +106,124 @@
   stroke-linejoin: round;
 }
 
-/* Totals */
+/*
+ * The one main action on this page, and Accept / Add: solid blue, pill-shaped, white text
+ * (5.1:1 light, 5.5:1 dark), with a soft blue shadow.
+ */
+.profile .profile__add-friend,
+.profile .profile__btn-blue,
+.profile__add-dialog .profile__btn-blue {
+  border-color: var(--profile-blue);
+  border-radius: var(--radius-full);
+  background: var(--profile-blue);
+  color: #ffffff;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--color-blue) 28%, transparent);
+}
 
-.profile__stats { margin-bottom: var(--space-8); }
-.profile__streak { display: flex; align-items: center; gap: 2px; }
-.profile__streak-mascot { width: 26px; margin-left: var(--space-2); }
+.profile .profile__add-friend:hover,
+.profile .profile__btn-blue:hover,
+.profile__add-dialog .profile__btn-blue:hover {
+  border-color: var(--profile-blue-hover);
+  background: var(--profile-blue-hover);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-blue) 34%, transparent);
+}
+
+.profile__hero .profile__add-friend { height: 42px; padding-inline: 20px; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.profile__hero .ui-button:not(.profile__add-friend) { height: 42px; border-radius: var(--radius-full); padding-inline: 16px; }
+
+.profile,
+.profile__add-dialog {
+  --profile-blue: var(--color-blue);
+  --profile-blue-hover: var(--color-blue-text);
+}
+
+/* Stat cards: Home's tinted cards, one hue per stat. */
+
+.profile-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 var(--space-8);
+  padding: 0;
+  list-style: none;
+}
+
+.profile-stat {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: var(--tone-tint);
+}
+
+.profile-stat__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--tone-text);
+}
+
+.profile-stat__icon svg,
+.profile__head-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.profile-stat__label { color: var(--tone-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+
+.profile-stat__value {
+  grid-column: 1 / -1;
+  color: var(--tone-text);
+  font-size: 26px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  line-height: 1.15;
+}
+
+.profile-stat__value small { color: var(--color-text-secondary); font-size: var(--text-sm); font-weight: var(--weight-medium); letter-spacing: 0; }
+
+.profile-stat__meta {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-stat__meter {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tone) 18%, var(--color-surface));
+}
+
+.profile-stat__meter span,
+.profile__group-card-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-blue), var(--color-violet));
+}
+
+.profile-stat__cheer { position: absolute; right: 10px; top: 8px; }
 
 .profile__stat-skeleton {
   display: inline-block;
@@ -72,25 +234,54 @@
 
 .profile .ui-alert { margin-bottom: var(--space-6); }
 
-/* Layout */
-
-.profile__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  align-items: start;
-  gap: var(--space-8);
-}
-
-.profile__main,
-.profile__side { min-width: 0; }
-
-.profile__side .ui-section + .ui-section { margin-top: var(--space-8); }
+/* Section headings carry a small colored icon chip so each part of the page is easy to find. */
 
 .profile .ui-section-title {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
 }
+
+.profile__head-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+}
+
+.profile__head-icon svg { width: 15px; height: 15px; }
+
+/*
+ * Layout: main column and a people column. Friend requests (when there are any) sit at the
+ * top of the people column on computers and above everything else on phones.
+ */
+
+.profile__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-areas: "main side";
+  align-items: start;
+  gap: var(--space-8);
+}
+
+.profile__grid.has-requests {
+  grid-template-areas: "main requests" "main side";
+  grid-template-rows: auto 1fr;
+  row-gap: var(--space-6);
+}
+
+.profile__main { grid-area: main; }
+.profile__side { grid-area: side; }
+.profile__requests { grid-area: requests; }
+
+.profile__main,
+.profile__side { min-width: 0; }
+
+.profile__side .ui-section + .ui-section { margin-top: var(--space-8); }
 
 .profile__label {
   display: flex;
@@ -117,6 +308,19 @@
   border-radius: var(--radius-md);
 }
 
+/* An empty list: one short line and one action. */
+.profile__empty-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.profile__empty-cta p { flex: 1 1 220px; margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.profile__empty-cta--flush { padding: 0; }
+
 .profile__hint {
   margin: 0;
   padding: var(--space-3) var(--space-5);
@@ -138,28 +342,45 @@
   white-space: nowrap;
 }
 
+/* People keep their own color; a thin ring of it makes the initials pop without losing contrast. */
+.profile .ui-avatar[class*="ui-tone--"],
+.profile__add-dialog .ui-avatar[class*="ui-tone--"] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--tone) 50%, transparent);
+  font-weight: var(--weight-bold);
+}
+
 .profile__rank {
+  display: inline-grid;
   flex: none;
-  width: 18px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
-  text-align: right;
 }
+
+/* Gold, silver and bronze for the top three. */
+.profile__rank--medal { border: 2px solid var(--medal); border-radius: var(--radius-full); background: var(--medal-tint); color: var(--medal-text); }
+.profile__rank--1 { --medal: var(--color-amber); --medal-tint: color-mix(in srgb, var(--color-amber) 22%, var(--color-surface)); --medal-text: var(--color-amber-text); }
+.profile__rank--2 { --medal: color-mix(in srgb, var(--color-text-tertiary) 55%, var(--color-surface)); --medal-tint: color-mix(in srgb, var(--color-text-tertiary) 14%, var(--color-surface)); --medal-text: var(--color-text-secondary); }
+.profile__rank--3 { --medal: var(--color-orange); --medal-tint: color-mix(in srgb, var(--color-orange) 18%, var(--color-surface)); --medal-text: var(--color-orange-text); }
 
 .profile__me {
-  background: var(--color-brand-tint);
-  box-shadow: inset 3px 0 0 var(--color-brand);
+  background: color-mix(in srgb, var(--color-brand) 11%, var(--color-surface));
+  box-shadow: inset 4px 0 0 var(--color-brand);
 }
 
-.profile__me .ui-row__title { color: var(--color-brand-text); font-weight: var(--weight-semibold); }
+.profile__me .ui-row__title { color: var(--color-brand-text); font-weight: var(--weight-bold); }
 
 .profile__league-xp,
 .profile__xp-gain {
   color: var(--color-text);
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-semibold);
 }
+
+.profile__xp-gain { color: var(--color-green-text); }
 
 .profile__row-actions {
   display: flex;
@@ -168,10 +389,72 @@
 }
 
 .profile__cheer.is-on {
-  border-color: color-mix(in srgb, var(--color-brand) 45%, var(--color-border));
-  background: var(--color-brand-tint);
-  color: var(--color-brand-text);
+  border-color: color-mix(in srgb, var(--color-pink) 45%, var(--color-border));
+  background: var(--color-pink-tint);
+  color: var(--color-pink-text);
 }
+
+/* Weekly league: an XP bar under each name, in that person's color, relative to the leader. */
+
+.profile__reset {
+  color: var(--color-amber-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile__league-row { min-height: 60px; }
+.profile__league-name { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.profile__league-name .ui-row__title { flex: 0 1 auto; }
+.profile__league-name .profile__row-meta { flex: 1 1 0; min-width: 0; }
+
+.profile__league-bar {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--tone) 14%, var(--color-surface-sunken));
+}
+
+.profile__league-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--tone); }
+
+/* Friend requests: a pink-to-violet card that can't be missed. */
+
+.profile__requests {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-pink) 40%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-pink) 12%, var(--color-surface)), color-mix(in srgb, var(--color-violet) 12%, var(--color-surface)));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--color-pink) 14%, transparent);
+}
+
+.profile__requests-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+
+.profile__requests-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-pink-text);
+  color: #ffffff;
+  font-size: var(--text-xs);
+}
+
+.profile__requests .ui-list { border-top: 1px solid color-mix(in srgb, var(--color-pink) 24%, var(--color-border)); }
+.profile__requests .ui-list > li + li { border-color: color-mix(in srgb, var(--color-pink) 18%, var(--color-border)); }
+.profile__requests .ui-row { padding-inline: var(--space-5) var(--space-3); }
 
 /* Skeletons shaped like people rows */
 
@@ -231,9 +514,101 @@
 
 .profile__code-input::placeholder { font-family: var(--font-sans); letter-spacing: 0; }
 
-.profile__groups { overflow: hidden; }
-.profile__group-tabs { padding: 0 var(--space-5); }
-.profile__group-body { padding: var(--space-5); container-type: inline-size; }
+/* Group cards: each group in its own color, with its members and this week's goal. */
+
+.profile__group-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.profile__group-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--tone-tint) 0%, var(--color-surface) 85%);
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.profile__group-card.is-selected {
+  border-color: var(--tone);
+  box-shadow: 0 0 0 1px var(--tone), 0 6px 18px color-mix(in srgb, var(--tone) 18%, transparent);
+}
+
+.profile__group-card-top { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+
+.profile__group-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--tone-text);
+  color: #ffffff;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+
+.profile__group-card-text { display: grid; min-width: 0; }
+
+.profile__group-card-name {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile__group-card-meta { color: var(--color-text-secondary); font-size: var(--text-xs); }
+
+.profile__avatar-stack { display: flex; padding-left: 6px; }
+.profile__avatar-stack .ui-avatar { width: 28px; height: 28px; margin-left: -6px; border: 2px solid var(--color-surface); font-size: 10px; }
+.profile__avatar-more { background: var(--color-surface-sunken); color: var(--color-text-secondary); }
+
+.profile__group-card-goal {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.profile__group-card-goal strong { color: var(--color-text); font-size: var(--text-sm); }
+.profile__group-card-pct { color: var(--tone-text); font-weight: var(--weight-bold); }
+
+.profile__group-card-meter {
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--tone) 16%, var(--color-surface));
+}
+
+.profile__group-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: 2px; }
+
+.profile__group-open {
+  border-color: var(--tone-text);
+  border-radius: var(--radius-full);
+  background: var(--tone-text);
+  color: #ffffff;
+}
+
+.profile__group-open:hover { border-color: var(--tone-text); background: color-mix(in srgb, var(--tone-text) 86%, #000); }
+.profile__group-pick { border-radius: var(--radius-full); }
+.profile__group-pick[aria-pressed="true"] { color: var(--tone-text); }
+
+.profile__group-body { padding: var(--space-5); container-type: inline-size; border-top: 3px solid var(--tone); }
 
 .profile__group-top {
   display: flex;
@@ -362,9 +737,13 @@
   align-items: center;
   gap: var(--space-3) var(--space-4);
   padding: var(--space-5);
-  border: 1px dashed var(--color-border-strong);
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--color-border));
   border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--tone-tint) 0%, var(--color-surface) 90%);
 }
+
+.profile__placeholder-icon { width: 48px; height: 48px; background: var(--color-surface); }
+.profile__placeholder-icon svg { width: 24px; height: 24px; }
 
 .profile__placeholder > div { flex: 1; min-width: 200px; }
 
@@ -383,7 +762,9 @@
 /* Record */
 
 .profile__record { padding: var(--space-3) var(--space-5); }
-.profile__record .ui-meter { margin-top: 6px; }
+.profile__record .ui-meter { margin-top: 6px; height: 6px; background: color-mix(in srgb, var(--tone) 14%, var(--color-surface-sunken)); }
+.profile__record .ui-meter > span { background: var(--tone); }
+.profile__record-pct { color: var(--tone-text); }
 
 .profile__record-name {
   overflow: hidden;
@@ -399,23 +780,35 @@
 
 .profile__block { padding-top: var(--space-4); }
 .profile__block + .profile__block,
-.profile__friend-forms + .profile__block,
-.profile__block + .profile__friend-forms { border-top: 1px solid var(--color-border); }
+.profile__add-row + .profile__block,
+.ui-empty + .profile__block { border-top: 1px solid var(--color-border); }
 .profile__block .profile__label { padding: 0 var(--space-5); }
 .profile__block .ui-row { gap: var(--space-2) var(--space-3); padding-inline: var(--space-5) var(--space-3); }
 .profile__block > .ui-list { border-top: 1px solid var(--color-border); }
 
-.profile__requests { background: color-mix(in srgb, var(--color-brand-tint) 55%, var(--color-surface)); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.profile__add-row { padding: var(--space-4) var(--space-5); }
+.profile__add-friend--wide { width: 100%; height: 42px; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.profile__add-friend svg,
+.profile__suggest-add svg,
+.profile__btn-blue svg { stroke-width: 2.4; }
 
-.profile__friend-forms {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-5);
+.profile__suggest-add {
+  border-color: color-mix(in srgb, var(--color-blue) 40%, var(--color-border));
+  border-radius: var(--radius-full);
+  background: var(--color-blue-tint);
+  color: var(--color-blue-text);
 }
 
-.profile__inline-form { display: flex; gap: var(--space-2); }
-.profile__inline-form .ui-button { flex: none; }
+.profile__suggest-add:hover { border-color: var(--color-blue); background: var(--color-blue-tint); }
+
+.profile__quest-button {
+  border-color: color-mix(in srgb, var(--tone) 40%, var(--color-border));
+  border-radius: var(--radius-full);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+}
+
+.profile__quest-button:hover { border-color: var(--tone); background: var(--tone-tint); }
 
 .profile__menu {
   position: relative;
@@ -690,15 +1083,45 @@
   .profile__grid { grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-6); }
 }
 
+@media (max-width: 1100px) {
+  .profile-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @media (max-width: 860px) {
-  .profile__code { font-size: max(12px, .92em); }
-  .profile__grid { grid-template-columns: minmax(0, 1fr); }
+  .profile__grid,
+  .profile__grid.has-requests {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "requests" "main" "side";
+    grid-template-rows: none;
+  }
+  .profile__grid:not(.has-requests) { grid-template-areas: "main" "side"; }
   .profile__side { margin-top: var(--space-2); }
+  /* Touch: chips and small buttons on this page are 44px tall too. */
+  .profile__id-chip { height: 44px; padding-inline: 14px 12px; }
+  .profile .ui-button--sm { border-radius: var(--radius-full); }
 }
 
 @media (max-width: 720px) {
-  .profile__identity { gap: var(--space-4); }
-  .profile__header-actions { width: 100%; }
+  .profile__hero { padding: var(--space-4); gap: var(--space-4); margin-bottom: var(--space-4); }
+  .profile__identity { gap: var(--space-3); }
+  .profile__avatar-ring .avatar { width: 60px; height: 60px; font-size: 20px; }
+  .profile__name { font-size: 32px; }
+  .profile__header-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .profile__hero .profile__add-friend,
+  .profile__hero .ui-button:not(.profile__add-friend) { height: 48px; }
+  .profile-stats { gap: 8px; margin-bottom: var(--space-6); }
+  .profile-stat { padding: 10px 12px; column-gap: 8px; row-gap: 2px; }
+  .profile-stat__icon { width: 26px; height: 26px; }
+  .profile-stat__icon svg { width: 15px; height: 15px; }
+  .profile-stat__label { font-size: var(--text-xs); }
+  .profile-stat__value { font-size: 22px; }
+  .profile-stat__cheer { width: 30px; top: 6px; right: 8px; }
+  .profile__group-cards { grid-template-columns: minmax(0, 1fr); }
+  .profile__requests .ui-row { padding-inline: var(--space-4) var(--space-2); }
+  .profile__requests-title { padding-inline: var(--space-4); }
+  .profile__add-row { padding: var(--space-3) var(--space-4); }
+  .profile__add-friend--wide { height: 48px; }
+  .profile__empty-cta { padding-inline: var(--space-4); }
 
   .profile__group-setup,
   .profile__group-columns { grid-template-columns: minmax(0, 1fr); }
@@ -711,13 +1134,13 @@
   .profile__form,
   .profile__group-body { padding: var(--space-4); }
 
-  .profile__group-tabs { padding: 0 var(--space-4); }
   .profile__group-top { flex-direction: column; }
   .profile__invite { justify-items: start; }
 
   .profile__block .profile__label { padding: 0 var(--space-4); }
   .profile__block .ui-row { padding-inline: var(--space-4) var(--space-2); }
   .profile__friends-head { padding-inline: var(--space-4) var(--space-2); }
+  .profile__friends-head .profile__label { padding: 0; }
   .profile__streak-detail { margin-inline: var(--space-3) var(--space-2); padding-inline: var(--space-3); }
 
   /* Phones: 40px tap targets on the friends list. */
@@ -726,7 +1149,6 @@
   .profile__menu > summary { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
   .profile__streak-grid tbody th, .profile__streak-grid thead td { width: 44px; }
   .profile__streak-dot { width: 10px; height: 10px; }
-  .profile__friend-forms { padding: var(--space-4); }
   .profile__record,
   .profile__quest,
   .profile__quest-start { padding-inline: var(--space-4); }
@@ -761,3 +1183,186 @@
   .profile__friend .profile__person .profile__row-meta { grid-row: 2; grid-column: 2 / -1; }
   .profile__friend .profile__person > :not(.ui-avatar):not(.ui-row__main) { grid-row: 1; }
 }
+
+/* Requests on phones: the name and both buttons can't share a 360px line, so the buttons go underneath. */
+@media (max-width: 480px) {
+  .profile__requests .profile__person { flex-wrap: wrap; padding-block: var(--space-3); }
+  .profile__requests .profile__row-actions { width: 100%; padding-left: 42px; }
+  .profile__requests .profile__row-actions .ui-button { flex: 1; }
+  .profile__league-name { display: grid; gap: 0; }
+}
+
+/*
+ * Add a friend: a small dialog on computers and a bottom sheet on phones. Three ways in
+ * (search, friend ID, share yours), one at a time.
+ */
+
+.profile__add-dialog { width: min(480px, 100%); }
+.profile__add-header { padding-block: var(--space-4); }
+.profile__add-header .ui-dialog__title { font-size: var(--text-xl); }
+
+.profile__add-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.profile__add-close:hover { color: var(--color-text); background: var(--color-surface-active); }
+
+.profile__add-body { display: grid; gap: var(--space-4); min-height: 300px; align-content: start; padding: var(--space-5) var(--space-6); }
+.profile__add-tabs { display: flex; width: 100%; }
+.profile__add-tabs .ui-segmented__item { flex: 1; justify-content: center; height: 36px; font-weight: var(--weight-semibold); }
+.profile__add-tabs .ui-segmented__item[aria-selected="true"] { color: var(--color-blue-text); }
+
+.profile__add-panel { display: grid; gap: var(--space-3); }
+.profile__add-panel .ui-field > span { color: var(--color-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.profile__add-input { height: 44px; font-size: var(--text-md); }
+.profile__add-code { font-size: 18px; text-transform: uppercase; }
+.profile__add-code::placeholder { text-transform: none; font-size: var(--text-md); }
+.profile__add-submit { justify-self: start; height: 44px; padding-inline: 20px; font-weight: var(--weight-semibold); }
+
+.profile__add-help { margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.profile__add-error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+
+.profile__add-results {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.profile__add-results .ui-row { padding-inline: var(--space-3); }
+.profile__add-results .profile__btn-blue { height: 34px; padding-inline: 14px; }
+
+.profile__add-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--color-green) 35%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: var(--color-green-tint);
+  color: var(--color-green-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.profile__add-status svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.profile__add-status.is-error { border-color: color-mix(in srgb, var(--color-danger) 35%, var(--color-border)); background: var(--color-danger-subtle); color: var(--color-danger); }
+
+.profile__share-id { justify-items: center; padding: var(--space-4); border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--color-blue-tint), var(--color-violet-tint)); text-align: center; }
+.profile__share-label { margin: 0; color: var(--color-violet-text); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
+.profile__share-code { margin: 0; color: var(--color-text); font-family: var(--font-mono); font-size: 36px; font-weight: var(--weight-bold); letter-spacing: .1em; }
+.profile__share-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-1); }
+.profile__share-actions .ui-button { height: 40px; border-radius: var(--radius-full); padding-inline: 16px; }
+
+@media (max-width: 600px) {
+  .profile__add-backdrop { place-items: end stretch; padding: 0; }
+  .profile__add-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 48px);
+    border-radius: 18px 18px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: profile-sheet var(--duration-base) var(--ease-out);
+  }
+  .profile__add-body { padding: var(--space-4); }
+  .profile__add-header { padding-inline: var(--space-4); }
+  .profile__add-tabs .ui-segmented__item { height: 44px; }
+  .profile__add-close { width: 44px; height: 44px; }
+  .profile__add-input,
+  .profile__add-code { height: 48px; font-size: 16px; }
+  .profile__add-code { font-size: 18px; }
+  .profile__add-submit { justify-self: stretch; height: 48px; }
+  .profile__add-results .profile__btn-blue { height: 44px; }
+  .profile__add-dialog .ui-dialog__footer .ui-button { width: 100%; height: 48px; }
+  .profile__share-code { font-size: 32px; }
+  .profile__share-actions .ui-button { flex: 1; height: 48px; }
+}
+
+@keyframes profile-sheet { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .profile__add-dialog { animation: none; }
+}
+
+/*
+ * Dark. Hues are mixed into the surface (about 20-35%) rather than using the muddy dark
+ * tints, icon chips become solid color with white glyphs, and text that sits on color
+ * uses a lightened tone so it stays above 4.5:1.
+ */
+:root[data-theme="dark"] .profile,
+:root[data-theme="dark"] .profile__add-dialog {
+  --profile-blue: color-mix(in srgb, var(--color-blue) 80%, #000);
+  --profile-blue-hover: color-mix(in srgb, var(--color-blue) 92%, #000);
+}
+
+:root[data-theme="dark"] .profile__hero {
+  border-color: color-mix(in srgb, var(--color-violet) 40%, var(--color-surface));
+  background: linear-gradient(115deg,
+    color-mix(in srgb, var(--color-blue) 26%, var(--color-surface)) 0%,
+    color-mix(in srgb, var(--color-violet) 28%, var(--color-surface)) 60%,
+    color-mix(in srgb, var(--color-pink) 18%, var(--color-surface)) 100%);
+}
+
+:root[data-theme="dark"] .profile__avatar-ring .avatar { border-color: var(--color-surface); }
+:root[data-theme="dark"] .profile__avatar-ring .avatar:not(.has-photo) { background: color-mix(in srgb, var(--tone) 58%, var(--color-surface)); color: #fff; }
+:root[data-theme="dark"] .profile__id-chip { border-color: color-mix(in srgb, var(--color-violet) 60%, transparent); background: color-mix(in srgb, var(--color-violet) 30%, var(--color-surface)); color: #ddd5fb; }
+
+:root[data-theme="dark"] .profile-stat {
+  border-color: color-mix(in srgb, var(--tone) 46%, var(--color-surface));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 34%, var(--color-surface)) 0%, color-mix(in srgb, var(--tone) 14%, var(--color-surface)) 100%);
+}
+:root[data-theme="dark"] .profile-stat__icon,
+:root[data-theme="dark"] .profile__head-icon { background: var(--tone); color: #fff; }
+:root[data-theme="dark"] .profile-stat__label,
+:root[data-theme="dark"] .profile-stat__value { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
+:root[data-theme="dark"] .profile-stat__value small,
+:root[data-theme="dark"] .profile-stat__meta { color: color-mix(in srgb, var(--tone-text) 35%, #fff); }
+:root[data-theme="dark"] .profile-stat__meter { background: color-mix(in srgb, var(--tone) 30%, var(--color-surface)); }
+
+/* Avatars: a brighter fill in the person's own color, white initials (5:1 or better). */
+:root[data-theme="dark"] .profile .ui-avatar[class*="ui-tone--"],
+:root[data-theme="dark"] .profile__add-dialog .ui-avatar[class*="ui-tone--"] {
+  background: color-mix(in srgb, var(--tone) 58%, var(--color-surface));
+  color: #fff;
+  box-shadow: none;
+}
+
+:root[data-theme="dark"] .profile__me { background: color-mix(in srgb, var(--color-brand) 22%, var(--color-surface)); }
+:root[data-theme="dark"] .profile__league-bar,
+:root[data-theme="dark"] .profile__record .ui-meter { background: color-mix(in srgb, var(--tone) 22%, var(--color-surface-sunken)); }
+:root[data-theme="dark"] .profile__rank--1 { --medal-tint: color-mix(in srgb, var(--color-amber) 30%, var(--color-surface)); }
+:root[data-theme="dark"] .profile__rank--2 { --medal: var(--color-text-tertiary); --medal-tint: color-mix(in srgb, var(--color-text-tertiary) 22%, var(--color-surface)); --medal-text: var(--color-text); }
+:root[data-theme="dark"] .profile__rank--3 { --medal-tint: color-mix(in srgb, var(--color-orange) 28%, var(--color-surface)); }
+
+:root[data-theme="dark"] .profile__requests {
+  border-color: color-mix(in srgb, var(--color-pink) 50%, var(--color-surface));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-pink) 24%, var(--color-surface)), color-mix(in srgb, var(--color-violet) 24%, var(--color-surface)));
+  box-shadow: none;
+}
+:root[data-theme="dark"] .profile__requests-count { background: color-mix(in srgb, var(--color-pink) 80%, #000); }
+
+:root[data-theme="dark"] .profile__group-card,
+:root[data-theme="dark"] .profile__placeholder {
+  border-color: color-mix(in srgb, var(--tone) 46%, var(--color-surface));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 30%, var(--color-surface)) 0%, color-mix(in srgb, var(--tone) 10%, var(--color-surface)) 100%);
+}
+:root[data-theme="dark"] .profile__group-mark,
+:root[data-theme="dark"] .profile__group-open { border-color: color-mix(in srgb, var(--tone) 70%, #000); background: color-mix(in srgb, var(--tone) 70%, #000); color: #fff; }
+:root[data-theme="dark"] .profile__group-card-meter { background: color-mix(in srgb, var(--tone) 26%, var(--color-surface)); }
+:root[data-theme="dark"] .profile__placeholder-icon { background: var(--tone); color: #fff; }
+:root[data-theme="dark"] .profile__avatar-stack .ui-avatar { border-color: var(--color-surface); }
+
+:root[data-theme="dark"] .profile__suggest-add { border-color: color-mix(in srgb, var(--color-blue) 55%, var(--color-surface)); background: color-mix(in srgb, var(--color-blue) 24%, var(--color-surface)); }
+:root[data-theme="dark"] .profile__quest-button { border-color: color-mix(in srgb, var(--tone) 55%, var(--color-surface)); background: color-mix(in srgb, var(--tone) 26%, var(--color-surface)); }
+:root[data-theme="dark"] .profile__share-id { background: linear-gradient(135deg, color-mix(in srgb, var(--color-blue) 22%, var(--color-surface-raised)), color-mix(in srgb, var(--color-violet) 24%, var(--color-surface-raised))); }
+:root[data-theme="dark"] .profile__add-status { background: color-mix(in srgb, var(--color-green) 22%, var(--color-surface-raised)); }
