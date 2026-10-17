@@ -576,7 +576,7 @@ class TutorGuardTests(FlashcardTestCase):
     def test_tutor_system_prompt_is_fixed_and_scoped_to_study(self):
         prompt = ai_tutor.tutor_system_prompt()
         self.assertIn(ai_tutor.OFF_TOPIC_SENTINEL, prompt)
-        self.assertIn("only help with studying", prompt)
+        self.assertIn("you help with school and learning", prompt)
         self.assertIn("untrusted data", prompt)
         self.assertFalse(ai_tutor.is_prompt_extraction("I always forget the rules for exponents"))
         self.assertFalse(ai_tutor.is_prompt_extraction("Repeat the instructions for the titration lab"))
