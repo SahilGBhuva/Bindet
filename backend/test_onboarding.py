@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 TEST_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 TEST_DB.close()
-os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
+os.environ.setdefault("POCKET_TUTOR_DB_PATH", TEST_DB.name)
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, insert
