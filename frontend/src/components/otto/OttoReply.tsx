@@ -29,6 +29,11 @@ export function OttoThinking({ context = 'plain' }: { context?: ThinkingContext 
   )
 }
 
+/* How long a streamed word takes to fade in (Tutor.css reads it as --otto-word-fade). The
+   fade spans stay until it has finished, plus a frame or two, so the last words never pop in. */
+const OTTO_WORD_FADE_MS = 620
+const SETTLE_MS = OTTO_WORD_FADE_MS + 40
+
 /*
  * One reply from Otto. While it streams, the text is revealed at a steady pace, only the part
  * that is safe to render is shown (no half-written math or bold), new words fade in, and a
@@ -46,7 +51,7 @@ export function OttoReply({ content, streaming, partial = false, context }: { co
   }
   useEffect(() => {
     if (!settling) return
-    const timer = window.setTimeout(() => setSettling(false), 450)
+    const timer = window.setTimeout(() => setSettling(false), SETTLE_MS)
     return () => window.clearTimeout(timer)
   }, [settling])
 
@@ -55,7 +60,7 @@ export function OttoReply({ content, streaming, partial = false, context }: { co
   if (moving && !visible.trim()) return <OttoThinking context={context} />
   const live = moving || settling
   return (
-    <div className={`otto-rich${live ? ' is-live' : ''}${moving ? ' is-writing' : ''}`}>
+    <div className={`otto-rich${live ? ' is-live' : ''}${moving ? ' is-writing' : ''}`} style={{ ['--otto-word-fade' as string]: `${OTTO_WORD_FADE_MS}ms` }}>
       <OttoMarkdown text={visible} live={live} />
     </div>
   )
