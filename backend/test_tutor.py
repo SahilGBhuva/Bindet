@@ -180,7 +180,7 @@ class TutorTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 self.send("alex")
         self.assertEqual(caught.exception.status_code, 429)
-        self.assertEqual(caught.exception.detail, main.TUTOR_DAILY_LIMITED)
+        self.assertEqual(caught.exception.detail, main.TUTOR_DAILY_LIMITED + main.PRO_HINT)
 
     def test_a_reply_can_only_be_replaced_once(self):
         events, _ = self.send("alex")

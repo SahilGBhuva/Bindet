@@ -26,6 +26,7 @@ import main
 import note_store
 import onboarding
 import otto
+import plans
 import practice
 import practice_tests
 import questions
@@ -51,7 +52,7 @@ ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
     practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
-    otto.otto_metadata, study_guides.guide_metadata,
+    otto.otto_metadata, study_guides.guide_metadata, plans.plans_metadata,
 )
 
 
@@ -130,6 +131,7 @@ class AccountDeletionTests(unittest.TestCase):
         feedback.reset_feedback()
         onboarding.reset_onboarding()
         otto.reset_otto()
+        plans.reset_plans()
         with database.engine().begin() as connection:
             connection.execute(delete(note_store.notes))
         rate_limit.limiter.reset()
@@ -265,6 +267,10 @@ class AccountDeletionTests(unittest.TestCase):
                               about="I like worked examples", memory_enabled=True)
             otto.add_memory(person, "taking AP Biology")
             otto.apply_memory_ops(person, [{"op": "add", "text": "has a test on cells on Oct 10"}])
+        # Plans: Alex has Pro and (as if an owner) granted Sam Pro; Eve's grant came from someone else.
+        plans.grant("alex@example.com", "pro", SAM)
+        plans.grant("sam@example.com", "pro", ALEX)
+        plans.grant("eve@example.com", "unlimited", SAM)
 
     # --- helpers --------------------------------------------------------------------
 
@@ -286,12 +292,31 @@ class AccountDeletionTests(unittest.TestCase):
         supabase = supabase or FakeSupabase()
         authorization = authorization or fresh_token(user)
         with patch.dict(os.environ, env if env is not None else ENV), \
-                patch.object(auth, "authenticated_user", return_value={"id": user, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+                patch.object(auth, "authenticated_user", return_value={"id": user, "email": f"{PEOPLE[user]}@example.com",
+                                                                     "email_confirmed_at": "2026-01-01T00:00:00Z"}):
             post, request, http_delete = supabase.patches()
             with post, request, http_delete:
                 return self.client.request("DELETE", "/api/account", json=body, headers={"Authorization": authorization})
 
     # --- tests ----------------------------------------------------------------------
+
+    def test_deleting_removes_the_accounts_plan_grant_and_keeps_grants_it_made(self):
+        self.assertIn("account_plans", self.rows_mentioning(ALEX))
+        result = self.delete()
+        self.assertEqual(result.status_code, 200, result.text)
+        grants = {grant["email"]: grant["plan"] for grant in plans.list_grants()}
+        self.assertEqual(grants, {"sam@example.com": "pro", "eve@example.com": "unlimited"})
+        self.assertNotIn("account_plans", self.rows_mentioning(ALEX))
+
+    def test_an_unconfirmed_account_cannot_delete_someone_elses_grant(self):
+        supabase = FakeSupabase()
+        with patch.dict(os.environ, ENV), patch.object(auth, "authenticated_user", return_value={
+                "id": EVE, "email": "alex@example.com", "email_confirmed_at": None}):
+            post, request, http_delete = supabase.patches()
+            with post, request, http_delete:
+                result = self.client.request("DELETE", "/api/account", json=CONFIRM, headers={"Authorization": fresh_token(EVE)})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("alex@example.com", {grant["email"] for grant in plans.list_grants()})
 
     def test_every_locked_table_is_checked(self):
         checked = {table.name for table_metadata in ALL_METADATA for table in table_metadata.sorted_tables}

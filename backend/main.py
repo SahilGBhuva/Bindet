@@ -46,6 +46,7 @@ import note_ingestion
 import note_store
 import onboarding
 import otto
+import plans
 import practice
 import practice_tests
 import rate_limit
@@ -677,6 +678,8 @@ class ProfileResponse(BaseModel):
     best_login_streak: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # The account's plan (plans.py): Free unless its confirmed email was granted one.
+    plan: Literal["free", "pro", "unlimited"] = "free"
 
 
 class AccountResponse(BaseModel):
@@ -1178,14 +1181,25 @@ def ai_daily_global_limit() -> int:
         return AI_DAILY_GLOBAL_LIMIT_DEFAULT
 
 
-# One account may use at most this share of the shared daily AI budget (owners are exempt),
-# so a single account can't pause AI for everyone else.
+# One account may use at most this share of the shared daily AI budget (owners and Unlimited
+# accounts are exempt), so a single account can't pause AI for everyone else. Pro gets more.
 AI_ACCOUNT_SHARE_PERCENT = 2
+PRO_ACCOUNT_SHARE_PERCENT = 6
 AI_ACCOUNT_SHARE_USED = "You’ve used a lot of AI help today, so it’s taking a break until tomorrow. Your notes, flashcards and saved answers still work."
 
 
-def ai_account_daily_limit() -> int:
-    return max(1, ai_daily_global_limit() * AI_ACCOUNT_SHARE_PERCENT // 100)
+def ai_account_daily_limit(student_id: str | None = None) -> int:
+    percent = PRO_ACCOUNT_SHARE_PERCENT if rate_limit.is_pro(student_id) else AI_ACCOUNT_SHARE_PERCENT
+    return max(1, ai_daily_global_limit() * percent // 100)
+
+
+# Added to a few daily-limit messages for Free accounts. Pro can't be bought yet, so it
+# stays one short clause and never appears for Pro or Unlimited accounts.
+PRO_HINT = " bindet Pro (coming soon) has 3× more."
+
+
+def pro_hint(student_id: str | None) -> str:
+    return PRO_HINT if rate_limit.plan_of(student_id) == "free" and not rate_limit.is_owner(student_id) else ""
 
 
 # The inbox behind the signed-in account for this request (set by ai_user). The share is
@@ -1196,11 +1210,11 @@ ai_inbox: contextvars.ContextVar[str | None] = contextvars.ContextVar("ai_inbox"
 
 def account_ai_share_available(student_id: str | None) -> bool:
     """Spend one call from this account's share of the shared daily budget. False once it is
-    used up. Owners are never limited."""
-    if not student_id or rate_limit.is_owner(student_id):
+    used up. Owners and Unlimited accounts are never limited; Pro has a larger share."""
+    if not student_id or rate_limit.skips_student_limits(student_id):
         return True
     try:
-        database.check_social_rate_limit(ai_inbox.get() or student_id, "ai_global_share", ai_account_daily_limit(), 1440)
+        database.check_social_rate_limit(ai_inbox.get() or student_id, "ai_global_share", ai_account_daily_limit(student_id), 1440)
     except ValueError:
         return False
     return True
@@ -1562,6 +1576,7 @@ def get_account_profile(authorization: Annotated[str | None, Header()] = None):
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
+    profile["plan"] = rate_limit.plan_of(user["id"])
     return profile
 
 
@@ -2071,7 +2086,7 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
     image_parts = tutor_image_parts(data.images)
-    slot = tutor_streams.acquire(owner, OWNER_MAX_CONCURRENT_STREAMS if rate_limit.is_owner(owner) else TUTOR_MAX_CONCURRENT_STREAMS)
+    slot = tutor_streams.acquire(owner, OWNER_MAX_CONCURRENT_STREAMS if rate_limit.skips_student_limits(owner) else TUTOR_MAX_CONCURRENT_STREAMS)
     if slot is None:
         raise HTTPException(status_code=429, detail=TUTOR_TOO_MANY_STREAMS, headers={"Retry-After": "10"})
     try:
@@ -2098,7 +2113,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         limit.result()
     except ValueError as error:
         if str(error) == "day":
-            raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED, headers={"Retry-After": "3600"}) from error
+            raise HTTPException(status_code=429, detail=TUTOR_DAILY_LIMITED + pro_hint(owner), headers={"Retry-After": "3600"}) from error
         raise HTTPException(status_code=429, detail=TUTOR_RATE_LIMITED, headers={"Retry-After": "300"}) from error
     # Regenerate keeps the old reply until the new one is saved (tutor.replace_reply): a refusal,
     # a used-up budget, an AI failure or an empty answer leaves the conversation as it was.
@@ -2524,6 +2539,7 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
+    profile["plan"] = rate_limit.plan_of(user["id"])
     return profile
 
 
@@ -2643,7 +2659,9 @@ def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
         raise HTTPException(status_code=403, detail={"code": "reauth_required", "message": ACCOUNT_DELETE_REAUTH})
     # Images first, while the memberships that say where they are still exist.
     _delete_account_images(student_id, account_deletion.group_ids(student_id))
-    summary = account_deletion.delete_account_data(student_id)
+    # The plan grant for the account's own email goes with it, but only for a confirmed
+    # email: an unconfirmed sign-up must not be able to remove someone else's grant.
+    summary = account_deletion.delete_account_data(student_id, plans.confirmed_inbox(user))
     _delete_leftover_images(student_id, summary)
     if not auth.delete_auth_user(student_id):
         account_logger.warning("account_delete_auth_failed %s", json.dumps({"student": ai_tutor.student_hash(student_id)}))
@@ -3051,7 +3069,7 @@ def flashcard_rate_limit(student_id: str, action: str, limit: int, window_minute
         database.check_social_rate_limit(student_id, action, limit, window_minutes)
     except ValueError as error:
         wait = limit_retry_after(student_id, action, window_minutes)
-        raise ai_error(429, "rate_limited", f"You’ve made a lot of flashcards today. Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+        raise ai_error(429, "rate_limited", f"You’ve made a lot of flashcards today. Try again {_wait_phrase(wait)}.{pro_hint(student_id)}", retry_after=wait) from error
 
 
 def flashcard_budget(student_id: str) -> None:
@@ -3529,7 +3547,7 @@ def practice_rate_limit(student_id: str, action: str, limit: int, message: str, 
         database.check_social_rate_limit(student_id, action, limit, window_minutes)
     except ValueError as error:
         wait = limit_retry_after(student_id, action, window_minutes)
-        raise practice_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+        raise practice_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.{pro_hint(student_id)}", retry_after=wait) from error
 
 
 class PracticeTestCreate(BaseModel):
@@ -3774,7 +3792,7 @@ def guide_rate_limit(student_id: str, action: str, limit: int, message: str, win
         database.check_social_rate_limit(student_id, action, limit, window_minutes)
     except ValueError as error:
         wait = limit_retry_after(student_id, action, window_minutes)
-        raise guide_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.", retry_after=wait) from error
+        raise guide_error(429, "rate_limited", f"{message} Try again {_wait_phrase(wait)}.{pro_hint(student_id)}", retry_after=wait) from error
 
 
 GuideKind = Literal["study_guide", "summary", "cheat_sheet", "vocabulary", "practice", "timeline"]
@@ -4247,6 +4265,70 @@ def require_admin(authorization: str | None) -> dict:
     if not email or not confirmed or email not in allowed:
         raise not_found
     return user
+
+
+def require_plan_admin(authorization: str | None) -> dict:
+    """The verified account when its confirmed email is in OWNER_EMAILS or ADMIN_EMAILS;
+    otherwise a 404. An Unlimited plan gives no admin power."""
+    not_found = HTTPException(status_code=404, detail="Not Found")
+    allowed = admin_emails() | auth.owner_emails()
+    if not allowed or not authorization:
+        raise not_found
+    try:
+        user = auth.authenticated_user(authorization)
+    except HTTPException as error:
+        raise not_found from error
+    email = str(user.get("email") or "").strip().lower()
+    if not email or not user.get("email_confirmed_at") or user.get("is_anonymous") or email not in allowed:
+        raise not_found
+    if rate_limit.limiter.hit(f"plan_admin:{user['id']}", PLAN_ADMIN_PER_MINUTE):
+        raise HTTPException(status_code=429, detail="Too many changes. Wait a minute and try again.", headers={"Retry-After": "60"})
+    return user
+
+
+PLAN_ADMIN_PER_MINUTE = 30
+PLAN_ERRORS = {
+    "invalid_email": "Enter a full email address, like name@example.com.",
+    "disposable_email": "That’s a temporary email address. Use the person’s school or personal email.",
+    "invalid_plan": "Choose Pro or Unlimited.",
+}
+
+
+class PlanGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=254)
+    plan: Literal["pro", "unlimited"] = "pro"
+    note: str | None = Field(default=None, max_length=plans.NOTE_MAX)
+
+
+@app.get("/api/admin/access")
+def admin_access(authorization: Annotated[str | None, Header()] = None):
+    """What the #admin page may show this account: the feedback list (ADMIN_EMAILS) and
+    plan grants (ADMIN_EMAILS or OWNER_EMAILS). A 404 for everyone else."""
+    user = require_plan_admin(authorization)
+    email = str(user.get("email") or "").strip().lower()
+    return {"feedback": email in admin_emails(), "plans": True}
+
+
+@app.get("/api/admin/plans")
+def admin_list_plans(authorization: Annotated[str | None, Header()] = None):
+    require_plan_admin(authorization)
+    return {"grants": plans.list_grants()}
+
+
+@app.post("/api/admin/plans")
+def admin_grant_plan(data: PlanGrantRequest, authorization: Annotated[str | None, Header()] = None):
+    user = require_plan_admin(authorization)
+    try:
+        return plans.grant(data.email, data.plan, user["id"], data.note)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail={"code": str(error), "message": PLAN_ERRORS.get(str(error), "Couldn’t save that.")}) from error
+
+
+@app.delete("/api/admin/plans/{email}")
+def admin_revoke_plan(email: Annotated[str, PathParam(max_length=254)], authorization: Annotated[str | None, Header()] = None):
+    require_plan_admin(authorization)
+    return {"removed": plans.revoke(email)}
 
 
 @app.get("/api/admin/feedback")
