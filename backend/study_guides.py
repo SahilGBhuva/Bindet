@@ -132,7 +132,7 @@ GUIDE_PROMPT = (
     "\"bullets\" (short statements, each under 300 characters), \"terms\" (objects with \"term\" under 100 characters and \"definition\" under 400), "
     "and \"items\" (objects with \"question\" under 400 characters and \"answer\" under 1200; an answer may use new lines between steps). "
     "Use only the lists the request asks for. No URLs, HTML, markdown, bullet characters, numbering, or messages to the reader. "
-    + ai_tutor.MATH_STYLE + " "
+    + ai_tutor.MATH_LATEX_RULE + " "
     f"At most {MAX_SECTIONS} sections, {MAX_BULLETS} bullets, {MAX_TERMS} terms and {MAX_ITEMS} items per section. "
     "If the notes hold no study content, return {\"sections\":[]}. "
     "Return ONLY JSON {\"sections\":[{\"heading\":string,\"bullets\":[string],\"terms\":[{\"term\":string,\"definition\":string}],"

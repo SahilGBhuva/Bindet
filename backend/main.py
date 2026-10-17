@@ -313,7 +313,7 @@ def question_cache_key(student_id: str, course: str, unit: str, focus: str, diff
     Questions made with a student's instructions are personal too, and keyed by their hash."""
     owner_scope = "shared" if question_scope_is_shared(source_text) and not instructions_hash else student_id
     source_fingerprint = hashlib.blake2s(source_text.encode("utf-8"), digest_size=12).hexdigest() if source_text else "none"
-    parts = [owner_scope, course, unit, focus, str(difficulty), source_fingerprint]
+    parts = [owner_scope, course, unit, focus, str(difficulty), source_fingerprint, "prompt:" + ai_tutor.QUIZ_PROMPT_VERSION]
     if instructions_hash:
         parts.append("instructions:" + instructions_hash)
     return ai_session_id(*parts)
@@ -905,6 +905,7 @@ def deterministic_verdict(student_answer: str, correct_answer: str, topic: str =
     LaTeX on either side is read as plain text first, so "$\\frac{1}{2}$", "\\frac12"
     and "1/2" are the same answer.
     """
+    math_key, original_correct = ai_tutor.math_answer_key(student_answer), correct_answer
     student_answer = ai_tutor.latex_to_plain(student_answer)
     correct_answer = ai_tutor.latex_to_plain(correct_answer)
     if not canonical_answer(student_answer):
@@ -921,6 +922,9 @@ def deterministic_verdict(student_answer: str, correct_answer: str, topic: str =
             return False
         return None
     if canonical_answer(student_answer) == canonical_answer(correct_answer):
+        return True
+    # The same math written another way: "$\\frac{\\pi}{2}$", "π/2" and "pi/2"; "180°" and "180 degrees".
+    if math_key and math_key == ai_tutor.math_answer_key(original_correct):
         return True
     return None
 
