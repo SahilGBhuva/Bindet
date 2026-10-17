@@ -91,7 +91,10 @@ export type Profile = {
   best_streak: number
   login_streak: number
   best_login_streak: number
+  /* Free unless the bindet team granted this email a plan; missing from older servers. */
+  plan?: Plan
 }
+export type Plan = 'free' | 'pro' | 'unlimited'
 /* A row of the weekly league (you and your friends). */
 export type LeaguePerson = {
   student_id: string

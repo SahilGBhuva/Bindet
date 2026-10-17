@@ -14,6 +14,7 @@ import { saveThemePreference, useThemePreference, type ThemePreference } from '.
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
 import { REVIEW_ALL_HASH, useReviewSummary } from './useReviewSummary'
+import { PlanBadge } from '../components/PlanBadge'
 import './SiteSidebar.css'
 
 // Still exported from here for the pages that already import it with the sidebar.
@@ -627,6 +628,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             <div className="bindit-rail__account">
               <span className="bindit-rail__avatar" aria-hidden="true" />
               <a className="bindit-rail__name" href="#profile" aria-label={`Your profile, ${displayName}`}>{displayName}</a>
+              <PlanBadge plan={profile?.plan} className="bindit-rail__plan" />
               <a className="bindit-rail__mini" href="#settings" aria-label="Account settings" title="Account settings">{glyphs.gear}</a>
             </div>
 

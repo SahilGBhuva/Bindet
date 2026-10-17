@@ -37,8 +37,8 @@ ANONYMOUS_PER_MINUTE = 60       # requests without a sign-in, per address
 UNVERIFIED_TOKENS_PER_MINUTE = 600
 AI_PER_MINUTE = 20              # tutor messages, quiz and flashcard generation, grading, note uploads, per student
 
-# Owner accounts (OWNER_EMAILS, confirmed email) skip per-student limits; they keep this
-# much higher burst cap so a runaway loop still can't spend without bound.
+# Owner accounts (OWNER_EMAILS, confirmed email) and Unlimited accounts skip per-student
+# limits; they keep this much higher burst cap so a runaway loop still can't spend without bound.
 OWNER_AI_PER_MINUTE = 120
 
 AI_PATHS = ("/api/tutor/messages", "/api/generate-question", "/api/generate-flashcards", "/api/analyze-answer", "/api/notes", "/api/practice-tests",
@@ -205,10 +205,96 @@ def is_owner(student_id: str | None) -> bool:
         return student_id in _owner_ids
 
 
+# Plans (plans.py): the plan auth resolved for each verified account, kept briefly so a
+# revoked grant ends within PLAN_CACHE_SECONDS on every instance. Refreshed by auth on
+# every sign-in check once the entry is stale.
+PLAN_CACHE_SECONDS = 120
+MAX_PLAN_IDS = 20_000
+PRO_AI_MULTIPLIER = 3
+# Per-student AI limits Pro multiplies. Everything else (the help bot, friend requests,
+# nudges, writes, sign-in and the burst guard) is the same for every plan.
+PRO_AI_ACTIONS = frozenset({
+    "tutor_message", "tutor_message_day", "tutor_strong", "otto_title", "otto_memory",
+    "ai_ocr", "note_upload", "flashcards_note", "ai_flashcards", "ai_question", "ai_grading",
+    "practice_test", "practice_test_start", "study_guide", "study_guide_request",
+})
+_plans: dict[str, tuple[float, str]] = {}
+_plan_lock = threading.Lock()
+
+
+def mark_plan(student_id: str, plan: str, now: float | None = None) -> None:
+    """Remember the plan auth resolved for this account ('free', 'pro' or 'unlimited')."""
+    if not student_id:
+        return
+    now = time.monotonic() if now is None else now
+    with _plan_lock:
+        if student_id not in _plans and len(_plans) >= MAX_PLAN_IDS:
+            for stale in [key for key, (expires, _) in _plans.items() if expires <= now]:
+                del _plans[stale]
+            if len(_plans) >= MAX_PLAN_IDS:
+                _plans.clear()
+        _plans[student_id] = (now + PLAN_CACHE_SECONDS, plan)
+
+
+def mark_pro(student_id: str) -> None:
+    mark_plan(student_id, "pro")
+
+
+def plan_is_fresh(student_id: str, now: float | None = None) -> bool:
+    now = time.monotonic() if now is None else now
+    with _plan_lock:
+        entry = _plans.get(student_id)
+        return entry is not None and entry[0] > now
+
+
+def plan_of(student_id: str | None, now: float | None = None) -> str:
+    """'free' unless auth recently resolved a grant for this account. A stale entry counts as
+    free; auth refreshes it on the account's next request."""
+    if not student_id:
+        return "free"
+    now = time.monotonic() if now is None else now
+    with _plan_lock:
+        entry = _plans.get(student_id)
+        return entry[1] if entry is not None and entry[0] > now else "free"
+
+
+def is_pro(student_id: str | None) -> bool:
+    return plan_of(student_id) == "pro"
+
+
+def is_unlimited(student_id: str | None) -> bool:
+    return plan_of(student_id) == "unlimited"
+
+
+def forget_plans() -> None:
+    """Drop every cached plan (after a grant changes), so this instance re-reads them."""
+    with _plan_lock:
+        _plans.clear()
+
+
+def skips_student_limits(student_id: str | None) -> bool:
+    """Owners and Unlimited accounts have no per-student limits. Unlimited gives no other
+    owner power: admin routes and owner-only features check auth.is_owner_user."""
+    return is_owner(student_id) or is_unlimited(student_id)
+
+
+def limit_for(student_id: str | None, action: str, limit: int) -> int:
+    """The per-student limit for this account: PRO_AI_MULTIPLIER times higher on Pro for AI actions."""
+    if action in PRO_AI_ACTIONS and is_pro(student_id):
+        return limit * PRO_AI_MULTIPLIER
+    return limit
+
+
 def token_is_owner(authorization: str) -> bool:
     """True when auth has verified this exact token and it belongs to an owner account."""
     import auth  # auth imports this module, so import it lazily
     return auth.is_owner_token(authorization)
+
+
+def token_skips_student_limits(authorization: str) -> bool:
+    """True when auth has verified this exact token and it belongs to an owner or Unlimited account."""
+    import auth  # auth imports this module, so import it lazily
+    return auth.is_owner_token(authorization) or auth.is_unlimited_token(authorization)
 
 
 def token_key(authorization: str | None) -> str | None:
@@ -231,7 +317,7 @@ def check_request(path: str, method: str, address: str, authorization: str | Non
             checks.append((f"unverified:{address}", UNVERIFIED_TOKENS_PER_MINUTE))
         checks.append((f"user:{token}", SIGNED_IN_PER_MINUTE))
         if method == "POST" and path.startswith(AI_PATHS):
-            checks.append((f"ai:{token}", OWNER_AI_PER_MINUTE if token_is_owner(authorization or "") else AI_PER_MINUTE))
+            checks.append((f"ai:{token}", OWNER_AI_PER_MINUTE if token_skips_student_limits(authorization or "") else AI_PER_MINUTE))
     else:
         checks.append((f"anon:{address}", ANONYMOUS_PER_MINUTE))
     for key, limit in checks:

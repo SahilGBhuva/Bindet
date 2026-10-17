@@ -314,6 +314,7 @@ study_tasks = Table(
 # denied, and the backend (the table owner) is unaffected either way.
 RLS_TABLES = (
     "account_onboarding",
+    "account_plans",
     "cache_refs",
     "extraction_cache",
     "flashcard_cache",
@@ -375,6 +376,7 @@ RLS_TABLES = (
 # (study_notes) must not be listed here.
 CLIENT_REVOKED_TABLES = (
     "account_onboarding",
+    "account_plans",
     "cache_refs",
     "extraction_cache",
     "feedback",
@@ -847,9 +849,12 @@ def _prune_rate_events_if_due(now: float | None = None) -> bool:
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Use shared storage so limits still hold across serverless instances.
 
-    Owner accounts (auth.owner_emails) are never limited; nothing is recorded for them."""
-    if rate_limit.is_owner(student_id):
+    Owner accounts (auth.owner_emails) and Unlimited accounts (plans.py) are never limited;
+    nothing is recorded for them. Pro accounts get PRO_AI_MULTIPLIER times the limit for
+    the AI actions in rate_limit.PRO_AI_ACTIONS."""
+    if rate_limit.skips_student_limits(student_id):
         return
+    limit = rate_limit.limit_for(student_id, action, limit)
     init_db()
     _prune_rate_events_if_due()
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)

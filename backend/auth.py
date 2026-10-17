@@ -243,6 +243,20 @@ def _note_owner(user: dict) -> None:
         rate_limit.forget_owner(str(user.get('id') or ''))
 
 
+def _note_plan(user: dict) -> None:
+    """Refresh the account's plan (plans.py) in rate_limit's short-lived registry."""
+    import plans  # plans imports database, which imports rate_limit; keep auth light
+    plans.refresh(user)
+
+
+def is_unlimited_token(authorization: str) -> bool:
+    """The cached, verified account for this token has an Unlimited grant. Never verifies on its own."""
+    if not authorization:
+        return False
+    cached = _cached(_cache_key(authorization), time.monotonic())
+    return bool(cached and cached[0] is not None and rate_limit.is_unlimited(str(cached[0].get('id') or '')))
+
+
 def is_owner_token(authorization: str) -> bool:
     """The cached, verified account for this token is an owner. Never verifies on its own."""
     if not authorization:
@@ -273,6 +287,7 @@ def authenticated_user(authorization: str | None, *, allow_disposable: bool = Fa
         if not allow_disposable:
             _refuse_disposable(user)
         _note_owner(user)
+        _note_plan(user)
         return user
     if rate_limit.limiter.is_limited(f'badauth:{rate_limit.client_address.get()}', FAILED_AUTH_PER_MINUTE):
         # This address keeps sending bad tokens; don't spend a Supabase call on another one.
@@ -296,4 +311,5 @@ def authenticated_user(authorization: str | None, *, allow_disposable: bool = Fa
     if not allow_disposable:
         _refuse_disposable(user)
     _note_owner(user)
+    _note_plan(user)
     return user

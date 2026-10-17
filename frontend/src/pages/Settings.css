@@ -133,3 +133,9 @@
 /* Help & feedback (guides and the feedback form come from pages/More.tsx). */
 .settings__feedback { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
 .settings__subhead { margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: var(--weight-semibold); }
+
+/* Plan: badge beside the name, the bindet Pro section */
+.settings__name-line { display: inline-flex; align-items: center; gap: var(--space-2); }
+.settings__plan-value { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-2); min-width: 0; }
+.settings__plan-list { display: grid; gap: var(--space-2); margin: 0; padding-left: 1.1em; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; }
+.settings__plan-list b { color: var(--color-text); font-weight: var(--weight-semibold); }

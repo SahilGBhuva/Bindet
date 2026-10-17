@@ -23,6 +23,8 @@ safe for foreign keys:
 - Practice lab: rounds and personal bests, and every challenge the student sent or
   received (the friend's copy of a received challenge goes too), and feedback they sent.
 - First-run setup state (account_onboarding).
+- The plan grant for the account's confirmed email (account_plans); grants the account
+  made for other people stay, without its id.
 - On Postgres, the browser-written group chat rows: messages the student sent, their
   read receipts and typing state.
 
@@ -45,6 +47,7 @@ import help_bot
 import note_store
 import onboarding
 import otto
+import plans
 import practice
 import practice_tests
 import questions
@@ -72,6 +75,7 @@ def init_all() -> None:
     onboarding.init_onboarding()
     help_bot.init_help_bot()
     otto.init_otto()
+    plans.init_plans()
 
 
 def _now() -> datetime:
@@ -241,10 +245,11 @@ def _delete_social(connection, student_id: str) -> None:
     )))
 
 
-def delete_account_data(student_id: str) -> dict:
+def delete_account_data(student_id: str, email: str | None = None) -> dict:
     """Delete every row tied to student_id in one transaction. Returns a summary
     ({"groups_deleted", "groups_transferred", "tasks_handed_over", "cache_rows",
-    "image_paths"}); image_paths are the private-bucket objects named by uploaded_images,
+    "image_paths"}); email is the account's confirmed inbox, whose plan grant goes too.
+    image_paths are the private-bucket objects named by uploaded_images,
     which the caller deletes from storage."""
     if not student_id:
         raise ValueError("student_required")
@@ -261,6 +266,7 @@ def delete_account_data(student_id: str) -> dict:
         feedback.delete_for_account_in(connection, student_id)
         onboarding.delete_for_account_in(connection, student_id)
         otto.delete_for_account_in(connection, student_id)
+        plans.delete_for_account_in(connection, student_id, email)
 
         if "study_group_messages" in chat_tables:
             connection.execute(text("DELETE FROM public.study_group_messages WHERE sender_id = :id"), {"id": student_id})

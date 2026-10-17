@@ -571,3 +571,4 @@
 .bindit-rail__strip-link:hover { background: var(--color-surface-hover); }
 .bindit-rail__strip-link.is-current { background: var(--color-surface-active); }
 .bindit-rail__strip-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.bindit-rail__plan { flex: none; height: 18px; padding: 0 6px; }
