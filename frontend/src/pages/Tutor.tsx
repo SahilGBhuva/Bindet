@@ -13,6 +13,7 @@ import { OttoSheet, type OttoSheetTab } from '../components/otto/OttoSheet'
 import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
+import { GuidePdfButton } from '../components/print/PdfButtons'
 import { useAnnounce } from '../lib/announce'
 import { awaitingReply, REPLY_RECHECKS_MS, replyArrivedAfter } from '../lib/ottoReplies'
 import { HEIC_ACCEPT, HeicTooLargeError, isHeicFile, isImageFile } from '../lib/heic'
@@ -1011,7 +1012,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     {guides.map((guide) => {
                       const kind = guideKind(guide.kind)
                       return (
-                        <a key={guide.id} className={`guide-card ui-tone--${kind.tone}`} href={guideHash(guide.id)}>
+                        <div key={guide.id} className="guide-card__row">
+                        <a className={`guide-card ui-tone--${kind.tone}`} href={guideHash(guide.id)}>
                           <span className="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z" /><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h4" /></svg></span>
                           <span className="guide-card__text">
                             <span className="guide-card__kind">{kind.label}</span>
@@ -1019,6 +1021,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                           </span>
                           <span className="guide-card__open">Open<span aria-hidden="true"> →</span></span>
                         </a>
+                        <GuidePdfButton guideId={guide.id} accessToken={token} label="PDF" className="guide-card__pdf" />
+                        </div>
                       )
                     })}
                     {message.status === 'sending' && message.progress !== undefined && message.progress < 1 ? (

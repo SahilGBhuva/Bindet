@@ -24,6 +24,7 @@ import { useNotePhoto } from '../lib/useNotePhoto'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
+import { FlashcardsPdfButton } from '../components/print/PdfButtons'
 import type { StudyGuide } from '../lib/studyGuides'
 import { COURSE_NAME_MAX, NAME_TOO_LONG_MESSAGE, nameRejected, noteDeposit, uploadFailure, UNIT_NAME_MAX } from '../lib/noteUpload'
 import type { NoteSource } from '../lib/noteUpload'
@@ -2442,12 +2443,15 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                 <div className={`tools__cards${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
                   {unsavedPaste}
                   {cards.length || cardMode === 'review' ? (
+                    <div className="tools__card-head">
                     <div className="ui-segmented tools__card-modes" role="group" aria-label="Flashcard mode">
                       <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'browse'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'browse' }))}>Browse</button>
                       <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'review'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'review' }))}>
                         Review
                         {unitReview?.due ? <span className="ui-count">{unitReview.due}</span> : null}
                       </button>
+                    </div>
+                    {cards.length ? <FlashcardsPdfButton cards={cards} course={activeCourse} unit={activeUnit} className="tools__cards-pdf" /> : null}
                     </div>
                   ) : null}
                   {cardMode === 'review' ? (

@@ -734,3 +734,7 @@
   .practice__actions .ui-button { flex: 1 1 100%; }
   .practice__review-item { padding: var(--space-3) var(--space-4); }
 }
+
+/* Download PDF of the questions while taking the test (the key comes with the results). */
+.practice__print { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.practice.is-focus .practice__print { display: none; }

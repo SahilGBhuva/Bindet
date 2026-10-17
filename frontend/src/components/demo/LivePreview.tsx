@@ -106,6 +106,8 @@ const ACTION_NAMES: [string, string][] = [
   ['.tools__source *', 'Remove notes'],
   ['.guides__make', 'Make a study guide'],
   ['.guide__tools *', 'Print or save a study guide'],
+  // Download PDF (guides, flashcards, practice tests) stays locked like other exports.
+  ['.pdf-button, .pdf-button *', 'Download a PDF'],
   ['.guide__cards', 'Make flashcards from a study guide'],
   ['.avatar', 'Change your avatar'],
   ['.profile__add-friend, .profile__suggest-add', 'Add a friend'],

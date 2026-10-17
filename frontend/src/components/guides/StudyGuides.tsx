@@ -3,10 +3,11 @@ import type { FormEvent, ReactNode } from 'react'
 import { ApiError, isAbortError, parseServerTime, RequestTimeoutError } from '../../lib/api'
 import { useAnnounce } from '../../lib/announce'
 import { useData } from '../../lib/dataSource'
-import { GUIDE_KINDS, guideFileName, guideKind, guideMarkdown, guidePlainText } from '../../lib/studyGuides'
-import type { GuideKind, GuideSection, StudyGuide, StudyGuideList } from '../../lib/studyGuides'
+import { GUIDE_KINDS, guideFileName, guideHidesAnswers, guideKind, guideMarkdown, guidePlainText } from '../../lib/studyGuides'
+import type { GuideKind, StudyGuide, StudyGuideList } from '../../lib/studyGuides'
 import { INSTRUCTIONS_MAX } from '../../lib/studyPrefs'
 import { MathText } from '../math/Math'
+import { GuidePdfButton } from '../print/PdfButtons'
 import './StudyGuides.css'
 
 /*
@@ -47,11 +48,6 @@ function day(value: string) {
 
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? '' : 's'}`
-}
-
-/* Answers start hidden for practice problems and test-style questions; worked examples show theirs. */
-function hidesAnswers(kind: GuideKind, section: GuideSection) {
-  return kind === 'practice' || /question|quiz|test|practice|check/i.test(section.heading)
 }
 
 function Lines({ text }: { text: string }) {
@@ -276,7 +272,6 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
   const [title, setTitle] = useState('')
   const [copied, setCopied] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
-  const sheet = useRef<HTMLElement>(null)
   const base = useId()
   const loaded = useEffectEvent((result: StudyGuide) => onLoaded?.(result))
   const loadedId = guide?.id
@@ -320,7 +315,7 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
   }
 
   const info = guideKind(guide.kind)
-  const hiddenKeys = guide.sections.flatMap((section, s) => hidesAnswers(guide.kind, section) ? section.items.map((_, i) => `${s}-${i}`) : [])
+  const hiddenKeys = guide.sections.flatMap((section, s) => guideHidesAnswers(guide.kind, section) ? section.items.map((_, i) => `${s}-${i}`) : [])
   const allShown = hiddenKeys.length > 0 && hiddenKeys.every((key) => revealed[key])
   const cardsUnit = guide.unit ?? fallbackUnit ?? ''
 
@@ -422,42 +417,16 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  /*
-   * Prints only the guide: a copy of it (every answer shown, no buttons) is placed at the top
-   * of the page and the print styles hide everything else, so no app chrome reaches paper.
-   */
-  function print() {
-    if (!sheet.current) return
-    const copy = sheet.current.cloneNode(true) as HTMLElement
-    copy.querySelectorAll('.guide__bar, .guide__actions, .guide__manage, .guide__reveal, .guide__status, .guide__unchanged').forEach((node) => node.remove())
-    copy.querySelectorAll('[hidden]').forEach((node) => node.removeAttribute('hidden'))
-    copy.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
-    copy.removeAttribute('aria-labelledby')
-    const holder = document.createElement('div')
-    holder.className = 'guide-print'
-    holder.setAttribute('aria-hidden', 'true')
-    holder.append(copy)
-    document.body.append(holder)
-    document.documentElement.classList.add('is-printing-guide')
-    const done = () => {
-      document.documentElement.classList.remove('is-printing-guide')
-      holder.remove()
-      window.removeEventListener('afterprint', done)
-    }
-    window.addEventListener('afterprint', done)
-    window.print()
-  }
-
   const toggleAll = () => setRevealed(allShown ? {} : Object.fromEntries(hiddenKeys.map((key) => [key, true])))
 
   return (
-    <article ref={sheet} className={`guide guide--${guide.kind} ui-tone--${info.tone}`} aria-labelledby={`${base}-title`}>
+    <article className={`guide guide--${guide.kind} ui-tone--${info.tone}`} aria-labelledby={`${base}-title`}>
       <div className="guide__bar">
         <button className="ui-button ui-button--ghost guide__back" type="button" onClick={onBack}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>{backLabel}
         </button>
         <div className="guide__tools" role="group" aria-label="Guide actions">
-          <button className="ui-button ui-button--sm guide__print" type="button" onClick={print}>Print</button>
+          <GuidePdfButton guide={guide} className="guide__pdf" />
           <button className="ui-button ui-button--sm guide__copy" type="button" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy'}</button>
           <button className="ui-button ui-button--sm guide__download" type="button" onClick={() => download('md')}>Download .md</button>
           <button className="ui-button ui-button--sm guide__download" type="button" onClick={() => download('txt')}>Download .txt</button>
@@ -487,7 +456,6 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
           {guide.unit ?? 'Whole course'} · {guide.course} · from {plural(guide.note_count, 'note')} · {day(guide.updated_at)}
           {guide.instructions ? <> · focus: “{guide.instructions}”</> : null}
         </p>
-        <p className="guide__print-note">Made by Otto in bindet from your own notes. Check anything important against them.</p>
       </header>
 
       {status && statusAt === 'top' ? <p className="guide__status">{status}</p> : null}
@@ -511,7 +479,7 @@ export function GuideReader({ guideId, accessToken, fallbackUnit, notice = '', b
 
       <div className="guide__body">
         {guide.sections.map((section, s) => {
-          const hides = hidesAnswers(guide.kind, section)
+          const hides = guideHidesAnswers(guide.kind, section)
           return (
             <section key={s} className="guide__section" aria-labelledby={`${base}-s${s}`}>
               <h3 className="guide__heading" id={`${base}-s${s}`}><MathText text={section.heading} /></h3>
