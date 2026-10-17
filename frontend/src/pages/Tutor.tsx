@@ -32,7 +32,8 @@ const MAX_IMAGES = 3
 // The server accepts 4 MB per image and 12 MB per request; base64 adds a third, so
 // all images together must stay under about 8.5 MB. Photos are downscaled first.
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
-const MAX_TOTAL_IMAGE_BYTES = 8.5 * 1024 * 1024
+// One request to the server must stay under the host's ~4.5 MB body limit; base64 adds a third.
+const MAX_TOTAL_IMAGE_BYTES = 3 * 1024 * 1024
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
@@ -541,7 +542,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     if (streaming) return
     if (attachments.some((item) => item.state === 'preparing')) { setNotice('Images are still being prepared. One moment.'); return }
     const total = attachments.reduce((sum, item) => sum + (item.state === 'ready' ? item.size ?? 0 : 0), 0)
-    if (total > MAX_TOTAL_IMAGE_BYTES) { setNotice('These images are too large to send together. Remove one and try again.'); return }
+    if (total > MAX_TOTAL_IMAGE_BYTES) { setNotice('These photos are too big to send together. Send them one at a time.'); return }
     const content = draft.trim() || (attachments.length ? 'What can you tell me about this?' : '')
     if (!content) return
     recognition.current?.stop()
