@@ -82,15 +82,20 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
   // on touch screens (so the on-screen keyboard doesn't open over the suggestions).
   useEffect(() => {
     const fine = window.matchMedia('(pointer: fine)').matches
-    if (fine) input.current?.focus()
-    else panel.current?.focus()
+    // preventScroll: focus never scrolls the panel (or, with a zoomed-in page, the page) sideways.
+    if (fine) input.current?.focus({ preventScroll: true })
+    else panel.current?.focus({ preventScroll: true })
   }, [])
 
   // Each new answer scrolls into view from its question.
   useEffect(() => {
     const scroller = body.current
     const last = scroller?.querySelector<HTMLElement>('.helpbot__turn:last-child')
-    if (scroller && last) scroller.scrollTop = Math.max(0, last.offsetTop - 8)
+    if (!scroller || !last) return
+    const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const top = Math.max(0, last.offsetTop - 12)
+    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
+    else scroller.scrollTop = top
   }, [turns])
 
   // A click outside the panel (except on its own corner button) closes it.
@@ -189,7 +194,7 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
       onKeyDown={onKeyDown}
     >
       <header className="helpbot__head">
-        <div>
+        <div className="helpbot__heading">
           <h2 className="helpbot__title" id={titleId}>Need help using bindet?</h2>
           <p className="helpbot__intro" id={introId}>Pick a question or ask your own. For schoolwork, ask Otto.</p>
         </div>
@@ -223,7 +228,10 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
             <ul className="helpbot__chips">
               {suggestions.map((entry) => entry ? (
                 <li key={entry.id}>
-                  <button type="button" className="helpbot__chip" onClick={() => askSuggested(entry.id)} disabled={busy}>{entry.question}</button>
+                  <button type="button" className="helpbot__chip" onClick={() => askSuggested(entry.id)} disabled={busy}>
+                    <span>{entry.question}</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg>
+                  </button>
                 </li>
               ) : null)}
             </ul>
