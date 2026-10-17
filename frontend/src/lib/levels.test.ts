@@ -39,6 +39,6 @@ describe('levels', () => {
       'Make Hard cards for Cells? Your Easy cards are saved, so switching back brings them back. Review progress restarts for cards that change.',
     )
     expect(levelRemakeQuestion('easy', 'custom', 'Cells')).toContain('Your current cards are saved')
-    expect(levelRemakeQuestion('easy', null, 'Cells')).toMatch(/^Make Easy cards for Cells\?/)
+    expect(levelRemakeQuestion('easy', null, 'Cells')).toBe('Make Easy cards for Cells?')
   })
 })

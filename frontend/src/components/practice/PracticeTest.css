@@ -737,8 +737,7 @@
 
 /* Levels and test mode (LevelPicker.tsx holds the picker and the level chips). */
 
-.practice__tags,
-.practice__history-tags {
+.practice__tags {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
@@ -746,7 +745,6 @@
 }
 
 .practice__tags { margin-top: 4px; }
-.practice__history-tags { margin-top: 2px; }
 
 .practice__mode-badge {
   background: var(--color-violet-tint);

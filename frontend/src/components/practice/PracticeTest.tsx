@@ -401,8 +401,6 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                     {done ? `${entry.score ?? 0} of ${entry.question_count} correct` : 'In progress'}
                     {done ? <span className={`ui-badge ${percent >= 70 ? 'ui-badge--positive' : 'ui-badge--warning'}`}>{percent}%</span> : null}
                     {entry.over_time ? <span className="ui-badge">Over time</span> : null}
-                  </span>
-                  <span className="practice__history-tags">
                     <LevelChip level={levelOf(entry.difficulty)} />
                     {entry.test_mode ? <span className="ui-badge practice__mode-badge">Test mode</span> : null}
                   </span>

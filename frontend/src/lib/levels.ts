@@ -60,6 +60,7 @@ export function deckLevel(levels: readonly (Level | 'custom' | undefined)[]): Le
  */
 export function levelRemakeQuestion(level: Level, current: Level | 'custom' | 'mixed' | null, unit: string) {
   const name = LEVEL_INFO[level].label
-  const kept = current === null || current === 'mixed' || current === 'custom' ? 'Your current cards are' : `Your ${LEVEL_INFO[current].label} cards are`
+  if (current === null) return `Make ${name} cards for ${unit}?`
+  const kept = current === 'mixed' || current === 'custom' ? 'Your current cards are' : `Your ${LEVEL_INFO[current].label} cards are`
   return `Make ${name} cards for ${unit}? ${kept} saved, so switching back brings them back. Review progress restarts for cards that change.`
 }
