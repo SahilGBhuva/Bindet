@@ -78,6 +78,8 @@ export async function prepareNotePhoto(file: File, name: string): Promise<File> 
 /* A camera photo of notes on its way in: prepared once, so Retry resends the same image. */
 export type PhotoStage = 'preparing' | 'uploading' | 'reading' | 'added' | 'failed'
 export type PhotoJob = {
+  /* Which photo this is, so a late update for an earlier photo never lands on a newer one. */
+  id: number
   file: File
   preview: string
   name: string

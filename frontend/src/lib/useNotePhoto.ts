@@ -31,54 +31,91 @@ export function useNotePhoto(options: NotePhotoOptions) {
   // Each preview URL is released when the next photo replaces it, or when the page closes.
   const photoPreview = photo?.preview
   useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview) }, [photoPreview])
+  // A photo still being prepared when the page closes must not leave its preview URL behind.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const jobs = useRef(0)
+  // One photo at a time: a second one taken while the first is being prepared or sent
+  // would be numbered from the same notes and get the same page number.
+  const inFlight = useRef(false)
+  const busy = photo?.stage === 'preparing' || photo?.stage === 'uploading' || photo?.stage === 'reading'
+
+  /* Changes the job only if it is still the one shown. */
+  function update(id: number, change: (job: PhotoJob) => PhotoJob) {
+    setPhoto((current) => current && current.id === id ? change(current) : current)
+  }
 
   function open() {
+    if (inFlight.current) return
     input.current?.click()
   }
 
   async function onChange(event: ChangeEvent<HTMLInputElement>) {
     const taken = event.target.files?.[0]
     event.target.value = ''
-    if (!taken) return
+    if (!taken || inFlight.current) return
     const place = options.placeFor()
     if (!place) return
     const { course, unit } = place
-    options.onStart?.()
-    const listed = options.notesIn(place)
-    // No preview URL for a photo the browser may not be able to draw (iPhone HEIC): a file chip shows instead.
-    const preview = (file: File) => isHeicFile(file) ? '' : URL.createObjectURL(file)
-    let name = ''
-    if (listed instanceof Promise) {
-      // The unit's notes are still being read: show the photo straight away, named once they are in.
-      setPhoto({ file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
-      name = photoNoteName(data.now(), await listed.catch((): NoteNames => []))
-      setPhoto((current) => current && current.file === taken ? { ...current, name } : current)
-    } else {
-      name = photoNoteName(data.now(), listed)
-      setPhoto({ file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
-    }
-    let prepared: File
+    const id = ++jobs.current
+    inFlight.current = true
     try {
-      prepared = await prepareNotePhoto(taken, name)
-    } catch (error) {
-      setPhoto((current) => current && { ...current, stage: 'failed' })
-      options.onPrepareError(error instanceof Error ? error.message : 'That photo could not be prepared.')
-      return
+      options.onStart?.()
+      const listed = options.notesIn(place)
+      // No preview URL for a photo the browser may not be able to draw (iPhone HEIC): a file chip shows instead.
+      const preview = (file: File) => isHeicFile(file) ? '' : URL.createObjectURL(file)
+      let name = ''
+      if (listed instanceof Promise) {
+        // The unit's notes are still being read: show the photo straight away, named once they are in.
+        setPhoto({ id, file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
+        name = photoNoteName(data.now(), await listed.catch((): NoteNames => []))
+        update(id, (current) => ({ ...current, name }))
+      } else {
+        name = photoNoteName(data.now(), listed)
+        setPhoto({ id, file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
+      }
+      let prepared: File
+      try {
+        prepared = await prepareNotePhoto(taken, name)
+      } catch (error) {
+        update(id, (current) => ({ ...current, stage: 'failed' }))
+        options.onPrepareError(error instanceof Error ? error.message : 'That photo could not be prepared.')
+        return
+      }
+      // The page may have closed while the photo was prepared: the photo is still sent, but
+      // no preview URL is made, since nothing would ever show or release it.
+      const job: PhotoJob = { id, file: prepared, preview: mounted.current ? preview(prepared) : '', name, course, unit, stage: 'uploading' }
+      setPhoto(job)
+      await send(job)
+    } finally {
+      inFlight.current = false
     }
-    const job: PhotoJob = { file: prepared, preview: preview(prepared), name, course, unit, stage: 'uploading' }
-    setPhoto(job)
-    await resend(job)
   }
 
-  /* Sends a prepared photo (again, for Retry). */
+  async function send(job: PhotoJob) {
+    update(job.id, (current) => ({ ...current, stage: 'uploading' }))
+    const saved = await options.upload(job, () => update(job.id, (current) => current.stage === 'uploading' ? { ...current, stage: 'reading' } : current))
+    update(job.id, (current) => ({ ...current, stage: saved ? 'added' : 'failed' }))
+  }
+
+  /* Sends a prepared photo again (Retry). */
   async function resend(job: PhotoJob) {
-    setPhoto((current) => current && { ...current, stage: 'uploading' })
-    const saved = await options.upload(job, () => setPhoto((current) => current && current.stage === 'uploading' ? { ...current, stage: 'reading' } : current))
-    setPhoto((current) => current && { ...current, stage: saved ? 'added' : 'failed' })
+    if (inFlight.current) return
+    inFlight.current = true
+    try {
+      await send(job)
+    } finally {
+      inFlight.current = false
+    }
   }
 
   return {
     photo,
+    /* A photo is being prepared, sent or read: the camera button should be disabled. */
+    busy,
     open,
     resend,
     clear: () => setPhoto(null),

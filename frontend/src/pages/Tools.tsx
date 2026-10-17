@@ -365,6 +365,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [removingNoteId, setRemovingNoteId] = useState('')
   const [notice, setNotice] = useState('')
   const [uploading, setUploading] = useState<'' | NoteSource>('')
+  // Uploads still running: busy is only cleared when the last one finishes, never by an
+  // earlier one finishing while a photo is still on its way.
+  const uploadsInFlight = useRef(0)
   const [uploadError, setUploadError] = useState<{ source: NoteSource; message: string; retry: boolean } | null>(null)
   const [cardIndex, setCardIndex] = useState(0)
   const [cardFlipped, setCardFlipped] = useState(false)
@@ -1463,11 +1466,16 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     const course = activeCourse
     const unit = activeUnit
     setDuplicate(null)
+    uploadsInFlight.current += 1
     setUploading(source)
+    const finished = () => {
+      uploadsInFlight.current = Math.max(0, uploadsInFlight.current - 1)
+      if (!uploadsInFlight.current) setUploading('')
+    }
     if (!allowDuplicate && source !== 'photo') {
       const twin = await sameNotes(candidate)
       if (twin) {
-        setUploading('')
+        finished()
         setUploadError(null)
         setDuplicate({ source, file: candidate, name: twin.fileName, course, unit })
         return false
@@ -1499,7 +1507,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       setUploadError({ source, ...uploadFailure(error, source) })
       return false
     } finally {
-      setUploading('')
+      finished()
     }
   }
 
@@ -2221,7 +2229,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                       className="ui-button tools__photo-button"
                       type="button"
                       onClick={openCamera}
-                      disabled={uploadBusy}
+                      disabled={uploadBusy || notePhoto.busy}
                     >
                       <CameraIcon />
                       Take a photo of your notes
@@ -2251,7 +2259,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                         </div>
                         {photo.stage === 'preparing' || photo.stage === 'uploading' || photo.stage === 'reading' ? <span className="ui-spinner" aria-hidden="true" /> : null}
                         {photo.stage === 'added' || photo.stage === 'failed' ? (
-                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy}>
+                          <button className="ui-button tools__photo-more" type="button" onClick={openCamera} disabled={uploadBusy || notePhoto.busy}>
                             {photo.stage === 'added' ? 'Add another page' : 'Take it again'}
                           </button>
                         ) : null}
