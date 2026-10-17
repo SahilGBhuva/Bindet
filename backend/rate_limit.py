@@ -213,10 +213,14 @@ MAX_PLAN_IDS = 20_000
 PRO_AI_MULTIPLIER = 3
 # Per-student AI limits Pro multiplies. Everything else (the help bot, friend requests,
 # nudges, writes, sign-in and the burst guard) is the same for every plan.
+# An AI route's request gate ("*_request", "*_start") must be listed with its AI gate, or
+# the un-multiplied request gate caps Pro below 3x (quizzes: question_request 80/day in
+# front of ai_question 40/day).
 PRO_AI_ACTIONS = frozenset({
     "tutor_message", "tutor_message_day", "tutor_strong", "otto_title", "otto_memory",
-    "ai_ocr", "note_upload", "flashcards_note", "ai_flashcards", "ai_question", "ai_grading",
+    "ai_ocr", "note_upload", "flashcards_note", "ai_flashcards", "question_request", "ai_question", "ai_grading",
     "practice_test", "practice_test_start", "study_guide", "study_guide_request",
+    "instant_key_points", "instant_key_points_request",
 })
 _plans: dict[str, tuple[float, str]] = {}
 _plan_lock = threading.Lock()

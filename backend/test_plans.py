@@ -234,9 +234,17 @@ class PlanTests(unittest.TestCase):
         plans.grant("pro.student@example.com", "pro", "owner-1")
         self.sign_in(PRO)
         self.sign_in(FREE)
-        for action in ("ai_question", "tutor_message_day", "flashcards_note", "practice_test", "study_guide", "ai_ocr", "otto_memory"):
+        for action in ("ai_question", "question_request", "tutor_message_day", "flashcards_note", "practice_test", "practice_test_start",
+                       "study_guide", "study_guide_request", "instant_key_points", "instant_key_points_request", "ai_ocr", "otto_memory"):
             self.assertEqual(self.allowed("pro-1", action, 2, 10), 6, action)
             self.assertEqual(self.allowed("free-1", action, 2, 10), 2, action)
+
+    def test_pro_quiz_request_gate_allows_three_times_the_ai_questions(self):
+        # The request gate sits in front of ai_question; it must not stop Pro first.
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        self.sign_in(PRO)
+        self.assertEqual(rate_limit.limit_for("pro-1", "question_request", 80), 240)
+        self.assertGreaterEqual(rate_limit.limit_for("pro-1", "question_request", 80), rate_limit.limit_for("pro-1", "ai_question", 40))
 
     def test_pro_keeps_social_and_help_bot_limits(self):
         plans.grant("pro.student@example.com", "pro", "owner-1")
