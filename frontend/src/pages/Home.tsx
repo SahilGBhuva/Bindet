@@ -19,6 +19,9 @@ import { DEFAULT_INSTANT_PREFS, loadInstantPrefs, pickInstantUnit, type InstantP
 import { browserStore, claimGoalBurst, emitGoalReached, goalPercent as percentOfGoal } from '../lib/rewards'
 import { GoalRing } from '../components/rewards/GoalRing'
 import { notificationHref, notificationLabel } from '../lib/planLabels'
+import { QuestsCard } from '../components/rewards/QuestsCard'
+import { RecapCard } from '../components/rewards/RecapCard'
+import { rewardIcon } from '../components/rewards/RewardIcon'
 import './Home.css'
 
 /*
@@ -528,6 +531,8 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
     return () => window.clearTimeout(timer)
   }, [goalBurst])
   const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
+  // Streak freezes in the bank (rewards): each one covers a missed day automatically.
+  const freezes = stats?.streak_freezes ?? 0
   const accuracy = stats && stats.attempts > 0 ? Math.round(stats.accuracy) : null
   const friendCount = social?.friends.length ?? 0
   // Friend streaks: whoever is waiting on you first, then the longest live streaks.
@@ -636,6 +641,10 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
         {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
         {data.sandboxed ? null : firstRun}
 
+        {/* Rewards: last week's recap (after Monday, until dismissed) and today's quests. */}
+        {data.sandboxed ? null : <RecapCard token={token} />}
+        {data.sandboxed ? null : <QuestsCard token={token} />}
+
         <ul className="home-today" aria-label="Today at a glance">
           <li className="home-today__card home-today__card--goal ui-tone--blue">
             <a href="#settings" className="home-today__link">
@@ -650,6 +659,11 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
               <span className="home-today__icon"><Icon name="flame" /></span>
               <span className="home-today__label">Streak</span>
               <span className="home-today__value">{streak}<small> {streak === 1 ? 'day' : 'days'}</small></span>
+              {data.sandboxed ? null : (
+                <span className="rw-freeze-pill" title="A streak freeze covers one missed day automatically. You earn one each week you study, up to 2.">
+                  <span aria-hidden="true">{rewardIcon('freeze')}</span>{freezes} {freezes === 1 ? 'freeze' : 'freezes'}<span className="sr-only"> banked</span>
+                </span>
+              )}
               {streak >= 7 ? <img className="ui-mascot-cheer home-today__cheer" src="/bindit-mascot-cutout.webp" alt="" width="36" height="43" /> : null}
             </a>
           </li>

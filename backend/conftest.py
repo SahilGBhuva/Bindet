@@ -18,3 +18,21 @@ def pytest_sessionfinish(session, exitstatus):
         os.unlink(_SESSION_DB.name)
     except OSError:
         pass
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _rewards_only_where_tested(request):
+    """Daily quests are picked per student and day, so their small bonus XP would make the
+    XP totals older tests assert depend on the date (and on test order, since a day's quests
+    are stored). The reward systems run in test_rewards.py; elsewhere rewards.record() is a
+    no-op, while the routes still call it."""
+    if request.module.__name__ == "test_rewards":
+        yield
+        return
+    from unittest.mock import patch
+    import rewards
+    with patch.object(rewards, "_record", return_value=None):
+        yield

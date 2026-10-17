@@ -1,4 +1,5 @@
-import type { RewardEvents } from './api'
+import type { QuestState, RewardEvents } from './api'
+import { TONES, type Tone } from './tones'
 
 /*
  * In-the-moment reward feedback: the small emitter pages call after a successful action,
@@ -15,6 +16,7 @@ import type { RewardEvents } from './api'
  * XP rules stay on the server. Nothing in this file awards or changes XP.
  */
 
+// Same name lib/api.ts dispatches; kept here so this file stays free of api.ts at runtime.
 export const REWARDS_EVENT = 'bindet:rewards'
 
 /* Levels: every 100 XP is a level, starting at level 1 (same rule as the Profile page). */
@@ -229,4 +231,105 @@ export function saveSoundOn(on: boolean, store: (DayStore & Pick<Storage, 'remov
     // Not saved; the choice still applies until the page is closed.
   }
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(SOUND_CHANGED_EVENT))
+}
+
+/* ---------- Quests, badges, freezes and the recap (server-owned; this only names and colors) ---------- */
+/*
+ * Small pure rules for the reward views (Home's quests and recap, the Badges section).
+ * The server owns what counts; this file only names, colors and words things.
+ */
+
+/* Each quest's own hue, so the three on a card are easy to tell apart. */
+export const QUEST_TONE: Record<string, Tone> = {
+  review_cards: 'violet',
+  quiz_answers: 'green',
+  ask_otto: 'teal',
+  instant_round: 'orange',
+  add_notes: 'amber',
+  right_in_a_row: 'pink',
+  daily_goal: 'blue',
+  friend_day: 'pink',
+}
+
+export const QUEST_ICON: Record<string, string> = {
+  review_cards: 'cards',
+  quiz_answers: 'check',
+  ask_otto: 'chat',
+  instant_round: 'bolt',
+  add_notes: 'note',
+  right_in_a_row: 'sparkle',
+  daily_goal: 'target',
+  friend_day: 'people',
+}
+
+/* Tones for today's quests, in order: each quest's own hue, or the next free one when two share it. */
+export function questTones(ids: readonly string[]): Tone[] {
+  const used = new Set<Tone>()
+  return ids.map((id) => {
+    const preferred = QUEST_TONE[id] ?? 'blue'
+    const tone = used.has(preferred) ? TONES.find((candidate) => !used.has(candidate)) ?? preferred : preferred
+    used.add(tone)
+    return tone
+  })
+}
+
+export function questPercent(quest: Pick<QuestState, 'progress' | 'target' | 'done'>) {
+  if (quest.done) return 100
+  return quest.target > 0 ? Math.min(100, Math.round((quest.progress / quest.target) * 100)) : 0
+}
+
+/* "4 / 10", "12 / 20 XP" */
+export function questCount(quest: Pick<QuestState, 'progress' | 'target' | 'unit'>) {
+  return `${Math.min(quest.progress, quest.target)} / ${quest.target}${quest.unit ? ` ${quest.unit}` : ''}`
+}
+
+export function freezeLabel(count: number) {
+  if (count <= 0) return 'No streak freezes yet'
+  return `${count} streak ${count === 1 ? 'freeze' : 'freezes'}`
+}
+
+/* "Oct 5 – 11", or "Sep 29 – Oct 5" across a month. */
+export function recapRange(start: string, end: string) {
+  const from = new Date(`${start}T00:00:00Z`)
+  const to = new Date(`${end}T00:00:00Z`)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 'Last week'
+  const month = new Intl.DateTimeFormat('en-US', { month: 'short', timeZone: 'UTC' })
+  const sameMonth = from.getUTCMonth() === to.getUTCMonth()
+  return `${month.format(from)} ${from.getUTCDate()} – ${sameMonth ? '' : `${month.format(to)} `}${to.getUTCDate()}`
+}
+
+/* A badge's progress toward its target, 0-100. */
+export function badgePercent(progress: number | null, target: number | null) {
+  if (!target || progress === null) return 0
+  return Math.min(100, Math.round((progress / target) * 100))
+}
+
+/* Call `listener` whenever an API response carried rewards. Returns the unsubscribe function. */
+export function onServerRewards(listener: (detail: RewardEvents) => void) {
+  const handle = (event: Event) => listener((event as CustomEvent<RewardEvents>).detail ?? {})
+  window.addEventListener(REWARDS_EVENT, handle)
+  return () => window.removeEventListener(REWARDS_EVENT, handle)
+}
+
+/* ---------- Reward notes: the short toasts for quests, chests, badges and saved streaks ---------- */
+
+export type RewardNote = { key: string; tone: Tone; icon: string; text: string }
+
+/* One note per thing the server reported. Keys let the layer show each one once. */
+export function rewardNotes(rewards: RewardEvents): RewardNote[] {
+  const notes: RewardNote[] = []
+  for (const quest of rewards.quests_completed ?? []) {
+    notes.push({ key: `quest:${quest.id}`, tone: QUEST_TONE[quest.id] ?? 'green', icon: QUEST_ICON[quest.id] ?? 'check', text: `Quest done: ${quest.title}` })
+  }
+  if (rewards.chest) {
+    notes.push({ key: 'chest', tone: 'amber', icon: 'chestOpen', text: rewards.chest.xp ? `Chest opened! +${rewards.chest.xp} XP` : 'Chest opened!' })
+  }
+  for (const badge of rewards.badges_earned ?? []) {
+    notes.push({ key: `badge:${badge.id}`, tone: 'violet', icon: badge.icon || 'trophy', text: `New badge: ${badge.title}` })
+  }
+  if (rewards.streak_saved) {
+    const days = rewards.streak_saved_days
+    notes.push({ key: 'streak-saved', tone: 'blue', icon: 'freeze', text: days ? `A freeze saved your ${days}-day streak` : 'A freeze saved your streak' })
+  }
+  return notes
 }

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { announce } from '../../lib/announce'
 import {
-  addToBursts, comboLabel, comboTier, isComboMilestone, isDuplicateXp, onRewards,
-  type Anchor, type Burst, type RewardSignal, type SeenXp,
+  addToBursts, comboLabel, comboTier, isComboMilestone, isDuplicateXp, onRewards, rewardNotes,
+  type Anchor, type Burst, type RewardNote, type RewardSignal, type SeenXp,
 } from '../../lib/rewards'
+import { rewardIcon } from './RewardIcon'
 import { noteUserGesture, playSound } from '../../lib/sounds'
 import './RewardLayer.css'
 
@@ -14,6 +15,8 @@ import './RewardLayer.css'
  *    of the screen, so they never sit over the answer buttons), batched when rewards arrive
  *    together;
  *  - "🔥 3 in a row!" combo chips (visual only, see lib/rewards.ts);
+ *  - short toasts for a finished quest, the daily chest, a new badge or a streak a freeze saved
+ *    (each shown once, however many responses report it);
  *  - a full-screen level-up celebration with the otter, a "Keep going" button and auto-dismiss;
  *  - optional sounds (lib/sounds.ts, off by default) and screen-reader announcements.
  *
@@ -25,6 +28,7 @@ import './RewardLayer.css'
  */
 
 const BURST_MS = 1700
+const NOTE_MS = 3600
 const LEVEL_AUTO_CLOSE_MS = 6500
 // An answer's anchor is used while the response is this fresh (AI grading can take a few seconds).
 const ANCHOR_FRESH_MS = 20_000
@@ -63,6 +67,8 @@ function placement(anchor: Anchor | null): CSSProperties {
 export function RewardLayer() {
   const [bursts, setBursts] = useState<Burst[]>([])
   const [level, setLevel] = useState<number | null>(null)
+  const [notes, setNotes] = useState<(RewardNote & { at: number })[]>([])
+  const shownNotes = useRef(new Map<string, number>())
   const [host, setHost] = useState<HTMLElement | null>(null)
   const lastAction = useRef<{ anchor: Anchor; at: number } | null>(null)
   const seen = useRef<SeenXp[]>([])
@@ -123,7 +129,8 @@ export function RewardLayer() {
     }
 
     const { rewards, source } = signal
-    const xp = Math.max(0, Math.round(rewards.xp ?? 0)) + Math.max(0, Math.round(rewards.chest?.xp ?? 0))
+    // The server's xp already includes quest and chest bonuses.
+    const xp = Math.max(0, Math.round(rewards.xp ?? 0))
     seen.current = seen.current.filter((entry) => now - entry.at < 10_000)
     if (xp && !isDuplicateXp(seen.current, xp, source, now)) {
       seen.current.push({ xp, at: now, source })
@@ -131,6 +138,18 @@ export function RewardLayer() {
       announce(`Plus ${xp} XP`)
     } else if (xp) {
       seen.current.push({ xp, at: now, source })
+    }
+    const fresh = rewardNotes(rewards).filter((note) => {
+      const last = shownNotes.current.get(note.key)
+      if (last !== undefined && now - last < 60_000) return false
+      shownNotes.current.set(note.key, now)
+      return true
+    })
+    if (fresh.length) {
+      setHost(topModal())
+      setNotes((current) => [...current, ...fresh.map((note) => ({ ...note, at: now }))].slice(-3))
+      playSound('combo')
+      for (const note of fresh) announce(note.text)
     }
     const to = rewards.level_up?.to ?? 0
     if (to > celebrated.current && (rewards.level_up?.from ?? 0) < to) {
@@ -151,6 +170,15 @@ export function RewardLayer() {
     return () => window.clearTimeout(timer)
   }, [bursts])
 
+  useEffect(() => {
+    if (!notes.length) return
+    const oldest = Math.min(...notes.map((note) => note.at))
+    const timer = window.setTimeout(() => {
+      setNotes((current) => current.filter((note) => Date.now() - note.at < NOTE_MS))
+    }, Math.max(50, NOTE_MS - (Date.now() - oldest)) + 20)
+    return () => window.clearTimeout(timer)
+  }, [notes])
+
   const phone = typeof window !== 'undefined' && matches(PHONE)
   const content = (
     <>
@@ -164,6 +192,16 @@ export function RewardLayer() {
                 </span>
               ) : null}
               {burst.xp ? <span className="reward-xp">+{burst.xp} XP</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {notes.length ? (
+        <div className={`reward-notes${phone ? ' is-phone' : ''}`} aria-hidden="true">
+          {notes.map((note) => (
+            <div key={`${note.key}-${note.at}`} className={`reward-note ui-tone--${note.tone}`}>
+              <span className="reward-note__icon">{rewardIcon(note.icon)}</span>
+              <span className="reward-note__text">{note.text}</span>
             </div>
           ))}
         </div>

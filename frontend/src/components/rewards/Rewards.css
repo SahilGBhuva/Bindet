@@ -1,0 +1,509 @@
+/*
+ * Rewards: Home's "Today's quests" (rq) and weekly recap (rr), the Badges section (rb) and the
+ * streak freeze chip. Same colorful vocabulary as Friends & groups (pages/Profile.css):
+ * a soft gradient band behind each heading, colored icon chips, tinted cards, blue pill
+ * buttons. Every color is a token, so light and dark both follow index.css.
+ */
+
+/* --- Today's quests -------------------------------------------------------------------- */
+
+.rq,
+.rr {
+  margin: 0 0 var(--space-6);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-violet) 24%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.rq.ui-alert { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+
+.rq__band,
+.rr__band {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background:
+    linear-gradient(115deg,
+      color-mix(in srgb, var(--color-blue) 13%, var(--color-surface)) 0%,
+      color-mix(in srgb, var(--color-violet) 15%, var(--color-surface)) 60%,
+      color-mix(in srgb, var(--color-pink) 9%, var(--color-surface)) 100%);
+}
+
+.rq__band-icon,
+.rr__band-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-violet-text);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-violet) 22%, transparent);
+}
+
+.rq svg,
+.rr svg,
+.rb svg,
+.rb-section svg,
+.rb-friend svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rq__band-icon svg,
+.rr__band-icon svg { width: 22px; height: 22px; }
+
+.rq__heading,
+.rr__heading { display: grid; gap: 2px; flex: 1; min-width: 0; }
+
+.rq__title,
+.rr__title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  letter-spacing: -.01em;
+}
+
+.rq__sub,
+.rr__eyebrow {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.rr__eyebrow { color: var(--color-violet-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+
+.rq__tally {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-violet-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-violet) 26%, transparent);
+}
+
+.rq__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  list-style: none;
+}
+
+.rq__quest {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--tone) 26%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--tone-tint) 60%, var(--color-surface));
+}
+
+.rq__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--tone-text);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+
+.rq__quest.is-done .rq__icon {
+  background: var(--tone);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.rq__main { display: grid; gap: 6px; min-width: 0; }
+
+.rq__quest-title {
+  color: var(--color-text);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.rq__meter,
+.rb__meter {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--tone) 16%, var(--color-surface));
+}
+
+.rq__meter > span,
+.rb__meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-blue), var(--color-violet));
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.rq__quest.is-done .rq__meter > span { background: var(--tone); }
+
+.rq__count {
+  color: var(--tone-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rq__chest {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-5) var(--space-4);
+  padding: 10px 14px;
+  border: 1px dashed color-mix(in srgb, var(--color-amber) 45%, var(--color-border));
+  border-radius: var(--radius-lg);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.rq__chest.is-open {
+  border-style: solid;
+  background: var(--color-amber-tint);
+}
+
+.rq__chest-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--color-amber-tint);
+  color: var(--color-amber-text);
+}
+
+.rq__chest.is-open .rq__chest-icon { background: var(--color-surface); }
+
+.rq__chest-text { display: grid; gap: 1px; min-width: 0; }
+.rq__chest-text strong { color: var(--color-amber-text); font-weight: var(--weight-bold); }
+
+/* The healthy stop point: one calm, celebratory line and what got done. */
+.rq__band--done {
+  background:
+    linear-gradient(115deg,
+      color-mix(in srgb, var(--color-green) 14%, var(--color-surface)) 0%,
+      color-mix(in srgb, var(--color-teal) 12%, var(--color-surface)) 55%,
+      color-mix(in srgb, var(--color-blue) 10%, var(--color-surface)) 100%);
+}
+
+.rq__cheer { width: 40px; }
+
+.rq__done-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  list-style: none;
+}
+
+.rq__done-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 6px;
+  border-radius: var(--radius-full);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.rq__done-check {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--tone);
+  color: #ffffff;
+}
+
+.rq__done-check svg { width: 13px; height: 13px; stroke-width: 2.4; }
+
+.rq__skeleton-title { display: block; width: 180px; height: 22px; }
+.rq__skeleton-row { display: block; height: 56px; border-radius: var(--radius-lg); }
+.rq__body { display: grid; gap: var(--space-2); padding: var(--space-4) var(--space-5); }
+
+/* --- Weekly recap ---------------------------------------------------------------------- */
+
+.rr__close {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -6px -10px -6px 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.rr__close:hover { background: color-mix(in srgb, var(--color-surface) 70%, transparent); color: var(--color-text); }
+
+.rr__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4) var(--space-5) 0;
+  list-style: none;
+}
+
+.rr__stat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--tone) 28%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: var(--tone-tint);
+}
+
+.rr__stat-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--tone-text);
+}
+
+.rr__stat-icon svg { width: 16px; height: 16px; }
+
+.rr__stat-label { color: var(--tone-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+
+.rr__stat-value {
+  grid-column: 1 / -1;
+  color: var(--tone-text);
+  font-size: 24px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+
+.rr__stat-value small { color: var(--color-text-secondary); font-size: var(--text-sm); font-weight: var(--weight-medium); letter-spacing: 0; }
+
+.rr__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.rr__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.rr__line-label { color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+
+.rr__badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+.rr__badge,
+.rb-friend__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 6px;
+  border-radius: var(--radius-full);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.rr__badge svg,
+.rb-friend__chip svg { width: 14px; height: 14px; }
+
+/* The one action on the card: a blue pill like Friends' main action. */
+.rr__done {
+  min-height: 44px;
+  margin-left: auto;
+  padding-inline: 18px;
+  border-color: var(--color-blue);
+  border-radius: var(--radius-full);
+  background: var(--color-blue);
+  color: #ffffff;
+  font-weight: var(--weight-semibold);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--color-blue) 28%, transparent);
+}
+
+.rr__done:hover { border-color: var(--color-blue-text); background: var(--color-blue-text); color: #ffffff; }
+
+/* --- Badges ---------------------------------------------------------------------------- */
+
+.rb-section .ui-section-head { flex-wrap: wrap; gap: var(--space-2); }
+
+.rb-panel { padding: var(--space-4); }
+
+.rb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rb {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
+  min-height: 72px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--color-border));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(160deg, var(--tone-tint) 0%, var(--color-surface) 90%);
+}
+
+.rb__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--tone);
+  color: #ffffff;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--tone) 26%, transparent);
+}
+
+.rb__icon svg { width: 20px; height: 20px; }
+
+.rb__text { display: grid; gap: 2px; min-width: 0; }
+.rb__title { color: var(--tone-text); font-size: var(--text-base); font-weight: var(--weight-bold); }
+.rb__desc { color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.4; }
+.rb__meta { color: var(--color-text-secondary); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+.rb__progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); margin-top: 4px; }
+
+/* Locked: dim and quiet, the icon outlined; the text stays readable (secondary ink). */
+.rb.is-locked {
+  border-style: dashed;
+  border-color: var(--color-border);
+  background: var(--color-surface-sunken);
+}
+
+.rb.is-locked .rb__icon {
+  background: var(--color-surface);
+  color: var(--color-text-tertiary);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.rb.is-locked .rb__title { color: var(--color-text-secondary); }
+
+.rb-skeleton { height: 72px; border-radius: var(--radius-lg); }
+
+.rb-empty { margin: 0 0 var(--space-3); color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+.rb-more { min-height: 44px; margin-top: var(--space-3); border-radius: var(--radius-full); }
+
+/* Streak freezes in the bank: a teal "ice" chip (Home's streak card, Friends). */
+.rb-freeze {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--tone) 32%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--tone-tint);
+  color: var(--tone-text);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rb-freeze svg { width: 14px; height: 14px; }
+.rb-freeze.is-empty { opacity: .8; }
+
+/* Streak cards (Home, Friends): the freezes in the bank, as a small white pill under the number. */
+.rw-freeze-pill {
+  display: inline-flex;
+  grid-column: 1 / -1;
+  justify-self: start;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  padding: 2px 8px 2px 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-teal-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-teal) 30%, transparent);
+}
+
+.rw-freeze-pill svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Friend streak detail: friend streaks never use freezes, said plainly. */
+.profile__streak-note { margin: var(--space-2) 0 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
+
+/* A friend's earned badges inside their streak detail. */
+.rb-friend { margin-top: var(--space-3); }
+.rb-friend__list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+/* --- Phones ---------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .rq__band,
+  .rr__band { padding: var(--space-3) var(--space-4); }
+  .rq__list { padding: var(--space-3) var(--space-3) var(--space-2); }
+  .rq__quest { gap: 10px; padding: 10px 12px; }
+  .rq__chest { margin: 0 var(--space-3) var(--space-3); }
+  .rq__done-list { padding: var(--space-3) var(--space-4) var(--space-4); }
+  .rr__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: var(--space-3) var(--space-3) 0; }
+  .rr__foot { padding: var(--space-3) var(--space-4) var(--space-4); }
+  .rr__done { width: 100%; margin-left: 0; }
+  .rb-grid { grid-template-columns: minmax(0, 1fr); }
+  .rb-panel { padding: var(--space-3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rq__meter > span,
+  .rb__meter > span { transition: none; }
+}

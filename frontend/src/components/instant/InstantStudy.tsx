@@ -749,12 +749,18 @@ function Celebration({ accessToken, studentId, goal, streakBefore, xp, cardsDone
   useEffect(() => {
     let live = true
     // Grades still saving count the study day; wait for them, then read the totals.
-    void settle().then(() => data.getProgress(studentId, accessToken, true)).then((progress) => {
+    // A round with real study in it counts for quests and badges (its rewards are announced by lib/api.ts).
+    const studied = cardsDone > 0 || asked > 0
+    void settle()
+      .then(() => (studied && accessToken ? data.completeInstantStudy(accessToken).catch(() => null) : null))
+      .then(() => data.getProgress(studentId, accessToken, true)).then((progress) => {
       if (!live) return
       const today = progress?.recent_xp?.find((day) => day.day === localDay(new Date(data.now())))?.xp ?? 0
       setAfter({ streak: Math.max(progress?.streak ?? streakBefore, 0), today })
     }).catch(() => { if (live) setAfter({ streak: streakBefore, today: 0 }) })
     return () => { live = false }
+    // Once per finished round: the counts are final when this screen mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, accessToken, studentId, settle, streakBefore])
 
   useEffect(() => { again.current?.focus({ preventScroll: true }) }, [])

@@ -32,6 +32,7 @@ import practice
 import practice_tests
 import questions
 import rate_limit
+import rewards
 import study_guides
 import tasks
 import tutor
@@ -54,6 +55,7 @@ ALL_METADATA = (
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
     practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
     otto.otto_metadata, study_guides.guide_metadata, plans.plans_metadata, classroom_store.classroom_metadata,
+    rewards.rewards_metadata,
 )
 
 

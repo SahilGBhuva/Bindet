@@ -23,6 +23,8 @@ safe for foreign keys:
 - Practice lab: rounds and personal bests, and every challenge the student sent or
   received (the friend's copy of a received challenge goes too), and feedback they sent.
 - First-run setup state (account_onboarding).
+- Rewards: daily quests and chests, earned badges, study activity counts, recap marks
+  (rewards.py) and streak freezes (streak_freezes).
 - Connected Google Classroom calendars (their secret addresses) and import links
   (classroom_feeds, classroom_items).
 - The plan grant for the account's confirmed email (account_plans), unless the account is
@@ -55,6 +57,7 @@ import plans
 import practice
 import practice_tests
 import questions
+import rewards
 import study_guides
 import tasks
 import tutor
@@ -81,6 +84,7 @@ def init_all() -> None:
     otto.init_otto()
     plans.init_plans()
     classroom.init_classroom()
+    rewards.init_rewards()
 
 
 def _now() -> datetime:
@@ -245,6 +249,7 @@ def _delete_social(connection, student_id: str) -> None:
     connection.execute(delete(db.social_action_events).where(db.social_action_events.c.student_id == student_id))
     # Friend streaks: the student's study days, and streak notices sent to or about them.
     connection.execute(delete(db.study_days).where(db.study_days.c.student_id == student_id))
+    connection.execute(delete(db.streak_freezes).where(db.streak_freezes.c.student_id == student_id))
     connection.execute(delete(db.friend_streak_marks).where(or_(
         db.friend_streak_marks.c.student_id == student_id, db.friend_streak_marks.c.friend_id == student_id,
     )))
@@ -274,6 +279,7 @@ def delete_account_data(student_id: str, email: str | None = None) -> dict:
         onboarding.delete_for_account_in(connection, student_id)
         otto.delete_for_account_in(connection, student_id)
         plans.delete_for_account_in(connection, student_id, email)
+        rewards.delete_for_account_in(connection, student_id)
 
         if "study_group_messages" in chat_tables:
             connection.execute(text("DELETE FROM public.study_group_messages WHERE sender_id = :id"), {"id": student_id})

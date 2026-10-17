@@ -554,6 +554,19 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     uploadNote: locked('upload notes'),
     getKeyPoints: locked('start Instant Study'),
     revealAnswer: locked('start Instant Study'),
+    // Rewards need a real study history, so the demo has none and its pages hide them.
+    getQuestsToday: () => wait({
+      day: '', quests: [], chest: { open: false, xp: 0 }, goal: { xp: 0, target: 0, met: false }, all_done: false,
+      freezes: { banked: 0, max: 2, covering: 0 },
+    }),
+    getBadges: () => wait({ badges: [], earned: 0, total: 0, freezes: { banked: 0, max: 2, covering: 0 } }),
+    getFriendBadges: () => wait({ badges: [] }),
+    getLastWeekRecap: () => wait({
+      week_start: '', week_end: '', days_studied: 0, xp: 0, cards_reviewed: 0, best_subject: null, longest_streak: 0,
+      badges_earned: [], dismissed: true, show: false,
+    }),
+    dismissLastWeekRecap: locked('dismiss the weekly recap'),
+    completeInstantStudy: () => wait({ recorded: false }),
     deleteNote: locked('remove notes'),
     moveNotes: locked('rename courses and units'),
     remakeNoteFlashcards: locked('make flashcards with your own instructions'),
