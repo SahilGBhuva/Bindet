@@ -63,6 +63,19 @@ export type AnswerResult = {
   total_xp: number
   streak: number
 }
+/*
+ * Rewards from one action, as the server reports them (shared contract with the rewards
+ * work on quests, badges and streak freeze). Dispatched on window as
+ * new CustomEvent('bindet:rewards', { detail }); components/rewards/RewardLayer.tsx shows them.
+ */
+export type RewardEvents = {
+  xp?: number
+  level_up?: { from: number; to: number }
+  quests_completed?: { id: string; title: string }[]
+  chest?: { xp: number } | null
+  badges_earned?: { id: string; title: string; icon: string }[]
+  streak_saved?: boolean
+}
 export type TopicStat = { topic: string; attempts: number; correct_answers: number; accuracy: number }
 export type Progress = {
   student_id: string
