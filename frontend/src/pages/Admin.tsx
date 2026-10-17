@@ -135,7 +135,7 @@ function PlanAccess({ token }: { token: string }) {
                 <span className="admin__meta">
                   <span className={`ui-badge ui-badge--tone ${grant.plan === 'pro' ? 'ui-tone--violet' : 'ui-tone--teal'}`}>{planBadge(grant.plan)}</span>
                   {grant.note ? <span>{grant.note}</span> : null}
-                  <time dateTime={grant.granted_at}>{new Date(grant.granted_at).toLocaleDateString()}</time>
+                  <time dateTime={grant.granted_at}>{new Date(grant.granted_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time>
                 </span>
               </div>
               <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => void remove(grant)} aria-label={`Remove ${planBadge(grant.plan)} from ${grant.email}`}>Remove</button>
