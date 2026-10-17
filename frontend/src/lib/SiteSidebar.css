@@ -1,12 +1,13 @@
 /*
- * App navigation, drawn after the owner's pencil sketches.
- * Desktop: a thin paper rail. Three tiny icons and a "‖" handle on top, then the student,
- * Highlighted, Directory, Important groups, My Groups and Tasks under underlined headings,
- * and a "locked / edit panel" switch at the bottom. Collapsed, only the tiny icons remain.
- * Phones: a top bar, tab bar and menu sheet.
+ * App navigation: one sidebar on desktop.
+ * Top to bottom: the account row (avatar, name, plan, Settings gear and the "‖" fold handle),
+ * Search, the main pages with icons and labels, then Quick study, Courses, groups, upcoming
+ * tasks and Highlighted under underlined headings, and the Edit sidebar switch at the bottom.
+ * Folded (the handle), it is a strip of page icons, quick-study icons and course badges.
+ * Phones: a top bar, tab bar and menu sheet instead.
  */
 
-:root { --layout-rail-collapsed-width: 84px; }
+:root { --layout-rail-collapsed-width: 64px; }
 
 .bindit-rail {
   position: sticky;
@@ -26,10 +27,9 @@
   font-size: var(--text-sm);
   scrollbar-width: none;
 }
-.bindit-rail.is-collapsed { width: var(--layout-rail-collapsed-width); gap: 6px; padding-inline: 6px; overflow: visible; }
+.bindit-rail.is-collapsed { width: var(--layout-rail-collapsed-width); align-items: center; gap: 10px; padding-inline: 6px; }
 
-.bindit-rail__top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-left: -6px; }
-.bindit-rail.is-collapsed .bindit-rail__top { flex-direction: column; align-items: flex-start; margin-left: 0; }
+.bindit-rail__top { display: flex; align-items: center; justify-content: center; min-height: 32px; }
 
 /* Brand: only in the phone top bar (the sketch has no logo on desktop). */
 .bindit-rail__brand {
@@ -52,10 +52,6 @@
 .bindit-mark__lines { fill: none; stroke: var(--color-text-tertiary); stroke-width: 1.4; stroke-linecap: round; }
 .bindit-mark__ring { fill: var(--color-bg); stroke: var(--color-brand); stroke-width: 1.7; }
 
-/* Gear, folder, play: the sketch's row of tiny icons. */
-.bindit-rail__tools { display: flex; align-items: center; gap: 0; }
-
-.bindit-rail__tool,
 .bindit-rail__handle,
 .bindit-rail__mini {
   display: grid;
@@ -72,33 +68,104 @@
   cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
 }
-.bindit-rail__tool:hover,
 .bindit-rail__handle:hover,
 .bindit-rail__mini:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
-.bindit-rail__tool.is-active { color: var(--color-text); }
 .bindit-rail__mini:disabled { opacity: .35; cursor: default; }
 
 .bindit-rail svg { fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-.bindit-rail__tool svg { width: 14px; height: 14px; }
 .bindit-rail__handle svg { width: 14px; height: 16px; stroke-width: 1.3; }
 .bindit-rail__mini svg { width: 13px; height: 13px; }
 
-/* "○ Name ⚙" */
-.bindit-rail__account { display: flex; align-items: center; gap: 7px; min-width: 0; margin-top: -10px; }
-.bindit-rail__avatar { flex: none; width: 13px; height: 13px; border: 1.2px solid var(--color-text-secondary); border-radius: 50%; }
+/* Account row: avatar, name, plan, Settings gear, then the fold handle. */
+.bindit-rail__account { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 36px; margin-inline: -2px -6px; }
+.bindit-rail__avatar { flex: none; width: 28px; height: 28px; border-radius: 50%; object-fit: cover; font-size: 11px; }
 .bindit-rail__name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--color-text);
   font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bindit-rail__name:hover { text-decoration-color: var(--color-text-tertiary); }
-.bindit-rail__account .bindit-rail__mini { width: 22px; height: 22px; margin-left: -4px; }
+.bindit-rail__name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.bindit-rail__account .bindit-rail__mini { width: 28px; height: 28px; }
+.bindit-rail__settings { margin-left: auto; }
+.bindit-rail__settings svg { width: 15px; height: 15px; }
+.bindit-rail__settings.is-current { background: var(--color-brand-tint); color: var(--color-brand-text); }
+.bindit-rail__account .bindit-rail__handle { width: 28px; height: 28px; }
+
+/* Search opens the command palette (also ⌘K / Ctrl K). */
+.bindit-rail__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin-top: -10px;
+  padding: 0 6px 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.bindit-rail__search:hover { border-color: var(--color-border-strong); color: var(--color-text); }
+.bindit-rail__search kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  color: var(--color-text-tertiary);
+  font: inherit;
+  font-size: var(--text-2xs);
+}
+
+/* Main pages: icon and label; the current page sits on the brand tint. */
+.bindit-rail__pages { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: -8px 0 0; padding: 0; list-style: none; }
+.bindit-rail__pages > li { min-width: 0; }
+.bindit-rail__page {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__page svg { flex: none; width: 18px; height: 18px; stroke-width: 1.7; }
+.bindit-rail__page:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.bindit-rail__page.is-current { background: var(--color-brand-tint); color: var(--color-brand-text); font-weight: var(--weight-semibold); }
+.bindit-rail__page:active { transform: translateY(1px); }
+.bindit-rail__page-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Project stats belongs to Tasks: a smaller row tucked under it. */
+.bindit-rail__pages > li.is-sub .bindit-rail__page { min-height: 30px; padding-left: 36px; font-size: var(--text-xs); }
+.bindit-rail__pages > li.is-sub .bindit-rail__page svg { width: 15px; height: 15px; }
+
+/* Folded: the same pages as 44px icons, named by tooltips and their (visually hidden) labels. */
+.bindit-rail.is-collapsed .bindit-rail__pages { gap: 4px; margin: 0; }
+.bindit-rail.is-collapsed .bindit-rail__page,
+.bindit-rail.is-collapsed .bindit-rail__pages > li.is-sub .bindit-rail__page { justify-content: center; width: 44px; min-height: 44px; padding: 0; }
+.bindit-rail.is-collapsed .bindit-rail__page svg { width: 20px; height: 20px; }
+.bindit-rail.is-collapsed .bindit-rail__page-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.bindit-rail.is-collapsed .bindit-rail__page .bindit-rail__badge { position: absolute; top: 3px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; }
 
 /* Sections: lots of white space between them, as drawn. */
 .bindit-rail__block { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
@@ -351,7 +418,7 @@
   padding: 0 5px;
   border-radius: var(--radius-full);
   background: var(--color-brand);
-  color: var(--color-surface);
+  color: var(--color-on-accent);
   font-size: 10px;
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
@@ -557,8 +624,8 @@
 
 @keyframes bindit-sheet-up { from { transform: translateY(24px); opacity: .6; } }
 
-/* Folded rail: study shortcuts and courses as a column of icons. */
-.bindit-rail__strip { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+/* Folded rail: below the page icons, quick study and courses as a column of icons. */
+.bindit-rail__strip { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--color-border); list-style: none; }
 .bindit-rail__strip-link {
   display: grid;
   place-items: center;
@@ -570,5 +637,19 @@
 }
 .bindit-rail__strip-link:hover { background: var(--color-surface-hover); }
 .bindit-rail__strip-link.is-current { background: var(--color-surface-active); }
+.bindit-rail__strip-settings { color: var(--color-text-secondary); }
+.bindit-rail__strip-settings svg { width: 20px; height: 20px; stroke-width: 1.7; }
+.bindit-rail__strip-settings.is-current { background: var(--color-brand-tint); color: var(--color-brand-text); }
 .bindit-rail__strip-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .bindit-rail__plan { flex: none; height: 18px; padding: 0 6px; }
+
+/* Light / Dark switch above the sidebar footer. */
+.bindit-rail__themes { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin: 12px 0 0; padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-sunken); }
+.bindit-rail__themes button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 0; border-radius: calc(var(--radius-md) - 2px); background: none; color: var(--color-text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer; }
+.bindit-rail__themes button:hover { color: var(--color-text); }
+.bindit-rail__themes button.is-on { background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-xs); }
+.bindit-rail__themes button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.bindit-rail__themes svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bindit-rail__themes button:first-child.is-on svg { color: var(--color-amber-text); }
+.bindit-rail__themes button:last-child.is-on svg { color: var(--color-violet-text); }
+.bindit-rail.is-collapsed .bindit-rail__themes { display: none; }

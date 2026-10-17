@@ -9,7 +9,7 @@ import { openHelp } from './helpEvents'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
-import { courseInitial } from './tones'
+import { courseInitial, toneClass, toneForName } from './tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
@@ -22,7 +22,7 @@ export { BrandMark }
 
 type NavItem = { id: Screen; label: string; short?: string }
 
-/* Every page, for the phone menu sheet. On desktop, pages live in the shell's top icon bar. */
+/* Every page, for the phone menu sheet. On desktop the rail lists the same pages (MAIN_PAGES). */
 const SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Workspace',
@@ -44,6 +44,23 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     ],
   },
 ]
+
+/*
+ * The desktop rail's main pages, top to bottom, each with an icon and a label. Project stats
+ * (group project analytics) sits under Tasks. Practice lab is in Quick study, Settings is the gear.
+ */
+const MAIN_PAGES: (NavItem & { sub?: boolean })[] = [
+  { id: 'home', label: 'Home' },
+  { id: 'tools', label: 'Study' },
+  { id: 'tutor', label: 'Otto' },
+  { id: 'goals', label: 'Tasks' },
+  { id: 'stats', label: 'Project stats', sub: true },
+  { id: 'chat', label: 'Messages' },
+  { id: 'profile', label: 'Friends & groups' },
+  { id: 'progress', label: 'Progress' },
+]
+/* Full names for the folded strip's tooltips. */
+const MAIN_TITLES: Partial<Record<Screen, string>> = { tutor: 'Otto, your tutor', stats: 'Project statistics' }
 
 /* The phone tab bar keeps the four places students go most; everything else is one tap away in Menu. */
 const TAB_BAR: Screen[] = ['home', 'tools', 'goals', 'tutor']
@@ -85,21 +102,42 @@ function ThemeButton() {
   )
 }
 
+/* Light or dark, in plain words: two clear choices instead of a cycling icon. */
+function ThemeSwitch() {
+  const preference = useThemePreference()
+  const systemDark = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const current = preference === 'system' ? (systemDark ? 'dark' : 'light') : preference
+  return (
+    <div className="bindit-rail__themes" role="group" aria-label="Color theme">
+      {(['light', 'dark'] as const).map((choice) => (
+        <button key={choice} type="button" className={current === choice ? 'is-on' : ''} aria-pressed={current === choice} onClick={() => saveThemePreference(choice)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {choice === 'dark' ? <path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z" />
+              : <><circle cx="12" cy="12" r="3.6" /><path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8M6 6l1.3 1.3M16.7 16.7 18 18M6 18l1.3-1.3M16.7 7.3 18 6" /></>}
+          </svg>
+          {choice === 'dark' ? 'Dark' : 'Light'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /* ---------- Panel layout: which sections show, in what order, and which are folded (per device). ---------- */
 
 type SectionId = 'highlighted' | 'study' | 'directory' | 'important' | 'groups' | 'tasks'
+/* Default order: quick study first, then courses, groups, the task preview and Highlighted. */
 type Layout = { order: SectionId[]; hidden: SectionId[]; collapsed: SectionId[] }
 
 const LAYOUT_KEY = 'bindit:sidebar:layout:v2'
 const IMPORTANT_KEY = 'bindit:sidebar:important'
-const SECTION_IDS: SectionId[] = ['highlighted', 'study', 'directory', 'important', 'groups', 'tasks']
+const SECTION_IDS: SectionId[] = ['study', 'directory', 'important', 'groups', 'tasks', 'highlighted']
 const SECTION_TITLES: Record<SectionId, string> = {
   highlighted: 'Highlighted',
-  study: 'Study',
+  study: 'Quick study',
   directory: 'Courses',
   important: 'Important groups',
   groups: 'My groups',
-  tasks: 'Tasks',
+  tasks: 'Upcoming tasks',
 }
 const DEFAULT_LAYOUT: Layout = { order: SECTION_IDS, hidden: [], collapsed: [] }
 
@@ -178,8 +216,6 @@ function nestGroups(groups: StudyGroup[]) {
 const svg = (body: ReactNode, size = 16) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">{body}</svg>
 const glyphs = {
   gear: <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" /></svg>,
-  folder: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.2c0-.6.4-1 1-1h3.2l1.4 1.6H13c.6 0 1 .4 1 1v6.4c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" /></svg>,
-  play: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3v10l8.5-5z" /></svg>,
   handle: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3v10M9.8 3v10" /></svg>,
   chevron: <svg className="bindit-rail__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></svg>,
   square: svg(<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" />),
@@ -193,7 +229,7 @@ const glyphs = {
   cards: svg(<><rect x="2.5" y="4.5" width="8.5" height="9" rx="1.2" /><path d="M5 2.5h7.3a1.2 1.2 0 0 1 1.2 1.2V11" /></>),
   test: svg(<><rect x="3" y="2.5" width="10" height="11" rx="1.2" /><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3" /></>),
   bolt: svg(<path d="M9 1.8 3.8 9h3.6L7 14.2 12.2 7H8.6z" />),
-  chat: svg(<path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11a1.5 1.5 0 0 1-1.5-1.5z" />),
+  search: svg(<><circle cx="7" cy="7" r="4.2" /><path d="m13.5 13.5-3.4-3.4" /></>),
   grip: svg(<path d="M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01" />),
   eyeOff: svg(<><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" /><path d="M3 3l10 10" /></>),
 }
@@ -202,16 +238,16 @@ type SiteSidebarProps = {
   active: Screen
   session?: AuthSession | null
   onOpenCommand?: () => void
-  /* Collapse state is owned by the app shell (the handle, the "Collapse sidebar" pill and "↔" share it). Without it the rail stays open. */
+  /* Fold state is owned by the app shell, which remembers it; the rail's ‖ handle is its only control. Without it the rail stays open. */
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
-  /* Lets the shell's top bar show the Messages unread dot without a second request. */
-  onUnreadChange?: (total: number) => void
+  /* Pointing at or focusing a page link starts loading that page, so the click rarely waits. */
+  onPrefetch?: (screen: Screen) => void
   /* The search palette is open: the phone menu sheet closes so the two never stack or fight for focus. */
   commandOpen?: boolean
 }
 
-export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onUnreadChange, commandOpen = false }: SiteSidebarProps) {
+export function SiteSidebar({ active, session = null, onOpenCommand, collapsed = false, onCollapsedChange, onPrefetch, commandOpen = false }: SiteSidebarProps) {
   const data = useData()
   // The landing demo has no session but a sandboxed, in-memory data source it may read from.
   const canRead = Boolean(session) || data.sandboxed
@@ -220,12 +256,16 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const [tasks, setTasks] = useState<Task[] | null>(() => canRead ? data.getCachedTasks(token) : null)
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => canRead ? data.getCachedStudyGroups(token) : null)
   const [notebook, setNotebook] = useState<Notebook>(() => data.loadNotebook())
+  const [avatar, setAvatar] = useState(() => data.loadAvatar())
   const [seenActive, setSeenActive] = useState(active)
   const [groupParam, setGroupParam] = useState(readGroupParam)
   const [unreadTotal, setUnreadTotal] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuButton = useRef<HTMLButtonElement>(null)
   const menuPanel = useRef<HTMLDivElement>(null)
+  const rail = useRef<HTMLElement>(null)
+  // The ‖ handle sits in the account row when open and atop the strip when folded: keep focus on it across the switch.
+  const refocusHandle = useRef(false)
   const [layout, setLayout] = useState<Layout>(() => data.sandboxed ? DEFAULT_LAYOUT : readLayout())
   const [important, setImportant] = useState<string[]>(() => data.sandboxed ? [] : readImportant())
   const [editing, setEditing] = useState(false)
@@ -246,6 +286,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     setSeenActive(active)
     setMenuOpen(false)
     setNotebook(data.loadNotebook())
+    setAvatar(data.loadAvatar())
     setNow(data.now())
   }
 
@@ -270,9 +311,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       // Unread counts come from Supabase directly; a slow answer there must not hold up the rest.
       void listChatUnreads(session).then((unread) => {
         if (cancelled) return
-        const total = unread.reduce((sum, item) => sum + item.unread_count, 0)
-        setUnreadTotal(total)
-        onUnreadChange?.(total)
+        setUnreadTotal(unread.reduce((sum, item) => sum + item.unread_count, 0))
       }).catch(() => undefined)
       void Promise.allSettled([
         data.getAccountProfile(session.access_token),
@@ -302,7 +341,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     const timer = window.setInterval(tick, 30_000)
     document.addEventListener('visibilitychange', onVisible)
     return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
-  }, [data, session, onUnreadChange])
+  }, [data, session])
 
   // Changes made in this tab show at once: a task edit updates the shared cache (read it
   // directly), and group or profile writes fetch fresh copies past the 30-second cache.
@@ -334,6 +373,12 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       window.removeEventListener(PROFILE_CHANGED_EVENT, onProfile)
     }
   }, [data, session])
+
+  useEffect(() => {
+    if (!refocusHandle.current) return
+    refocusHandle.current = false
+    rail.current?.querySelector<HTMLButtonElement>('.bindit-rail__handle')?.focus()
+  }, [collapsed])
 
   // The phone menu takes focus when it opens, keeps the page behind it still, closes on Esc
   // and hands focus back to the Menu button when it closes.
@@ -435,7 +480,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const groupLink = (group: StudyGroup, glyph: ReactNode, extra = '') => {
     const current = active === 'stats' && groupParam === group.id
     return (
-      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'page' : undefined} title={group.name}>
+      <a className={`bindit-rail__entry${extra}${current ? ' is-current' : ''}`} href={`#stats?group=${encodeURIComponent(group.id)}`} aria-current={current ? 'true' : undefined} title={group.name}>
         <span className="bindit-rail__glyph">{glyph}</span>
         <span className="bindit-rail__entry-text">{group.name}</span>
       </a>
@@ -446,7 +491,6 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
     { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
     { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
     { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
-    { key: 'tutor', tone: 'teal', glyph: glyphs.chat, href: '#tutor', label: 'Ask Otto', current: active === 'tutor' },
   ] as const
 
   const sections: Record<SectionId, { count?: number; hatch?: boolean; body: ReactNode }> = {
@@ -499,7 +543,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
             const current = active === 'tools' && course.name === notebook.activeCourse
             return (
               <li key={course.name}>
-                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'page' : undefined} title={course.name} onClick={() => openCourse(course)}>
+                <a className={`bindit-rail__entry${current ? ' is-current' : ''}`} href="#tools" aria-current={current ? 'true' : undefined} title={course.name} onClick={() => openCourse(course)}>
                   <span className="ui-course-mark ui-course-mark--sm bindit-rail__course" style={{ ['--course' as string]: course.tone }} aria-hidden="true">{courseInitial(course.name)}</span>
                   <span className="bindit-rail__entry-text">{course.name}</span>
                 </a>
@@ -569,14 +613,6 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const canCollapse = Boolean(onCollapsedChange)
   const isCollapsed = canCollapse && collapsed
 
-  const tools = (
-    <div className="bindit-rail__tools">
-      <a className={`bindit-rail__item bindit-rail__tool${active === 'settings' ? ' is-active' : ''}`} href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined}>{glyphs.gear}</a>
-      <a className={`bindit-rail__item bindit-rail__tool${active === 'tools' ? ' is-active' : ''}`} href="#tools" aria-label="Study files" title="Study files" aria-current={active === 'tools' ? 'page' : undefined}>{glyphs.folder}</a>
-      <a className={`bindit-rail__item bindit-rail__tool${active === 'games' ? ' is-active' : ''}`} href="#games" aria-label="Practice lab" title="Practice lab" aria-current={active === 'games' ? 'page' : undefined}>{glyphs.play}</a>
-    </div>
-  )
-
   const handle = canCollapse ? (
     <button
       type="button"
@@ -584,53 +620,108 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
       aria-expanded={!isCollapsed}
       aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      onClick={() => onCollapsedChange?.(!isCollapsed)}
+      onClick={() => {
+        refocusHandle.current = true
+        onCollapsedChange?.(!isCollapsed)
+      }}
     >
       {glyphs.handle}
     </button>
   ) : null
 
+  // The main pages: icon and label, the current page highlighted. Folded, only the icons show,
+  // each named by its label (kept for screen readers) and a tooltip.
+  const pages = (
+    <ul className="bindit-rail__pages" aria-label="Pages">
+      {MAIN_PAGES.map((item) => {
+        const current = active === item.id
+        const label = isCollapsed ? MAIN_TITLES[item.id] ?? item.label : item.label
+        const unread = item.id === 'chat' ? unreadTotal : 0
+        return (
+          <li key={item.id} className={item.sub ? 'is-sub' : undefined}>
+            <a
+              className={`bindit-rail__item bindit-rail__page${current ? ' is-current' : ''}`}
+              href={`#${item.id}`}
+              aria-current={current ? 'page' : undefined}
+              title={isCollapsed ? label : undefined}
+              onPointerEnter={() => onPrefetch?.(item.id)}
+              onFocus={() => onPrefetch?.(item.id)}
+            >
+              <NavIcon kind={item.id} />
+              <span className="bindit-rail__page-label">{label}</span>
+              {unread ? (
+                <>
+                  <b className="bindit-rail__badge" aria-hidden="true">{unread > 99 ? '99+' : unread}</b>
+                  <span className="sr-only">, {unread} unread</span>
+                </>
+              ) : null}
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
+
+  const searchKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘K' : 'Ctrl K'
+
   return (
     <>
-      <nav className={`bindit-rail${editing ? ' is-editing' : ''}${isCollapsed ? ' is-collapsed' : ''}`} aria-label="Sidebar">
-        <div className="bindit-rail__top">
-          {tools}
-          {handle}
-        </div>
-
+      <nav ref={rail} className={`bindit-rail${editing ? ' is-editing' : ''}${isCollapsed ? ' is-collapsed' : ''}`} aria-label="Sidebar">
         {isCollapsed ? (
-          // The folded strip keeps the study shortcuts and courses as icons, so it never looks empty.
-          <ul className="bindit-rail__strip" aria-label="Shortcuts">
-            {studyLinks.map((item) => (
-              <li key={item.key}>
-                <a
-                  className={`bindit-rail__strip-link bindit-rail__study ui-tone--${item.tone}${'current' in item && item.current ? ' is-current' : ''}`}
-                  href={item.href}
-                  aria-label={item.label}
-                  title={item.label}
-                  aria-current={'current' in item && item.current ? 'page' : undefined}
-                  data-review-link={'review' in item ? '' : undefined}
-                >
-                  <span className="bindit-rail__study-icon">{item.glyph}</span>
+          <>
+            <div className="bindit-rail__top">{handle}</div>
+            {pages}
+            {/* Then the quick-study shortcuts and courses as icons. */}
+            <ul className="bindit-rail__strip" aria-label="Quick study and courses">
+              {studyLinks.map((item) => (
+                <li key={item.key}>
+                  <a
+                    className={`bindit-rail__strip-link bindit-rail__study ui-tone--${item.tone}${'current' in item && item.current ? ' is-current' : ''}`}
+                    href={item.href}
+                    aria-label={item.label}
+                    title={item.label}
+                    aria-current={'current' in item && item.current ? 'page' : undefined}
+                    data-review-link={'review' in item ? '' : undefined}
+                  >
+                    <span className="bindit-rail__study-icon">{item.glyph}</span>
+                  </a>
+                </li>
+              ))}
+              {courses.map((course) => (
+                <li key={course.name}>
+                  <a className="bindit-rail__strip-link" href="#tools" aria-label={course.name} title={course.name} onClick={() => openCourse(course)}>
+                    <span className="ui-course-mark ui-course-mark--sm bindit-rail__course" style={{ ['--course' as string]: course.tone }} aria-hidden="true">{courseInitial(course.name)}</span>
+                  </a>
+                </li>
+              ))}
+              <li>
+                <a className={`bindit-rail__strip-link bindit-rail__strip-settings${active === 'settings' ? ' is-current' : ''}`} href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined}>
+                  <NavIcon kind="settings" />
                 </a>
               </li>
-            ))}
-            {courses.map((course) => (
-              <li key={course.name}>
-                <a className="bindit-rail__strip-link" href="#tools" aria-label={course.name} title={course.name} onClick={() => openCourse(course)}>
-                  <span className="ui-course-mark ui-course-mark--sm bindit-rail__course" style={{ ['--course' as string]: course.tone }} aria-hidden="true">{courseInitial(course.name)}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
+            </ul>
+          </>
         ) : (
           <>
             <div className="bindit-rail__account">
-              <span className="bindit-rail__avatar" aria-hidden="true" />
+              {avatar
+                ? <img className="bindit-rail__avatar" src={avatar} alt="" width={28} height={28} />
+                : <span className={`ui-avatar bindit-rail__avatar ${toneClass(toneForName(displayName))}`} aria-hidden="true">{initials}</span>}
               <a className="bindit-rail__name" href="#profile" aria-label={`Your profile, ${displayName}`}>{displayName}</a>
               <PlanBadge plan={profile?.plan} className="bindit-rail__plan" />
-              <a className="bindit-rail__mini" href="#settings" aria-label="Account settings" title="Account settings">{glyphs.gear}</a>
+              <a className={`bindit-rail__mini bindit-rail__settings${active === 'settings' ? ' is-current' : ''}`} href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined}>{glyphs.gear}</a>
+              {handle}
             </div>
+
+            {onOpenCommand ? (
+              <button type="button" className="bindit-rail__search" onClick={onOpenCommand} aria-keyshortcuts="Meta+K Control+K">
+                <span className="bindit-rail__glyph">{glyphs.search}</span>
+                <span>Search</span>
+                <kbd aria-hidden="true">{searchKey}</kbd>
+              </button>
+            ) : null}
+
+            {pages}
 
             {shown.map((id, index) => {
               const section = sections[id]
@@ -693,6 +784,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
 
             {editing ? <p className="bindit-rail__hint">Drag <span aria-hidden="true">⋮⋮</span> to move a section, or use the arrows. The eye hides one.</p> : null}
 
+            {data.sandboxed ? null : <ThemeSwitch />}
             <div className="bindit-rail__footer">
               <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} onClick={() => setEditing((value) => !value)}>
                 <span className="bindit-rail__lock-state" aria-hidden="true">
