@@ -18,7 +18,7 @@ MAX_NOTE_BYTES = 4 * 1024 * 1024
 NOTE_TOO_LARGE = 'Notes must be 4 MB or smaller. Try a smaller file or a photo.'
 MAX_STORED_CHARS = 120_000
 TEXT_EXTENSIONS = {'.txt', '.md', '.csv', '.json'}
-IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif'}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {'.pdf', '.docx'}
 MAX_PDF_PAGES = 200
 MAX_OCR_PDF_PAGES = 15  # scanned PDFs are OCR'd by a paid model, so only the first pages are sent
@@ -226,7 +226,7 @@ def extract_text(filename: str, content: bytes) -> str:
         raise NoteIngestionError(NOTE_TOO_LARGE)
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
-        raise NoteIngestionError('Use a PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG, JPEG, or WEBP file')
+        raise NoteIngestionError('Use a PDF, DOCX, TXT, MD, CSV, JSON, PNG, JPG, JPEG, WEBP, or HEIC file')
     try:
         if suffix in TEXT_EXTENSIONS:
             text = content.decode('utf-8-sig', errors='replace')

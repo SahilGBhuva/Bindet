@@ -41,6 +41,7 @@ import disposable_email
 import feedback
 import flashcards
 import help_bot
+import images as photos
 import questions
 import note_ingestion
 import note_store
@@ -429,9 +430,10 @@ GLOBAL_AI_BUDGET_ID = "global:ai"
 NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
 GUEST_QUESTIONS_PER_DAY = 300
-TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+TUTOR_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"} | photos.HEIF_CONTENT_TYPES
 TUTOR_IMAGE_MAX_BYTES = 4 * 1024 * 1024
 TUTOR_IMAGE_TOO_LARGE = "Images must be 4 MB or smaller"
+TUTOR_IMAGE_TYPE_REJECTED = "Attach a JPG, PNG, WebP, GIF, or iPhone (HEIC) photo"
 # All images in one message together. As base64 (4/3 larger) plus the message text this
 # keeps the whole request under TUTOR_REQUEST_MAX_BYTES (4.4 MB), below Vercel's ~4.5 MB
 # request limit, so in practice this total, not the per-image cap, is what binds.
@@ -1389,12 +1391,17 @@ NOTE_CONTENT_TYPES = {
     ".jpg": ("image/jpeg", "image/jpg"),
     ".jpeg": ("image/jpeg", "image/jpg"),
     ".webp": ("image/webp",),
+    ".heic": ("image/heic", "image/heif"),
+    ".heif": ("image/heif", "image/heic"),
 }
 
 
 # What an image note's bytes must be, by extension (checked with sniff_image_type).
-NOTE_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
-NOTE_IMAGE_MISMATCH = "That image couldn’t be read. Upload a real PNG, JPG or WebP photo of your notes."
+NOTE_IMAGE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".heic": photos.HEIF_MIME, ".heif": photos.HEIF_MIME,
+}
+NOTE_IMAGE_MISMATCH = "That image couldn’t be read. Upload a real PNG, JPG, WebP or iPhone (HEIC) photo of your notes."
 
 
 def note_content_type(suffix: str, claimed: str | None) -> str:
@@ -1451,6 +1458,9 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             if actual_type is None or actual_type != NOTE_IMAGE_TYPES.get(suffix):
                 raise HTTPException(status_code=415, detail=NOTE_IMAGE_MISMATCH)
             content_type = actual_type
+            if actual_type == photos.HEIF_MIME:
+                # iPhone photos become a plain, metadata-free JPEG for OCR, the cache and the row.
+                content, content_type = heif_as_jpeg(content), "image/jpeg"
             # The same image was read before (by anyone: the key hashes its full bytes),
             # so reuse that text without an OCR quota, budget or model call.
             cache_key = ai_cache.extraction_key(content, content_type)
@@ -1991,6 +2001,8 @@ def otto_after_reply(owner: str, conversation: dict, *, first_reply: bool, first
 
 def sniff_image_type(raw: bytes) -> str | None:
     """Identify an image by its magic bytes; the declared data URL type is never trusted."""
+    if photos.is_heif(raw):
+        return photos.HEIF_MIME
     if raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if raw.startswith(b"\xff\xd8\xff"):
@@ -2002,6 +2014,14 @@ def sniff_image_type(raw: bytes) -> str | None:
     return None
 
 
+def heif_as_jpeg(raw: bytes) -> bytes:
+    """An iPhone HEIC/HEIF photo as a JPEG, or a friendly 415 when it can't be read."""
+    try:
+        return photos.heif_to_jpeg(raw)
+    except photos.ImageConversionError as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+
+
 def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
     """Validate data URLs (type, size, real base64, magic bytes) before anything is sent to a model."""
     parts = []
@@ -2010,7 +2030,7 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
         header, _, encoded = image.data_url.partition(",")
         content_type = header.removeprefix("data:").removesuffix(";base64")
         if not header.startswith("data:") or not header.endswith(";base64") or content_type not in TUTOR_IMAGE_TYPES:
-            raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
+            raise HTTPException(status_code=415, detail=TUTOR_IMAGE_TYPE_REJECTED)
         # Cheap length check before decoding: 4 base64 characters carry 3 bytes.
         if len(encoded) > (TUTOR_IMAGE_MAX_BYTES + 2) // 3 * 4 + 4:
             raise HTTPException(status_code=413, detail=TUTOR_IMAGE_TOO_LARGE)
@@ -2027,7 +2047,12 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
             raise HTTPException(status_code=413, detail=TUTOR_IMAGES_TOO_LARGE)
         actual_type = sniff_image_type(raw)
         if actual_type is None:
-            raise HTTPException(status_code=415, detail="Attach a JPG, PNG, WebP, or GIF image")
+            raise HTTPException(status_code=415, detail=TUTOR_IMAGE_TYPE_REJECTED)
+        if actual_type == photos.HEIF_MIME:
+            # The vision model is sent a plain JPEG; the HEIC (and its EXIF/GPS) goes no further.
+            converted = heif_as_jpeg(raw)
+            parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(converted).decode()}})
+            continue
         # A mislabelled but genuine image is relabelled with its real type.
         data_url = image.data_url if actual_type == content_type else f"data:{actual_type};base64,{encoded}"
         parts.append({"type": "image_url", "image_url": {"url": data_url}})
