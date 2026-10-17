@@ -368,35 +368,65 @@ async function sendRequest<T>(path: string, options?: RequestInit & { timeoutMs?
   return response.json() as Promise<T>
 }
 
-async function optimizedImage(file: File): Promise<File> {
+/* File name extensions for the image types a browser canvas can produce. */
+const IMAGE_EXTENSIONS: Record<string, string> = { 'image/webp': '.webp', 'image/jpeg': '.jpg', 'image/png': '.png' }
+/* The most a shrunk image may be: the server's limit for one note file. */
+const OPTIMIZED_MAX_BYTES = 4 * 1024 * 1024
+
+type DrawSurface = { blob: (type: string, quality: number) => Promise<Blob | null> }
+
+function drawSurface(bitmap: ImageBitmap, width: number, height: number, paper: boolean): DrawSurface {
+  // JPEG has no transparency: paper-white behind any transparent pixels.
+  const paint = (context: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null) => {
+    if (!context) return
+    if (paper) {
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, width, height)
+    }
+    context.drawImage(bitmap, 0, 0, width, height)
+  }
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const canvas = new OffscreenCanvas(width, height)
+    paint(canvas.getContext('2d'))
+    return { blob: (type, quality) => canvas.convertToBlob({ type, quality }).catch(() => null) }
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  paint(canvas.getContext('2d'))
+  return { blob: (type, quality) => new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality)) }
+}
+
+/*
+ * Shrinks a large photo to at most 1800px on its long edge. WebP where the browser can
+ * encode it; Safari can't, and hands back a PNG instead (often larger than the photo), so
+ * then JPEG. The file is named and typed from what was really produced, never assumed.
+ * Exported for tests.
+ */
+export async function optimizedImage(file: File): Promise<File> {
   // HEIC is tried too: Safari can decode it, and the original is kept (for the server to
   // convert) wherever the browser can't.
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) && !isHeicFile(file)) return file
+  const heic = isHeicFile(file)
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) && !heic) return file
   try {
     const bitmap = await createImageBitmap(file)
     const largestSide = Math.max(bitmap.width, bitmap.height)
-    if (file.size < 1_000_000 && largestSide <= 1800 && !isHeicFile(file)) {
+    if (file.size < 1_000_000 && largestSide <= 1800 && !heic) {
       bitmap.close()
       return file
     }
     const scale = Math.min(1, 1800 / largestSide)
     const width = Math.max(1, Math.round(bitmap.width * scale))
     const height = Math.max(1, Math.round(bitmap.height * scale))
-    let blob: Blob | null = null
-    if (typeof OffscreenCanvas !== 'undefined') {
-      const canvas = new OffscreenCanvas(width, height)
-      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height)
-      blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.82 })
-    } else {
-      const canvas = document.createElement('canvas')
-      canvas.width = width
-      canvas.height = height
-      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, width, height)
-      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82))
+    let blob = await drawSurface(bitmap, width, height, false).blob('image/webp', 0.82)
+    if (!blob || blob.type !== 'image/webp') {
+      blob = await drawSurface(bitmap, width, height, true).blob('image/jpeg', 0.82)
     }
     bitmap.close()
-    if (!blob || (blob.size >= file.size && !isHeicFile(file))) return file
-    return new File([blob], file.name.replace(/\.[^.]+$/, '.webp'), { type: 'image/webp', lastModified: file.lastModified })
+    const extension = blob ? IMAGE_EXTENSIONS[blob.type] : undefined
+    if (!blob || !extension || blob.size > OPTIMIZED_MAX_BYTES || (blob.size >= file.size && !heic)) return file
+    const base = file.name.replace(/\.[^.]+$/, '') || 'image'
+    return new File([blob], `${base}${extension}`, { type: blob.type, lastModified: file.lastModified })
   } catch {
     return file
   }
