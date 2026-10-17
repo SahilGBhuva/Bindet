@@ -551,7 +551,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
               <a className="home-notice__row" href={notificationHref(unread.kind)}>
                 <span className={`home-badge${unread.kind === 'plan_granted' ? ' home-badge--plan' : ''}`}>{notificationLabel(unread.kind)}</span>
                 <span className="home-notice__text">{unread.message}</span>
-                <span className="home-notice__time">{relative(now - parseServerTime(unread.created_at))}<span className="sr-only"> ago</span></span>
+                <span className="home-notice__time">{(() => { const label = relative(now - parseServerTime(unread.created_at)); return <>{label}{label === 'now' ? null : <span className="sr-only"> ago</span>}</> })()}</span>
               </a>
             ) : reviewDue && !tasksFailed ? null : (
               <p className="home-notice__quiet">{tasksFailed ? 'Couldn’t check right now.' : 'All caught up.'}</p>

@@ -724,3 +724,14 @@
   .home-fold__body,
   .home-rule__track { transition: none; }
 }
+
+/* Dark mode: each stat card gets a clear wash of its own color (deep at the top corner,
+   settling toward the surface) instead of a muddy dark tint, with a solid icon chip. */
+:root[data-theme="dark"] .home-today__card {
+  border-color: color-mix(in srgb, var(--tone) 46%, var(--color-surface));
+  background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 34%, var(--color-surface)) 0%, color-mix(in srgb, var(--tone) 14%, var(--color-surface)) 100%);
+}
+:root[data-theme="dark"] .home-today__icon { background: var(--tone); color: #fff; }
+:root[data-theme="dark"] .home-today__label,
+:root[data-theme="dark"] .home-today__value { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
+:root[data-theme="dark"] .home-today__value small { color: color-mix(in srgb, var(--tone-text) 40%, #fff); opacity: .85; }
