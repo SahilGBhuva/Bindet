@@ -12,7 +12,7 @@ TEST_DB.close()
 os.environ["POCKET_TUTOR_DB_PATH"] = TEST_DB.name
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, update
+from sqlalchemy import delete, inspect, update
 
 import ai_cache
 import ai_tutor
@@ -565,6 +565,150 @@ class SafetyTests(PracticeTestCase):
             self.assertIn(f"alter table public.{name} enable row level security", sql)
             self.assertIn(f"revoke all on table public.{name} from anon, authenticated", sql)
         self.assertIn("on delete cascade", sql)
+
+
+class DifficultyTests(PracticeTestCase):
+    """Easy / Medium / Hard: the field, the prompt rule per level, the cache, the avoid list,
+    the default time per level, test mode and XP."""
+
+    def system_prompt(self, call=-1):
+        return self.model.calls[call]["messages"][0]["content"]
+
+    def test_difficulty_defaults_to_medium_and_is_validated(self):
+        test = self.create().json()
+        self.assertEqual((test["difficulty"], test["test_mode"]), ("medium", False))
+        for level in ("easy", "hard"):
+            created = self.create(difficulty=level, new_questions=True)
+            self.assertEqual(created.status_code, 201, created.text)
+            self.assertEqual(created.json()["difficulty"], level)
+        for bad in ("extreme", "", "HARD", 3, None):
+            self.assertEqual(self.create(difficulty=bad).status_code, 422, bad)
+        listed = self.call("GET", "/api/practice-tests", params={"course": "Biology"}).json()["tests"]
+        self.assertEqual([entry["difficulty"] for entry in listed], ["hard", "easy", "medium"])
+        # Older tests stored no level: they read as medium.
+        with database.engine().begin() as connection:
+            connection.execute(update(practice_tests.tests).values(difficulty=None))
+        self.assertEqual(practice_tests.get_test("alex", test["id"])["difficulty"], "medium")
+        self.assertEqual(ai_tutor.practice_difficulty(None), "medium")
+        self.assertEqual(ai_tutor.practice_difficulty("nonsense"), "medium")
+
+    def test_each_level_steers_the_prompt_with_its_own_fixed_rule(self):
+        prompts = {}
+        for level in ("easy", "medium", "hard"):
+            self.create(difficulty=level)
+            prompts[level] = self.system_prompt()
+        self.assertEqual(len(set(prompts.values())), 3)
+        # Medium is today's test, unchanged.
+        self.assertEqual(prompts["medium"], ai_tutor.GENERATE_TEST_PROMPT)
+        for level in ("easy", "hard"):
+            self.assertTrue(prompts[level].startswith(ai_tutor.GENERATE_TEST_PROMPT))
+            self.assertIn(ai_tutor.PRACTICE_LEVEL_RULES[level], prompts[level])
+            # Every level keeps the grounding rule.
+            self.assertIn("Use ONLY facts stated in the notes", prompts[level])
+        self.assertIn("definitions", prompts["easy"])
+        self.assertIn("four fifths", prompts["easy"])
+        self.assertIn("misconceptions", prompts["hard"])
+        self.assertIn("40 percent", prompts["hard"])
+        self.assertIn("No giveaway wording", prompts["hard"])
+        # The level never reaches the model as text from the client.
+        for call in self.model.calls:
+            self.assertNotIn("Difficulty:", call["messages"][1]["content"])
+
+    def test_every_level_keeps_the_grounding_and_cleaning_checks(self):
+        made_up = short("Which planet is closest to the sun in our solar system?", "Mercury orbits closest", "Space")
+        linked = short("Visit the site to learn about photosynthesis?", "https://example.com chloroplasts", "Links")
+        self.model.questions = [*GOOD, made_up, linked]
+        for level in ("easy", "hard"):
+            test = self.create(difficulty=level, count=7).json()
+            prompts = [item["prompt"] for item in test["items"]]
+            self.assertEqual(sorted(prompts), sorted(question["prompt"] for question in GOOD))
+
+    def test_each_level_has_its_own_cache_and_medium_keeps_the_old_key(self):
+        self.create()
+        self.create(difficulty="hard")
+        self.create(difficulty="easy")
+        self.assertEqual(self.model.ops(), ["practice_test"] * 3)
+        # Switching back to a level reuses its saved test.
+        self.create(difficulty="hard")
+        self.create(difficulty="medium")
+        self.create(difficulty="easy")
+        self.assertEqual(len(self.model.calls), 3)
+        base = {"owner_id": "alex", "course": "Biology", "unit": "Photosynthesis", "source_text": NOTE_TEXT, "count": 5}
+        keys = {level: ai_cache.practice_key(**base, difficulty=level) for level in ("easy", "medium", "hard")}
+        self.assertEqual(len(set(keys.values())), 3)
+        self.assertEqual(keys["medium"], ai_cache.practice_key(**base))
+        self.assertEqual(ai_cache.practice_key(**base, difficulty=None), ai_cache.practice_key(**base))
+        # Editing one level's rule misses only that level's cache.
+        with patch.dict(ai_tutor.PRACTICE_LEVEL_RULES, {"hard": ai_tutor.PRACTICE_LEVEL_RULES["hard"] + " Changed."}):
+            self.assertNotEqual(ai_cache.practice_key(**base, difficulty="hard"), keys["hard"])
+            self.assertEqual(ai_cache.practice_key(**base, difficulty="easy"), keys["easy"])
+            self.assertEqual(ai_cache.practice_key(**base, difficulty="medium"), keys["medium"])
+
+    def test_new_questions_avoid_only_prompts_from_the_same_level(self):
+        hard_only = mc("Why does closing the stomata reduce water loss from a leaf?", ["Guard cells close them", "Rubisco fixes it", "Chlorophyll absorbs it", "The stroma stores it"], "Guard cells close them", "Leaves")
+        self.model.questions = [hard_only, *GOOD]
+        self.create(difficulty="hard")
+        self.model.questions = GOOD
+        self.create(difficulty="easy", new_questions=True)
+        self.assertNotIn(hard_only["prompt"], self.model.calls[-1]["messages"][1]["content"])
+        self.create(difficulty="hard", new_questions=True)
+        self.assertIn(hard_only["prompt"], self.model.calls[-1]["messages"][1]["content"])
+        # Tests from before levels existed count as medium.
+        with database.engine().begin() as connection:
+            connection.execute(update(practice_tests.tests).values(difficulty=None))
+        self.assertIn(hard_only["prompt"], practice_tests.recent_prompts("alex", "Biology", "Photosynthesis", difficulty="medium"))
+        self.assertEqual(practice_tests.recent_prompts("alex", "Biology", "Photosynthesis", difficulty="hard"), [])
+
+    def test_default_time_follows_the_level_and_test_mode_is_always_timed(self):
+        times = {level: self.create(difficulty=level, new_questions=True).json()["time_limit_s"] for level in ("easy", "medium", "hard")}
+        self.assertEqual(times, {"easy": 5 * 120, "medium": 5 * 90, "hard": 5 * 72})
+        self.assertGreater(times["easy"], times["medium"])
+        self.assertGreater(times["medium"], times["hard"])
+        self.assertIsNone(self.create(untimed=True).json()["time_limit_s"])
+        exam = self.create(difficulty="hard", untimed=True, test_mode=True).json()
+        self.assertEqual((exam["test_mode"], exam["time_limit_s"]), (True, 5 * 72))
+        self.assertEqual(self.create(time_limit_min=9, test_mode=True).json()["time_limit_s"], 9 * 60)
+        self.assertTrue(practice_tests.get_test("alex", exam["id"])["test_mode"])
+
+    def test_hard_earns_one_and_a_half_times_the_xp(self):
+        self.assertEqual([practice_tests.xp_for(5, level) for level in ("easy", "medium", "hard", None)], [10, 10, 15, 10])
+        self.assertEqual(practice_tests.xp_for(3, "hard"), 9)
+        self.assertEqual(practice_tests.xp_for(1, "hard"), 3)
+        for level, expected in (("easy", 10), ("medium", 10), ("hard", 15)):
+            test = self.create(difficulty=level, new_questions=True).json()
+            result = self.submit(test["id"], self.correct_answers(test)).json()
+            self.assertEqual(result["xp_earned"], expected, level)
+
+    def test_the_hard_bonus_stays_inside_the_practice_test_daily_cap(self):
+        earned = 0
+        for _ in range(practice_tests.XP_PER_DAY // 15 + 2):
+            test = self.create(difficulty="hard").json()
+            earned += self.submit(test["id"], self.correct_answers(test)).json()["xp_earned"]
+        self.assertEqual(earned, practice_tests.XP_PER_DAY)
+        self.assertEqual(practice_tests.xp_left_today("alex"), 0)
+
+    def test_the_hard_bonus_stays_inside_the_overall_daily_xp_cap(self):
+        database.award_xp("alex", database.DAILY_XP_CAP - 7)
+        test = self.create(difficulty="hard").json()
+        result = self.submit(test["id"], self.correct_answers(test)).json()
+        self.assertEqual(result["xp_earned"], 7)
+        self.assertEqual(practice_tests.get_test("alex", test["id"])["xp_earned"], 7)
+
+    def test_the_level_columns_are_added_to_an_older_table(self):
+        engine = database.engine()
+        with engine.begin() as connection:
+            connection.exec_driver_sql("ALTER TABLE practice_tests DROP COLUMN difficulty")
+            connection.exec_driver_sql("ALTER TABLE practice_tests DROP COLUMN test_mode")
+        practice_tests.init_practice.cache_clear()
+        practice_tests.init_practice()
+        columns = {column["name"] for column in inspect(engine).get_columns("practice_tests")}
+        self.assertTrue({"difficulty", "test_mode"} <= columns)
+        self.assertEqual(self.create(difficulty="hard").json()["difficulty"], "hard")
+        # The Postgres statements are additive only.
+        for _, postgres_sql, sqlite_sql in practice_tests.ADDED_COLUMNS:
+            self.assertIn("ADD COLUMN IF NOT EXISTS", postgres_sql)
+            for statement in (postgres_sql, sqlite_sql):
+                self.assertNotRegex(statement.upper(), r"DROP|NOT NULL|DELETE|UPDATE")
 
 
 if __name__ == "__main__":

@@ -860,6 +860,42 @@ GENERATE_TEST_PROMPT = (
     "Write different questions from those, testing other facts or the same fact from a new angle. "
     "Return ONLY JSON {\"questions\":[{\"type\":\"multiple_choice\"|\"short_answer\",\"prompt\":string,\"choices\":[string],\"answer\":string,\"explanation\":string,\"topic\":string}]}."
 )
+# Difficulty levels. "medium" is the original test and adds nothing to the prompt, so its
+# cached tests and cache keys are unchanged; the other levels append one fixed, server-side
+# rule (never text from the client). Every grounding and cleaning check applies to all levels.
+PRACTICE_DIFFICULTIES = ("easy", "medium", "hard")
+PRACTICE_DEFAULT_DIFFICULTY = "medium"
+PRACTICE_LEVEL_RULES = {
+    "easy": (
+        "Difficulty: EASY. This overrides the question mix above. Test recall: definitions, key terms, names, places and single facts "
+        "stated plainly in the notes. Make about four fifths of the questions \"multiple_choice\" and the rest \"short_answer\" "
+        "with a one or two word answer. Word every prompt simply and directly. The three wrong choices are plainly wrong to a "
+        "student who read the notes (other terms from the notes are fine), never trick options."
+    ),
+    "medium": "",
+    "hard": (
+        "Difficulty: HARD. This overrides the question mix above. Test understanding, not recall: multi-step application, "
+        "analysis, cause and effect, comparing two ideas, and \"why\" or \"how\" questions, all answerable from facts in the notes. "
+        "Make about 40 percent of the questions \"short_answer\" (the answer is still a short phrase that can be checked) and the rest "
+        "\"multiple_choice\". The three wrong choices are plausible: build them from common misconceptions about this material, "
+        "mixed-up terms from the notes, or a step in the wrong order, while the notes still show they are wrong. "
+        "No giveaway wording: the prompt must not repeat words that only appear in the right answer, and the right choice must not "
+        "be the longest or most detailed one."
+    ),
+}
+
+
+def practice_difficulty(value: str | None) -> str:
+    """A known level, or the default (medium) for None or anything unknown."""
+    return value if value in PRACTICE_DIFFICULTIES else PRACTICE_DEFAULT_DIFFICULTY
+
+
+def practice_test_prompt(difficulty: str | None = None) -> str:
+    """The system prompt for one level: medium is exactly GENERATE_TEST_PROMPT."""
+    rule = PRACTICE_LEVEL_RULES[practice_difficulty(difficulty)]
+    return GENERATE_TEST_PROMPT + (" " + rule if rule else "")
+
+
 _TEST_QUESTION_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {
@@ -971,13 +1007,16 @@ class PracticeTestBatch:
 
 
 def generate_practice_test(*, course: str, unit: str, note_text: str, count: int, instructions: str = "",
-                           session_id: str | None = None, avoid: list[str] | None = None) -> PracticeTestBatch:
+                           session_id: str | None = None, avoid: list[str] | None = None,
+                           difficulty: str | None = None) -> PracticeTestBatch:
     """A practice test of `count` questions from the student's notes (unit or whole course).
     Grounded only. Raises AIBadOutput when fewer than PRACTICE_MIN_KEPT_RATIO of them are usable.
 
     `avoid`: earlier prompts the student has had. The model is shown them and any question
     that repeats one is dropped; only when too few new ones are left (fewer than
-    practice_min_kept) is the test topped up with those repeats."""
+    practice_min_kept) is the test topped up with those repeats.
+
+    `difficulty`: easy | medium | hard (see PRACTICE_LEVEL_RULES); medium is the default."""
     text = practice_source_text(note_text)
     if not text:
         raise AITutorError("No note text to make a practice test from")
@@ -991,7 +1030,7 @@ def generate_practice_test(*, course: str, unit: str, note_text: str, count: int
     if clean_instructions(instructions):
         user_content += "\n\n" + preferences_block(instructions)
     result = _chat_json(
-        op="generate_test", system_prompt=GENERATE_TEST_PROMPT, max_tokens=practice_max_tokens(count),
+        op="generate_test", system_prompt=practice_test_prompt(difficulty), max_tokens=practice_max_tokens(count),
         schema_name="practice_test", schema=_TEST_SCHEMA, session_id=session_id, provider_sort="throughput", user_content=user_content,
     )
     if set(result.keys()) != {"questions"}:

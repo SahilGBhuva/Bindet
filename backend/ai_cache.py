@@ -463,8 +463,16 @@ def practice_version() -> str:
     )
 
 
-def practice_key(*, owner_id: str, course: str, unit: str, source_text: str, count: int, instructions_hash: str = "") -> str:
-    return make_key("practice", practice_version(), owner_id, course, unit, source_text, int(count), instructions_hash)
+def practice_key(*, owner_id: str, course: str, unit: str, source_text: str, count: int, instructions_hash: str = "",
+                 difficulty: str | None = None) -> str:
+    """Each level has its own key. Medium (the default, and the only level before levels
+    existed) keeps the original key so its cached tests stay valid; the other levels add
+    the level and its exact prompt rule, so editing a rule misses only that level's cache."""
+    level = ai_tutor.practice_difficulty(difficulty)
+    parts: tuple = ()
+    if level != ai_tutor.PRACTICE_DEFAULT_DIFFICULTY:
+        parts = (f"level:{level}", fingerprint(ai_tutor.PRACTICE_LEVEL_RULES[level]))
+    return make_key("practice", practice_version(), owner_id, course, unit, source_text, int(count), instructions_hash, *parts)
 
 
 def cached_practice_test(key: str, owner_id: str) -> list[dict] | None:

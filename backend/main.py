@@ -3562,6 +3562,11 @@ class PracticeTestCreate(BaseModel):
     instructions: str | None = Field(default=None, max_length=200)
     # Skip the saved test for these notes and settings and have the AI write new questions.
     new_questions: bool = False
+    # easy | medium | hard: picks one of the fixed, server-side prompt rules (ai_tutor.PRACTICE_LEVEL_RULES).
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    # Exam conditions in the runner (strict timer, no checking until hand-in). Stored with the
+    # test so a reload keeps it; grading and XP are the same either way.
+    test_mode: bool = False
 
 
 class PracticeAnswer(BaseModel):
@@ -3576,12 +3581,14 @@ class PracticeSubmit(BaseModel):
 
 
 def practice_time_limit(data: PracticeTestCreate, count: int) -> int | None:
-    """Seconds allowed: the student's choice, or 1.5 minutes per question; None when untimed."""
-    if data.untimed:
+    """Seconds allowed: the student's choice, or the level's suggested time per question
+    (practice_tests.SECONDS_PER_QUESTION: Easy 2, Medium 1.5, Hard 1.2 minutes); None when
+    untimed. Test mode is always timed: untimed is ignored there."""
+    if data.untimed and not data.test_mode:
         return None
     if data.time_limit_min is not None:
         return data.time_limit_min * 60
-    return round(count * 90)
+    return round(count * practice_tests.SECONDS_PER_QUESTION[data.difficulty])
 
 
 @app.post("/api/practice-tests", status_code=201)
@@ -3604,7 +3611,8 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         raise practice_error(400, "notes_too_short")
     practice_rate_limit(owner, "practice_test_start", PRACTICE_STARTS_PER_DAY, "You’ve started a lot of practice tests today.")
     steering = ai_tutor.instructions_hash(instructions)
-    cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count, instructions_hash=steering)
+    cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count,
+                                      instructions_hash=steering, difficulty=data.difficulty)
     questions: list[dict] = []
     if not data.new_questions:
         # The same notes, settings and preferences already made a test for this student:
@@ -3627,10 +3635,11 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         try:
             ai_tutor.warm_connection()
             # "New questions": steer away from (and drop) prompts of this student's earlier tests here.
-            avoid = practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX) if data.new_questions else None
+            avoid = (practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX, difficulty=data.difficulty)
+                     if data.new_questions else None)
             batch = ai_tutor.generate_practice_test(
                 course=course, unit=unit or "", note_text=text, count=count, instructions=instructions,
-                session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid,
+                session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid, difficulty=data.difficulty,
             )
         except ai_tutor.AIBadOutput as exc:
             log("bad_output", error=exc)
@@ -3644,7 +3653,8 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
             # Tied to every note it was written from: deleting any of them deletes it.
             for note_id in note_ids:
                 ai_cache.add_ref("practice_test_cache", cache_key, owner, note_id)
-    return practice_tests.create_test(owner, course, unit, time_limit_s, practice_tests.shuffled_choices(questions))
+    return practice_tests.create_test(owner, course, unit, time_limit_s, practice_tests.shuffled_choices(questions),
+                                      difficulty=data.difficulty, test_mode=data.test_mode)
 
 
 @app.get("/api/practice-tests")
@@ -3743,7 +3753,7 @@ def submit_practice_test(
         limit = test["time_limit_s"]
         over_time = bool(limit) and submitted_at > started_at + timedelta(seconds=int(limit) + practice_tests.GRACE_SECONDS)
         # finish() caps this by today's practice-test XP left, inside its lock.
-        earned = practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"])
+        earned = practice_tests.xp_for(sum(1 for result in results.values() if result["correct"]), practice_tests.difficulty_of(test))
         public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=earned)
         xp = int(public["xp_earned"])
     except practice_tests.Conflict as error:

@@ -19,7 +19,7 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, delete, func, select, update
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, MetaData, String, Table, delete, func, inspect, or_, select, text, update
 
 import database
 
@@ -42,6 +42,9 @@ tests = Table(
     Column("xp_awarded", Integer, nullable=False, default=0),
     Column("grading_started_at", DateTime(timezone=True), nullable=True),
     Column("grading_token", String(36), nullable=True),  # which request holds the grading claim
+    # Added after the first release (nullable, added at runtime by _add_missing_columns).
+    Column("difficulty", String(8), nullable=True),  # easy | medium | hard; None (older tests): medium
+    Column("test_mode", Boolean, nullable=True),  # exam conditions chosen on the setup screen; None: off
 )
 Index("ix_practice_tests_owner_course_unit", tests.c.owner_id, tests.c.course, tests.c.unit)
 
@@ -73,6 +76,21 @@ XP_PER_CORRECT = 2
 XP_PER_DAY = 60
 # A topic answered below this share correct is a weak spot.
 WEAK_BELOW = 0.7
+# XP per correct answer is scaled by the test's level, then capped by XP_PER_DAY (finish())
+# and the overall daily XP cap (database.award_xp) exactly as before: Hard earns 1.5x
+# (rounded down), Easy and Medium the normal rate. Test mode does not change XP.
+XP_MULTIPLIER = {"easy": 1.0, "medium": 1.0, "hard": 1.5}
+DIFFICULTIES = tuple(XP_MULTIPLIER)
+# The default time limit per question for each level (the setup screen suggests the same,
+# frontend lib/practice.ts suggestedMinutes): easier questions get more time, Hard less,
+# like a real exam.
+SECONDS_PER_QUESTION = {"easy": 120, "medium": 90, "hard": 72}
+DEFAULT_DIFFICULTY = "medium"
+# Columns added after the first release, for databases created before them (additive only).
+ADDED_COLUMNS = (
+    ("difficulty", "ALTER TABLE practice_tests ADD COLUMN IF NOT EXISTS difficulty varchar(8)", "ALTER TABLE practice_tests ADD COLUMN difficulty VARCHAR(8)"),
+    ("test_mode", "ALTER TABLE practice_tests ADD COLUMN IF NOT EXISTS test_mode boolean", "ALTER TABLE practice_tests ADD COLUMN test_mode BOOLEAN"),
+)
 
 _sqlite_lock = threading.Lock()
 
@@ -81,11 +99,40 @@ class Conflict(Exception):
     """The test was already submitted (or is being graded right now)."""
 
 
+def _add_missing_columns(connection) -> None:
+    """Postgres, inside create_locked_tables' transaction. ADD COLUMN locks the table even
+    when the column exists, so only the missing ones run (like database.init_db)."""
+    existing = set(connection.execute(text(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'practice_tests'"
+    )).scalars().all())
+    for column, postgres_sql, _ in ADDED_COLUMNS:
+        if column not in existing:
+            connection.exec_driver_sql(postgres_sql)
+
+
 @lru_cache(maxsize=1)
 def init_practice() -> None:
     database.init_db()
     # Served only through the API: RLS on, no policy and no client grants (one transaction).
-    database.create_locked_tables(database.engine(), practice_metadata, PRACTICE_TABLES, PRACTICE_TABLES)
+    active_engine = database.engine()
+    database.create_locked_tables(active_engine, practice_metadata, PRACTICE_TABLES, PRACTICE_TABLES, extra=_add_missing_columns)
+    if active_engine.dialect.name == "sqlite":
+        existing = {column["name"] for column in inspect(active_engine).get_columns("practice_tests")}
+        with active_engine.begin() as connection:
+            for column, _, sqlite_sql in ADDED_COLUMNS:
+                if column not in existing:
+                    connection.exec_driver_sql(sqlite_sql)
+
+
+def difficulty_of(row) -> str:
+    value = row.get("difficulty")
+    return value if value in DIFFICULTIES else DEFAULT_DIFFICULTY
+
+
+def xp_for(correct: int, difficulty: str | None) -> int:
+    """XP the answers earn before any cap: XP_PER_CORRECT each, scaled by the level."""
+    level = difficulty if difficulty in XP_MULTIPLIER else DEFAULT_DIFFICULTY
+    return int(XP_PER_CORRECT * max(0, int(correct)) * XP_MULTIPLIER[level])
 
 
 def _now() -> datetime:
@@ -134,6 +181,7 @@ def _public(test, item_rows, now: datetime | None = None) -> dict:
         "question_count": test["question_count"], "score": test["score"] if submitted else None,
         "over_time": bool(test["over_time"]) if submitted else False,
         "xp_earned": int(test["xp_awarded"] or 0) if submitted else 0,
+        "difficulty": difficulty_of(test), "test_mode": bool(test.get("test_mode")),
     }
     public_items = []
     for row in item_rows:
@@ -159,6 +207,7 @@ def _summary(row) -> dict:
         "created_at": _iso(row["created_at"]), "submitted_at": _iso(row["submitted_at"]), "question_count": row["question_count"],
         "score": row["score"] if submitted else None, "time_limit_s": row["time_limit_s"], "deadline": _iso(_deadline(row)),
         "over_time": bool(row["over_time"]) if submitted else False,
+        "difficulty": difficulty_of(row), "test_mode": bool(row.get("test_mode")),
     }
 
 
@@ -176,13 +225,15 @@ def shuffled_choices(questions: list[dict], rng: random.Random | None = None) ->
     return result
 
 
-def create_test(owner_id: str, course: str, unit: str | None, time_limit_s: int | None, questions: list[dict]) -> dict:
+def create_test(owner_id: str, course: str, unit: str | None, time_limit_s: int | None, questions: list[dict],
+                difficulty: str = DEFAULT_DIFFICULTY, test_mode: bool = False) -> dict:
     init_practice()
     now = _now()
     test_id = str(uuid.uuid4())
     row = {"id": test_id, "owner_id": owner_id, "course": course, "unit": unit, "created_at": now, "started_at": now,
            "submitted_at": None, "time_limit_s": time_limit_s, "question_count": len(questions), "score": None,
-           "status": "in_progress", "over_time": False, "xp_awarded": 0, "grading_started_at": None, "grading_token": None}
+           "status": "in_progress", "over_time": False, "xp_awarded": 0, "grading_started_at": None, "grading_token": None,
+           "difficulty": difficulty if difficulty in DIFFICULTIES else DEFAULT_DIFFICULTY, "test_mode": bool(test_mode)}
     item_rows = [{"test_id": test_id, "position": position, "type": question["type"], "prompt": question["prompt"],
                   "choices": list(question["choices"]) if question["type"] == "multiple_choice" else None,
                   "answer": question["answer"], "explanation": question["explanation"], "topic": question["topic"],
@@ -313,12 +364,17 @@ def list_tests(owner_id: str, course: str, unit: str | None = None, limit: int =
     return [_summary(row) for row in rows]
 
 
-def recent_prompts(owner_id: str, course: str, unit: str | None, limit: int = 40) -> list[str]:
+def recent_prompts(owner_id: str, course: str, unit: str | None, limit: int = 40, difficulty: str | None = None) -> list[str]:
     """Prompts from the owner's newest tests in exactly this scope (one unit, or the whole
-    course when unit is None), newest test first, without duplicates; at most `limit`."""
+    course when unit is None) and level (older tests without one count as medium), newest
+    test first, without duplicates; at most `limit`. difficulty None: every level."""
     init_practice()
     scope = [tests.c.owner_id == owner_id, tests.c.course == course,
              tests.c.unit == unit if unit is not None else tests.c.unit.is_(None)]
+    if difficulty is not None:
+        level = difficulty if difficulty in DIFFICULTIES else DEFAULT_DIFFICULTY
+        scope.append(or_(tests.c.difficulty == level, tests.c.difficulty.is_(None)) if level == DEFAULT_DIFFICULTY
+                     else tests.c.difficulty == level)
     recent_tests = select(tests.c.id).where(*scope).order_by(tests.c.created_at.desc()).limit(HISTORY_LIMIT)
     with database.engine().connect() as connection:
         test_order = list(connection.execute(recent_tests).scalars().all())
