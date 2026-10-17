@@ -101,6 +101,13 @@ export type DataSource = {
   // Instant Study (Home). Locked in the demo: its button opens sign-up.
   getKeyPoints: typeof api.getKeyPoints
   revealAnswer: typeof api.revealAnswer
+  // Rewards (quests, badges, recap). The demo shows none: it has no real study history.
+  getQuestsToday: typeof api.getQuestsToday
+  getBadges: typeof api.getBadges
+  getFriendBadges: typeof api.getFriendBadges
+  getLastWeekRecap: typeof api.getLastWeekRecap
+  dismissLastWeekRecap: typeof api.dismissLastWeekRecap
+  completeInstantStudy: typeof api.completeInstantStudy
 }
 
 export const realData: DataSource = {
@@ -174,6 +181,12 @@ export const realData: DataSource = {
   nudgeFriend: api.nudgeFriend,
   getKeyPoints: api.getKeyPoints,
   revealAnswer: api.revealAnswer,
+  getQuestsToday: api.getQuestsToday,
+  getBadges: api.getBadges,
+  getFriendBadges: api.getFriendBadges,
+  getLastWeekRecap: api.getLastWeekRecap,
+  dismissLastWeekRecap: api.dismissLastWeekRecap,
+  completeInstantStudy: api.completeInstantStudy,
 }
 
 const DataContext = createContext<DataSource>(realData)

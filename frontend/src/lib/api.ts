@@ -62,6 +62,7 @@ export type AnswerResult = {
   xp_earned: number
   total_xp: number
   streak: number
+  rewards?: RewardEvents | null
 }
 export type TopicStat = { topic: string; attempts: number; correct_answers: number; accuracy: number }
 export type Progress = {
@@ -74,6 +75,8 @@ export type Progress = {
   best_streak: number
   login_streak: number
   best_login_streak: number
+  /* Streak freezes in the bank (0-2); each covers one missed day. Missing from older servers. */
+  streak_freezes?: number
   weak_topics: string[]
   topics: TopicStat[]
   // XP per local day, oldest first. Present on server responses; the demo may omit it.
@@ -171,6 +174,41 @@ export const PROFILE_CHANGED_EVENT = 'bindit:profile-changed'
 
 function announce(name: string) {
   window.dispatchEvent(new Event(name))
+}
+
+/*
+ * Rewards. Whenever an action awards XP or completes something, its response may carry an
+ * optional `rewards` object (the tutor stream sends it as a `rewards` event after `done`).
+ * Every key is optional:
+ *  - xp: all XP this action added (the action's own XP plus quest and chest bonuses)
+ *  - level_up: the level before and after (levels are 100 XP each)
+ *  - quests_completed: today's quests this action finished
+ *  - chest: today's chest, opened by finishing all three quests (xp can be 0 at the daily cap)
+ *  - badges_earned: badges earned just now, each once
+ *  - streak_saved: a streak freeze kept the streak going; streak_saved_days is the streak it kept
+ * request() dispatches it on window as REWARDS_EVENT, so any view can react without wiring.
+ */
+export type RewardEvents = {
+  xp?: number
+  level_up?: { from: number; to: number }
+  quests_completed?: { id: string; title: string }[]
+  chest?: { xp: number } | null
+  badges_earned?: { id: string; title: string; icon: string }[]
+  streak_saved?: boolean
+  streak_saved_days?: number
+}
+
+export const REWARDS_EVENT = 'bindet:rewards'
+
+/* Dispatch a response's rewards (if any) as a 'bindet:rewards' CustomEvent with the object as detail. */
+export function emitRewards(rewards: unknown) {
+  if (!rewards || typeof rewards !== 'object' || Array.isArray(rewards) || !Object.keys(rewards).length) return
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent<RewardEvents>(REWARDS_EVENT, { detail: rewards as RewardEvents }))
+}
+
+function emitResponseRewards(data: unknown) {
+  if (data && typeof data === 'object' && 'rewards' in data) emitRewards((data as { rewards?: unknown }).rewards)
 }
 
 function tokenSubject(accessToken: string) {
@@ -368,7 +406,9 @@ async function sendRequest<T>(path: string, options?: RequestInit & { timeoutMs?
     const data = await response.json().catch(() => null)
     throw apiError(response.status, data, `bindet could not complete that request (${response.status}).`)
   }
-  return response.json() as Promise<T>
+  const data = await response.json() as T
+  emitResponseRewards(data)
+  return data
 }
 
 /* File name extensions for the image types a browser canvas can produce. */
@@ -475,7 +515,10 @@ async function sendWithProgress<T>(path: string, body: FormData, timeoutMs: numb
       markSent()
       let data: unknown = null
       try { data = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data as T)
+      if (xhr.status >= 200 && xhr.status < 300) {
+        emitResponseRewards(data)
+        resolve(data as T)
+      }
       else reject(apiError(xhr.status, data, `bindet could not complete that request (${xhr.status}).`))
     }
     xhr.ontimeout = () => reject(new RequestTimeoutError())
@@ -698,6 +741,7 @@ export type ReviewGradeResult = {
   }
   next_due_at: string
   duplicate: boolean
+  rewards?: RewardEvents
 }
 
 const tzOffset = () => new Date().getTimezoneOffset()
@@ -732,6 +776,74 @@ export function getKeyPoints(course: string, unit: string, accessToken?: string,
     signal,
     timeoutMs: AI_TIMEOUTS.question,
   }, accessToken)
+}
+
+/* --- Rewards: daily quests, badges, streak freezes, weekly recap --- */
+
+export type QuestState = { id: string; title: string; progress: number; target: number; unit: '' | 'XP'; done: boolean; xp: number }
+export type StreakFreezes = { banked: number; max: number; covering: number }
+export type TodayQuests = {
+  day: string
+  quests: QuestState[]
+  chest: { open: boolean; xp: number }
+  goal: { xp: number; target: number; met: boolean }
+  /* All three quests and the daily goal are done: time to stop for today. */
+  all_done: boolean
+  freezes: StreakFreezes
+  rewards?: RewardEvents | null
+}
+export type BadgeTone = 'blue' | 'violet' | 'green' | 'orange' | 'pink' | 'teal' | 'amber'
+export type Badge = {
+  id: string
+  title: string
+  description: string
+  icon: string
+  tone: BadgeTone
+  earned: boolean
+  earned_at: string | null
+  progress: number | null
+  target: number | null
+  /* A surprise badge: hidden until earned. */
+  secret: boolean
+}
+export type BadgeList = { badges: Badge[]; earned: number; total: number; freezes: StreakFreezes }
+export type WeeklyRecap = {
+  week_start: string
+  week_end: string
+  days_studied: number
+  xp: number
+  cards_reviewed: number
+  best_subject: string | null
+  longest_streak: number
+  badges_earned: { id: string; title: string; icon: string; tone: BadgeTone }[]
+  dismissed: boolean
+  show: boolean
+}
+
+export function getQuestsToday(accessToken?: string, signal?: AbortSignal) {
+  return request<TodayQuests>('/api/quests/today', { signal }, accessToken)
+}
+
+export function getBadges(accessToken?: string, signal?: AbortSignal) {
+  return request<BadgeList>('/api/badges', { signal }, accessToken)
+}
+
+/* A friend's earned badges (only friends can see them). */
+export function getFriendBadges(friendId: string, accessToken?: string, signal?: AbortSignal) {
+  return request<{ badges: Badge[] }>(`/api/friends/${encodeURIComponent(friendId)}/badges`, { signal }, accessToken)
+}
+
+export function getLastWeekRecap(accessToken?: string, signal?: AbortSignal) {
+  return request<WeeklyRecap>('/api/recap/last-week', { signal }, accessToken)
+}
+
+export function dismissLastWeekRecap(accessToken?: string) {
+  return request<{ dismissed: boolean; week_start: string }>('/api/recap/last-week/dismiss', { method: 'POST' }, accessToken)
+}
+
+/* An Instant Study round finished (counts for quests and badges after real study today). */
+export function completeInstantStudy(accessToken?: string) {
+  return request<{ recorded: boolean; rewards?: RewardEvents | null }>('/api/instant-study/complete', { method: 'POST' }, accessToken)
 }
 
 /* The answer to a quiz question. The server closes the question first, so it can't earn XP afterwards. */
@@ -1200,6 +1312,11 @@ export function streamTutorMessage(
     const name = /^event: (.+)$/m.exec(block)?.[1]
     const raw = /^data: (.+)$/m.exec(block)?.[1]
     if (!name || !raw) return
+    // Quests and badges a question to Otto earned arrive after "done" too.
+    if (name === 'rewards') {
+      emitRewards(JSON.parse(raw))
+      return
+    }
     // Otto's housekeeping arrives after "done", on the same stream.
     if (name === 'title' || name === 'memory') {
       if (stopped) return
