@@ -1,5 +1,5 @@
 import { request } from './api'
-import { loadNotebook, pickCourseTone, sameName, saveNotebook } from './session'
+import { FIRST_UNIT, loadNotebook, pickCourseTone, sameName, saveNotebook } from './session'
 import { setCourseHidden } from './studyPrefs'
 import type { Course } from './types'
 
@@ -96,7 +96,7 @@ export const SUGGESTED_CLASSES = [
   'Spanish', 'Computer Science',
 ]
 
-export const FIRST_UNIT = 'Unit 1'
+export { FIRST_UNIT }
 export const COURSE_NAME_MAX = 120
 
 /** True when this device's binder already has a course with a unit (the classes step is not needed). */

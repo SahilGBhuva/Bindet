@@ -140,6 +140,33 @@ export function onNotebookChange(listener: () => void): () => void {
   }
 }
 
+// A new course starts with this unit, so notes can go in right away (it can be renamed any time).
+export const FIRST_UNIT = 'Unit 1'
+
+/*
+ * The notebook with `name` open: a new course gets "Unit 1" and the next free color; a course
+ * already there opens on its first unit. (Study's "Add course" and Home's Snap notes picker.)
+ */
+export function notebookWithCourse(current: Notebook, name: string): Notebook {
+  if (current.courses.some((course) => course.name === name)) {
+    return { ...current, activeCourse: name, activeUnit: unitsFor(current.courses, name)[0] ?? '' }
+  }
+  const courses: Course[] = [...current.courses, { name, units: [FIRST_UNIT], tone: pickCourseTone(current.courses) }]
+  return { ...current, courses, activeCourse: name, activeUnit: FIRST_UNIT }
+}
+
+/* The open course with a new unit ("Unit 1", or the next free number), opened. */
+export function notebookWithNextUnit(current: Notebook): Notebook {
+  const taken = unitsFor(current.courses, current.activeCourse)
+  let n = 1
+  while (taken.some((item) => sameName(item, `Unit ${n}`))) n += 1
+  const name = `Unit ${n}`
+  const courses = current.courses.map((course) =>
+    course.name === current.activeCourse ? { ...course, units: [...course.units, name] } : course,
+  )
+  return { ...current, courses, activeUnit: name }
+}
+
 export function unitsFor(courses: Course[], courseName: string): string[] {
   return courses.find((course) => course.name === courseName)?.units ?? []
 }

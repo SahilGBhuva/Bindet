@@ -6,9 +6,11 @@ import { useData } from '../lib/dataSource'
 import { isOffline, useOnline } from '../lib/pwa'
 import {
   fileToCourseImageDataUrl,
+  FIRST_UNIT,
   mergeNoteScopes,
+  notebookWithCourse,
+  notebookWithNextUnit,
   notesFor,
-  pickCourseTone,
   sameName,
   unitsFor,
   withCourseTones,
@@ -18,12 +20,13 @@ import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
 import { announceReviewChange } from '../lib/review'
 import { useReviewSummary } from '../lib/useReviewSummary'
+import { useNotePhoto } from '../lib/useNotePhoto'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
 import type { StudyGuide } from '../lib/studyGuides'
-import { prepareNotePhoto } from '../lib/notePhoto'
-import { FIRST_UNIT } from '../lib/onboarding'
+import { COURSE_NAME_MAX, NAME_TOO_LONG_MESSAGE, nameRejected, noteDeposit, uploadFailure, UNIT_NAME_MAX } from '../lib/noteUpload'
+import type { NoteSource } from '../lib/noteUpload'
 import {
   FOCUS_SIZES,
   INSTRUCTIONS_MAX,
@@ -42,47 +45,18 @@ import { isoDay } from '../lib/time'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz' | 'guides'
-type NoteSource = 'file' | 'paste' | 'photo'
 // repeat: the server had nothing new, so this is a question the student has seen before.
 type QuizQuestion = GeneratedQuestion & { repeat?: boolean }
 type Place = { course: string; unit: string }
 // A rename on this page: a whole course (no unit), or one unit of a course.
 type Rename = { course: string; unit?: string; newCourse: string; newUnit?: string }
 
-// The server's limits: notes up to 4 MB, course names up to 120 characters and unit names up to 160.
+// The server's limit on a note's size (name limits are in lib/noteUpload).
 const NOTE_MAX_BYTES = 4 * 1024 * 1024
-const COURSE_NAME_MAX = 120
-const UNIT_NAME_MAX = 160
-const NAME_TOO_LONG_MESSAGE = `Course names can be up to ${COURSE_NAME_MAX} characters and unit names up to ${UNIT_NAME_MAX}. Pick a shorter name.`
 // Photos (PNG, JPEG, WebP) are shrunk before they are sent, so their size is checked by the server.
 const SHRUNK_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 // Course and unit names holding saved notes are fetched again on focus, at most this often.
 const SCOPES_REFRESH_MS = 30_000
-
-/* A name the server rejected for its length (422), or the request otherwise invalid. */
-function nameRejected(error: unknown) {
-  return error instanceof ApiError && error.status === 422
-}
-
-/*
- * Why a note couldn't be added, in words a student can act on. The server rejects a file it
- * can't use with a 400 and a short reason (wrong type, empty, unreadable, no text); sending
- * the same file again won't help, so those get no "Try again".
- */
-function uploadFailure(error: unknown, source: NoteSource): { message: string; retry: boolean } {
-  if (nameRejected(error)) return { message: NAME_TOO_LONG_MESSAGE, retry: false }
-  const what = source === 'paste' ? 'Those notes' : source === 'photo' ? 'That photo' : 'That file'
-  if (error instanceof ApiError && error.status === 413) return { message: 'Notes must be 4 MB or smaller. Try a smaller file, or split it into parts.', retry: false }
-  if (error instanceof ApiError && error.status === 400) {
-    const reason = error.message
-    if (/^Use a /.test(reason)) return { message: 'bindet can’t read that kind of file. Use a PDF, Word document (DOCX), text file (TXT, Markdown, CSV or JSON), or a photo (PNG, JPG or WebP).', retry: false }
-    if (/empty/i.test(reason)) return { message: `${what} ${source === 'paste' ? 'are' : 'is'} empty. Pick a file with your notes in it.`, retry: false }
-    if (/no readable text/i.test(reason)) return { message: `bindet couldn’t find any text in ${what.toLowerCase()}. If it’s a scan, try Take a photo of your notes, or paste the text instead.`, retry: false }
-    if (/could not read/i.test(reason)) return { message: `bindet couldn’t open ${what.toLowerCase()}. It may be damaged or password-protected. Try saving or exporting it again.`, retry: false }
-    return { message: /[.!?]$/.test(reason) ? reason : `${reason}.`, retry: false }
-  }
-  return { message: error instanceof Error && error.message ? error.message : `${what} couldn’t be added. Try again.`, retry: true }
-}
 
 /* Where a note filed under `place` is now, after the renames made since. */
 function placeAfter(place: Place, renames: Rename[]): Place {
@@ -134,18 +108,6 @@ function uniqueCards(list: Flashcard[]) {
 
 const collapse = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim()
 const TEXT_NOTE = /\.(txt|md|csv|json)$/i
-
-/* A camera photo of notes on its way in: prepared once, so Retry resends the same image. */
-type PhotoJob = {
-  file: File
-  preview: string
-  name: string
-  course: string
-  unit: string
-  stage: 'preparing' | 'uploading' | 'reading' | 'added' | 'failed'
-}
-
-const photoDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
 const QUIZ_LEVELS = [
   { id: 1, label: 'Level 1' },
@@ -456,11 +418,6 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [unitTests, setUnitTests] = useState<{ key: string; tests: PracticeTestSummary[] } | null>(null)
   const [unitTestsRequest, setUnitTestsRequest] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
-  const photoInput = useRef<HTMLInputElement>(null)
-  const [photo, setPhoto] = useState<PhotoJob | null>(null)
-  // Each preview URL is released when the next photo replaces it, or when the page closes.
-  const photoPreview = photo?.preview
-  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview) }, [photoPreview])
   const courseImageInput = useRef<HTMLInputElement>(null)
   const orderDragIndex = useRef(-1)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -991,15 +948,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     const name = newCourse.trim()
     if (!name) return
     if (!data.sandboxed) setCourseHidden(name, false)
-    setNotebook((current) => {
-      if (current.courses.some((course) => course.name === name)) {
-        return { ...current, activeCourse: name, activeUnit: unitsFor(current.courses, name)[0] ?? '' }
-      }
-      // A new course starts with "Unit 1" open on its Notes tab, so notes can go in right away.
-      // The unit can be renamed any time (Rename next to its title, or double-click its tab).
-      const courses: Course[] = [...current.courses, { name, units: [FIRST_UNIT], tone: pickCourseTone(current.courses) }]
-      return { ...current, courses, activeCourse: name, activeUnit: FIRST_UNIT }
-    })
+    // A new course starts with "Unit 1" open on its Notes tab, so notes can go in right away.
+    // The unit can be renamed any time (Rename next to its title, or double-click its tab).
+    setNotebook((current) => notebookWithCourse(current, name))
     setPanelFn('scan')
     setNewCourse('')
     setAddingCourse(false)
@@ -1007,16 +958,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
 
   /* A course with no units: start its first one ("Unit 1", or the next free number) and open its Notes. */
   function startFirstUnit() {
-    setNotebook((current) => {
-      const taken = unitsFor(current.courses, current.activeCourse)
-      let n = 1
-      while (taken.some((item) => sameName(item, `Unit ${n}`))) n += 1
-      const name = `Unit ${n}`
-      const courses = current.courses.map((course) =>
-        course.name === current.activeCourse ? { ...course, units: [...course.units, name] } : course,
-      )
-      return { ...current, courses, activeUnit: name }
-    })
+    setNotebook(notebookWithNextUnit)
     setPanelFn('scan')
   }
 
@@ -1462,47 +1404,28 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   }
 
   /* "Take a photo of your notes": the camera opens, and the photo uploads as soon as it is taken. */
+  const notePhoto = useNotePhoto({
+    placeFor: () => {
+      if (uploadBusy) return null
+      if (!activeUnit) {
+        setUploadError({ source: 'photo', message: 'Pick or create a unit first.', retry: false })
+        return null
+      }
+      return { course: activeCourse, unit: activeUnit }
+    },
+    notesIn: () => unitNotes,
+    upload: (job, onSent) => ingestNote(job.file, 'photo', onSent),
+    onStart: () => setUploadError(null),
+    onPrepareError: (message) => setUploadError({ source: 'photo', message, retry: false }),
+  })
+  const photo = notePhoto.photo
+
   function openCamera() {
     if (!activeUnit) {
       setUploadError({ source: 'photo', message: 'Pick or create a unit first.', retry: false })
       return
     }
-    photoInput.current?.click()
-  }
-
-  async function onPhotoTaken(event: React.ChangeEvent<HTMLInputElement>) {
-    const taken = event.target.files?.[0]
-    event.target.value = ''
-    if (!taken || uploadBusy) return
-    if (!activeUnit) {
-      setUploadError({ source: 'photo', message: 'Pick or create a unit first.', retry: false })
-      return
-    }
-    const course = activeCourse
-    const unit = activeUnit
-    // Each page is its own note: "Photo notes – Oct 7, page 2".
-    const base = `Photo notes – ${photoDay.format(new Date(data.now()))}`
-    const page = unitNotes.filter((note) => note.fileName.startsWith(base)).length + 1
-    const name = `${base}, page ${page}`
-    setUploadError(null)
-    setPhoto({ file: taken, preview: URL.createObjectURL(taken), name, course, unit, stage: 'preparing' })
-    let prepared: File
-    try {
-      prepared = await prepareNotePhoto(taken, name)
-    } catch (error) {
-      setPhoto((current) => current && { ...current, stage: 'failed' })
-      setUploadError({ source: 'photo', message: error instanceof Error ? error.message : 'That photo could not be prepared.', retry: false })
-      return
-    }
-    const job: PhotoJob = { file: prepared, preview: URL.createObjectURL(prepared), name, course, unit, stage: 'uploading' }
-    setPhoto(job)
-    await sendPhoto(job)
-  }
-
-  async function sendPhoto(job: PhotoJob) {
-    setPhoto((current) => current && { ...current, stage: 'uploading' })
-    const saved = await ingestNote(job.file, 'photo', () => setPhoto((current) => current && current.stage === 'uploading' ? { ...current, stage: 'reading' } : current))
-    setPhoto((current) => current && { ...current, stage: saved ? 'added' : 'failed' })
+    notePhoto.open()
   }
 
   /* A note already in this unit with the same text (or, for PDFs and documents, the same file). */
@@ -1557,16 +1480,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       noteSizes.current.set(uploaded.id, uploaded.size_bytes)
       // Renamed while it uploaded: the note follows its unit (the server filed it under the old name).
       const place = followRenames({ course, unit }, since)
-      const deposit: NoteDeposit = {
-        id: uploaded.id,
-        // The server trims names; keep this page's spelling so the note shows in its unit.
-        course: place.course,
-        unit: place.unit,
-        fileName: uploaded.file_name,
-        createdAt: uploaded.created_at,
-        status: uploaded.status,
-        textPreview: uploaded.text_preview,
-      }
+      // The server trims names; the deposit keeps this page's spelling so the note shows in its unit.
+      const deposit = noteDeposit(uploaded, place)
       setNotebook((current) => ({ ...current, deposits: [deposit, ...current.deposits.filter((note) => note.id !== deposit.id)] }))
       if (source === 'file') {
         setFile(null)
@@ -2296,16 +2211,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
               {panelFn === 'scan' ? (
                 <div className="tools__notes" role="tabpanel" aria-label="Notes">
                   <section className="tools__photo" aria-labelledby="tools-photo-title">
-                    <input
-                      ref={photoInput}
-                      className="ui-file-input"
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      tabIndex={-1}
-                      aria-hidden="true"
-                      onChange={(event) => void onPhotoTaken(event)}
-                    />
+                    <input {...notePhoto.inputProps} />
                     <div className="tools__photo-intro">
                       <h3 className="tools__label" id="tools-photo-title">Snap your notes</h3>
                       <p className="tools__hint">Handwritten or printed. Each photo becomes a note in {activeUnit}, then flashcards.</p>
@@ -2352,7 +2258,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                       <div className="ui-alert" role="alert">
                         <span>{uploadError.message}</span>
                         {uploadError.retry && photo?.stage === 'failed' && photo.course === activeCourse && photo.unit === activeUnit ? (
-                          <button className="ui-button ui-button--sm" type="button" onClick={() => void sendPhoto(photo)}>Retry</button>
+                          <button className="ui-button ui-button--sm" type="button" onClick={() => void notePhoto.resend(photo)}>Retry</button>
                         ) : null}
                       </div>
                     ) : null}

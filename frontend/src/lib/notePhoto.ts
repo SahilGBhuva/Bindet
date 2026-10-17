@@ -62,3 +62,26 @@ export async function prepareNotePhoto(file: File, name: string): Promise<File> 
   if (!blob) throw new Error('That photo could not be prepared. Try again.')
   return new File([blob], `${name}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
 }
+
+/* A camera photo of notes on its way in: prepared once, so Retry resends the same image. */
+export type PhotoStage = 'preparing' | 'uploading' | 'reading' | 'added' | 'failed'
+export type PhotoJob = {
+  file: File
+  preview: string
+  name: string
+  course: string
+  unit: string
+  stage: PhotoStage
+}
+
+const photoDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+
+/*
+ * Each page is its own note, numbered within its unit and day: "Photo notes – Oct 7, page 2".
+ * `notes` are the unit's notes so far (on any device), so the next page follows the last one.
+ */
+export function photoNoteName(now: number, notes: readonly { fileName: string }[]) {
+  const base = `Photo notes – ${photoDay.format(new Date(now))}`
+  const page = notes.filter((note) => note.fileName.startsWith(base)).length + 1
+  return `${base}, page ${page}`
+}
