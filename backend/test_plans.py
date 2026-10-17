@@ -265,9 +265,17 @@ class PlanTests(unittest.TestCase):
         plans.grant("tester@example.com", "unlimited", "owner-1")
         self.sign_in(TESTER)
         self.assertEqual(self.allowed("tester-1", "ai_question", 2, 10), 10)
-        self.assertEqual(self.allowed("tester-1", "friend_request", 2, 10), 10)
+        self.assertEqual(self.allowed("tester-1", "tutor_message_day", 2, 10), 10)
         with patch.object(main, "ai_account_daily_limit", return_value=1):
             self.assertTrue(all(main.account_ai_share_available("tester-1") for _ in range(5)))
+
+    def test_unlimited_keeps_anti_spam_limits_and_owners_do_not(self):
+        plans.grant("tester@example.com", "unlimited", "owner-1")
+        self.sign_in(TESTER)
+        self.sign_in(OWNER)
+        for action in ("friend_request", "nudge", "report", "group_notice", "task_assign", "search", "help_bot_hour"):
+            self.assertEqual(self.allowed("tester-1", action, 2, 10), 2, action)
+            self.assertEqual(self.allowed("owner-1", action, 2, 10), 10, action)
 
     def test_unlimited_is_still_stopped_by_the_global_cap(self):
         plans.grant("tester@example.com", "unlimited", "owner-1")

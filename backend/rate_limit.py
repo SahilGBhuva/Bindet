@@ -277,9 +277,21 @@ def forget_plans() -> None:
 
 
 def skips_student_limits(student_id: str | None) -> bool:
-    """Owners and Unlimited accounts have no per-student limits. Unlimited gives no other
-    owner power: admin routes and owner-only features check auth.is_owner_user."""
+    """Owners and Unlimited accounts have no per-student AI limits (the account's AI share,
+    tutor stream slots). Unlimited gives no other owner power: admin routes and owner-only
+    features check auth.is_owner_user. For a durable per-action limit use skips_action_limit,
+    which keeps anti-spam limits on Unlimited."""
     return is_owner(student_id) or is_unlimited(student_id)
+
+
+def skips_action_limit(student_id: str | None, action: str) -> bool:
+    """Whether this account skips the durable limit on this action. Owners skip every limit;
+    Unlimited skips only the AI limits (PRO_AI_ACTIONS). Friend requests, nudges, reports,
+    group notices, task assignment, search and other anti-spam limits still apply to
+    Unlimited, so a trusted tester's account can't be used to spam other students."""
+    if is_owner(student_id):
+        return True
+    return action in PRO_AI_ACTIONS and is_unlimited(student_id)
 
 
 def limit_for(student_id: str | None, action: str, limit: int) -> int:

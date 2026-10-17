@@ -849,10 +849,11 @@ def _prune_rate_events_if_due(now: float | None = None) -> bool:
 def check_social_rate_limit(student_id: str, action: str, limit: int, window_minutes: int = 60) -> None:
     """Use shared storage so limits still hold across serverless instances.
 
-    Owner accounts (auth.owner_emails) and Unlimited accounts (plans.py) are never limited;
-    nothing is recorded for them. Pro accounts get PRO_AI_MULTIPLIER times the limit for
-    the AI actions in rate_limit.PRO_AI_ACTIONS."""
-    if rate_limit.skips_student_limits(student_id):
+    Owner accounts (auth.owner_emails) are never limited; Unlimited accounts (plans.py) skip
+    only the AI actions in rate_limit.PRO_AI_ACTIONS and keep every anti-spam limit. Nothing
+    is recorded for a skipped check. Pro accounts get PRO_AI_MULTIPLIER times the limit for
+    the AI actions."""
+    if rate_limit.skips_action_limit(student_id, action):
         return
     limit = rate_limit.limit_for(student_id, action, limit)
     init_db()

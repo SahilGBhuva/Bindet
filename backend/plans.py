@@ -7,9 +7,10 @@ Gmail's ignored dots) of one inbox resolve to the same grant.
 - 'pro': the per-student AI limits are PRO_AI_MULTIPLIER (3) times higher
   (rate_limit.PRO_AI_ACTIONS) and the account's share of the shared daily AI budget is
   PRO_ACCOUNT_SHARE_PERCENT instead of the Free share. No payments yet.
-- 'unlimited': for people the owner trusts (teammates, testers). No per-student limits,
-  like owners, but the global daily cap and the burst guard still apply. It gives no
-  admin or owner powers.
+- 'unlimited': for people the owner trusts (teammates, testers). No per-student AI limits
+  (rate_limit.PRO_AI_ACTIONS), like owners, but the global daily cap, the burst guard and
+  every anti-spam limit (friend requests, nudges, reports, search, tasks...) still apply.
+  It gives no admin or owner powers.
 
 A plan only counts for an account whose email is confirmed (email_confirmed_at), never
 an unconfirmed or anonymous one. auth resolves it on each sign-in check and caches it in
