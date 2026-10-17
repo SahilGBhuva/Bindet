@@ -36,6 +36,7 @@ import account_deletion
 import ai_cache
 import ai_tutor
 import auth
+import classroom
 import database
 import disposable_email
 import feedback
@@ -544,6 +545,23 @@ class TaskUpdate(BaseModel):
     sort_order: int | None = None
     kind: Literal["task", "event"] | None = None
     location: str | None = Field(default=None, max_length=160)
+
+
+class ClassroomFeedCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=600)
+    course: str = Field(min_length=1, max_length=120)
+    tz: str | None = Field(default=None, max_length=64)
+
+
+class ClassroomFeedUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    save_notes: bool
+
+
+class ClassroomSync(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tz: str | None = Field(default=None, max_length=64)
 
 
 class ChecklistItemCreate(BaseModel):
@@ -2775,6 +2793,104 @@ def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
     auth.forget(authorization)
     account_logger.info("account_event %s", json.dumps({"event": "account_deleted", "student": ai_tutor.student_hash(student_id)}))
     return {"deleted": True}
+
+
+# --- Google Classroom calendar import (classroom.py) -----------------------------------
+
+CLASSROOM_ERRORS = {
+    "invalid_calendar_url": (400, "That isn’t a Google Calendar iCal link. Copy the “Secret address in iCal format”."),
+    "invalid_course": (400, "Pick a course for this class."),
+    "calendar_unreachable": (502, "Google didn’t answer. Try again in a minute."),
+    "calendar_private": (422, "That calendar is private or the link was reset. Copy the secret address again."),
+    "calendar_invalid": (422, "That link didn’t return a calendar. Copy the “Secret address in iCal format”."),
+    "calendar_too_large": (422, "That calendar is too big to import."),
+    "feed_exists": (409, "That class is already connected."),
+    "feed_limit": (409, f"You can connect up to {classroom.MAX_FEEDS} classes. Disconnect one to add another."),
+    "feed_not_found": (404, "That connected class could not be found."),
+}
+
+
+def classroom_error(error: ValueError) -> HTTPException:
+    code = str(error)
+    if code in CLASSROOM_ERRORS:
+        status, message = CLASSROOM_ERRORS[code]
+        return HTTPException(status_code=status, detail={"code": code, "message": message})
+    return social_error(error)
+
+
+@app.get("/api/classroom/feeds")
+def list_classroom_feeds(authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    return {"feeds": classroom.list_feeds(user["id"]), "max_feeds": classroom.MAX_FEEDS}
+
+
+@app.post("/api/classroom/feeds", status_code=201)
+def add_classroom_feed(data: ClassroomFeedCreate, authorization: Annotated[str | None, Header()] = None):
+    """Connect a class calendar: validate the link, fetch it once, store it, import."""
+    user = auth.authenticated_user(authorization)
+    try:
+        # Validate (shape, duplicates, the 15-class cap) before spending a limit or fetching.
+        classroom.check_new_feed(user["id"], data.url, data.course)
+        database.check_social_rate_limit(user["id"], "classroom_add", classroom.ADD_LIMIT_PER_DAY, 1440)
+        database.check_social_rate_limit(user["id"], "classroom_fetch", classroom.FETCH_LIMIT_PER_DAY, 1440)
+        body = classroom.fetch_calendar(data.url)
+        return classroom.add_feed(user["id"], data.url, data.course, data.tz, body)
+    except ValueError as error:
+        raise classroom_error(error) from error
+
+
+@app.patch("/api/classroom/feeds/{feed_id}")
+def update_classroom_feed(feed_id: str, data: ClassroomFeedUpdate, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return classroom.set_save_notes(user["id"], feed_id, data.save_notes)
+    except ValueError as error:
+        raise classroom_error(error) from error
+
+
+@app.post("/api/classroom/feeds/{feed_id}/sync")
+def sync_classroom_feed(feed_id: str, data: ClassroomSync | None = None, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        classroom.feed_url(user["id"], feed_id)  # 404 before charging a limit
+        database.check_social_rate_limit(user["id"], "classroom_sync", classroom.SYNC_LIMIT_PER_HOUR, 60)
+        database.check_social_rate_limit(user["id"], "classroom_fetch", classroom.FETCH_LIMIT_PER_DAY, 1440)
+        return classroom.sync_feed(user["id"], feed_id, data.tz if data else None)
+    except ValueError as error:
+        raise classroom_error(error) from error
+
+
+@app.delete("/api/classroom/feeds/{feed_id}")
+def delete_classroom_feed(feed_id: str, delete_tasks: bool = False, authorization: Annotated[str | None, Header()] = None):
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "task_write", TASK_WRITE_LIMIT, 60)
+        return classroom.disconnect(user["id"], feed_id, delete_tasks)
+    except ValueError as error:
+        raise classroom_error(error) from error
+
+
+@app.post("/api/classroom/refresh")
+def refresh_classroom(data: ClassroomSync | None = None, authorization: Annotated[str | None, Header()] = None):
+    """Cheap app-open check: nothing to do without feeds; otherwise recompute priorities
+    and fetch feeds last synced over 3 hours ago. Over its limit it quietly does nothing."""
+    user = auth.authenticated_user(authorization)
+    if not classroom.has_feeds(user["id"]):
+        return {"feeds": 0, "synced": 0, "changed": 0}
+    try:
+        database.check_social_rate_limit(user["id"], "classroom_auto", classroom.AUTO_LIMIT_PER_HOUR, 60)
+    except ValueError:
+        return {"feeds": None, "synced": 0, "changed": 0, "limited": True}
+
+    def fetch_allowed() -> bool:
+        try:
+            database.check_social_rate_limit(user["id"], "classroom_fetch", classroom.FETCH_LIMIT_PER_DAY, 1440)
+            return True
+        except ValueError:
+            return False
+
+    return classroom.auto_sync(user["id"], data.tz if data else None, fetch_allowed)
 
 
 @app.get("/api/tasks")

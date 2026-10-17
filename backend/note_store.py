@@ -43,6 +43,17 @@ def save_note(student_id: str, course: str, unit: str, file_name: str, content_t
     return row
 
 
+def save_note_in(connection, student_id: str, course: str, unit: str, file_name: str, text: str) -> dict:
+    """save_note for a plain-text note, inside the caller's transaction (the Classroom import)."""
+    row = {
+        'id': str(uuid.uuid4()), 'student_id': student_id, 'course': course, 'unit': unit,
+        'file_name': file_name, 'content_type': 'text/plain', 'text': text,
+        'size_bytes': len(text.encode('utf-8')), 'created_at': datetime.now(timezone.utc),
+    }
+    connection.execute(notes.insert().values(**row))
+    return row
+
+
 def context_for(student_id: str, course: str, unit: str, limit_chars: int = 18_000) -> tuple[list[str], str]:
     init_notes()
     # Only the owner's notes, and only as much of each as could fit in the excerpt:

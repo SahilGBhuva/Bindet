@@ -7,6 +7,7 @@ import { HelpBot } from './components/HelpBot'
 import { useAuth } from './lib/AuthContext'
 import { getStudyGroups, recordDailyLogin } from './lib/api'
 import { useAnnounce } from './lib/announce'
+import { refreshClassroomOnOpen } from './lib/classroom'
 import { cachedSetup, getOnboarding, rememberSetupDone, saveOnboarding } from './lib/onboarding'
 import { BrandMark } from './lib/SiteSidebar'
 import { rememberPage, SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
@@ -196,6 +197,13 @@ function AppShell() {
     const studentId = session?.user.id ?? getStudentId()
     void recordDailyLogin(studentId, session?.access_token).catch(() => undefined)
   }, [session?.user.id, session?.access_token])
+
+  // Google Classroom: keep imported assignments fresh (a no-op without connected classes).
+  useEffect(() => {
+    if (!session?.access_token) return
+    const token = session.access_token
+    return whenIdle(() => { void refreshClassroomOnOpen(token).catch(() => undefined) }, 4000)
+  }, [session?.access_token])
 
   // Warm the next likely screens and the group list after Home has painted.
   useEffect(() => whenIdle(() => {

@@ -18,6 +18,7 @@ from sqlalchemy import String, Text, delete, insert, select
 import account_deletion
 import ai_cache
 import auth
+import classroom_store
 import database
 import feedback
 import flashcards
@@ -52,7 +53,7 @@ ALL_METADATA = (
     database.metadata, note_store.note_metadata, flashcards.flashcard_metadata,
     questions.metadata, tutor.tutor_metadata, tasks.task_metadata, practice_tests.practice_metadata,
     practice.practice_metadata, feedback.feedback_metadata, onboarding.onboarding_metadata, help_bot.help_metadata,
-    otto.otto_metadata, study_guides.guide_metadata, plans.plans_metadata,
+    otto.otto_metadata, study_guides.guide_metadata, plans.plans_metadata, classroom_store.classroom_metadata,
 )
 
 

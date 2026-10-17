@@ -1264,8 +1264,9 @@ export type Task = {
   can_edit: boolean
   can_delete: boolean
   can_manage: boolean
-  // Imported from a Google Classroom calendar feed (classroom-ical); absent on older servers.
+  /* 'classroom' for tasks imported from a Google Classroom calendar (Settings → Google Classroom); absent on older servers. */
   source?: 'classroom' | null
+  /* The Classroom event was cancelled by the teacher (the title also starts with "Cancelled: "). */
   source_cancelled?: boolean
 }
 export type TaskChecklistItem = { id: number; text: string; done: boolean }
