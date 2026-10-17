@@ -551,6 +551,8 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     },
 
     uploadNote: locked('upload notes'),
+    getKeyPoints: locked('start Instant Study'),
+    revealAnswer: locked('start Instant Study'),
     deleteNote: locked('remove notes'),
     moveNotes: locked('rename courses and units'),
     remakeNoteFlashcards: locked('make flashcards with your own instructions'),

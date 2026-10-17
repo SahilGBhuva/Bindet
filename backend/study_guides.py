@@ -101,6 +101,27 @@ KINDS: dict[str, dict[str, Any]] = {
 }
 KIND_IDS = tuple(KINDS)
 
+# Instant Study's "Key points": a few bullets read before flashcards. Not a guide kind the
+# student can save (it is never listed or offered); it is served from ai_cache only, under its
+# own key version (ai_cache.key_points_key), so adding it leaves every saved guide's key as it was.
+KEY_POINTS_MIN = 4
+KEY_POINTS_MAX = 6
+KEY_POINTS_BULLET_MAX = 200
+KEY_POINTS_TOKENS = 700            # four to six short bullets; far below a full guide
+KEY_POINTS_ASK = (
+    f"Write the {KEY_POINTS_MIN} to {KEY_POINTS_MAX} most important key points of these notes, for a two-minute review "
+    "right before flashcards: ONE section headed \"Key points\" whose bullets are each one testable fact, rule, "
+    f"definition or cause from the notes, under {KEY_POINTS_BULLET_MAX - 40} characters, in the notes' order."
+)
+HIDDEN_KINDS: dict[str, dict[str, Any]] = {
+    "key_points": {"label": "Key points", "fields": ("bullets",), "ask": KEY_POINTS_ASK},
+}
+
+
+def kind_spec(kind: str) -> dict[str, Any]:
+    """A saved guide kind, or a hidden one (key points). KeyError for anything else."""
+    return KINDS[kind] if kind in KINDS else HIDDEN_KINDS[kind]
+
 # --- Output limits -------------------------------------------------------------------------
 
 GUIDE_NOTE_CHARS = 16_000          # note text sent per guide
@@ -157,7 +178,7 @@ GUIDE_SCHEMA = {"type": "object", "additionalProperties": False,
 
 
 def label(kind: str) -> str:
-    return KINDS[kind]["label"]
+    return kind_spec(kind)["label"]
 
 
 def default_title(kind: str, course: str, unit: str | None) -> str:
@@ -237,11 +258,11 @@ class GuideCheck:
 def clean_guide(raw_sections: Any, note_text: str, kind: str) -> GuideCheck:
     """Keep the valid, grounded, distinct entries of the lists this kind uses; drop the rest
     and every section left empty. Raises AIBadOutput for the wrong shape."""
-    if kind not in KINDS:
+    if kind not in KINDS and kind not in HIDDEN_KINDS:
         raise ValueError("unknown_kind")
     if not isinstance(raw_sections, list):
         raise ai_tutor.AIBadOutput("AI guide response did not match the required schema")
-    fields = KINDS[kind]["fields"]
+    fields = kind_spec(kind)["fields"]
     note_tokens = ai_tutor._content_tokens(note_text)
     sections: list[dict[str, Any]] = []
     received = kept = chars = 0
@@ -346,12 +367,14 @@ def generate(*, kind: str, course: str, unit: str, note_text: str, instructions:
     text = source_text(note_text)
     if not text:
         raise ai_tutor.AITutorError("No note text to make a guide from")
-    request = KINDS[kind]["ask"] + " Use only the notes below."
+    request = kind_spec(kind)["ask"] + " Use only the notes below."
     user_content = request + "\n\n" + ai_tutor.notes_block(text, header={"Course": course, "Unit": unit or "Whole course"})
     if ai_tutor.clean_instructions(instructions):
         user_content += "\n\n" + ai_tutor.preferences_block(instructions)
+    hidden = kind in HIDDEN_KINDS
     result = ai_tutor._chat_json(
-        op="generate_guide", system_prompt=GUIDE_PROMPT, max_tokens=max_tokens(), schema_name="study_guide",
+        op="generate_guide", system_prompt=GUIDE_PROMPT, max_tokens=KEY_POINTS_TOKENS if hidden else max_tokens(),
+        schema_name="key_points" if hidden else "study_guide",
         schema=GUIDE_SCHEMA, session_id=session_id, provider_sort="throughput", user_content=user_content,
     )
     if set(result.keys()) != {"sections"}:
@@ -362,6 +385,18 @@ def generate(*, kind: str, course: str, unit: str, note_text: str, instructions:
     if not usable(check):
         raise ai_tutor.AIBadOutput("AI returned too little usable study material")
     return GuideBatch(sections=check.sections, received=check.received, kept=check.kept)
+
+
+def key_points(sections: list[dict[str, Any]]) -> list[str]:
+    """The bullets of checked key-point sections, in order, at most KEY_POINTS_MAX, each short."""
+    points: list[str] = []
+    for section in sections:
+        for bullet in section.get("bullets", []):
+            if len(points) >= KEY_POINTS_MAX:
+                return points
+            if isinstance(bullet, str) and 0 < len(bullet) <= KEY_POINTS_BULLET_MAX:
+                points.append(bullet)
+    return points
 
 
 # --- Plain text (notes for flashcards, Otto) ---------------------------------------------

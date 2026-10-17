@@ -98,6 +98,8 @@ const ACTION_NAMES: [string, string][] = [
   ['.tools__paste *', 'Add typed notes'],
   // Home's Snap notes (phones): the camera, its course picker and Change all open sign-up.
   ['.home-snap, .home-snap *', 'Snap notes'],
+  // Instant Study runs AI on the visitor's own notes: it opens sign-up.
+  ['.instant-cta, .instant-cta *', 'Instant Study'],
   ['.tools__course-menu *', 'Course options'],
   ['.tools__note-cards *', 'Make flashcards'],
   ['.tools__deck-status *', 'Make flashcards'],

@@ -1,0 +1,100 @@
+import { describe, expect, it } from 'vitest'
+import type { NoteScope, ReviewSummary } from './api'
+import { instantHint, instantReason, pickInstantUnit, sessionMinutes, unitKey, type InstantInput } from './instantStudy'
+import type { NoteDeposit, UnitAttempt } from './types'
+
+const scope = (course: string, unit: string, note_count: number, last_added: string | null): NoteScope => ({ course, unit, note_count, last_added })
+const review = (by_unit: ReviewSummary['by_unit']): ReviewSummary => ({
+  due: by_unit.reduce((sum, item) => sum + item.due, 0),
+  new_available: by_unit.reduce((sum, item) => sum + item.new, 0),
+  next_due_at: null,
+  by_unit,
+})
+let n = 0
+const attempts = (course: string, unit: string, right: number, wrong: number): UnitAttempt[] => [
+  ...Array.from({ length: right }, () => ({ id: `a${n++}`, course, unit, correct: true, at: 1 })),
+  ...Array.from({ length: wrong }, () => ({ id: `a${n++}`, course, unit, correct: false, at: 1 })),
+]
+
+const SCOPES = [
+  scope('AP Biology', 'Photosynthesis', 2, '2026-10-10T10:00:00Z'),
+  scope('Chemistry', 'Stoichiometry', 1, '2026-10-14T10:00:00Z'),
+  scope('US History', 'WWI causes', 3, '2026-10-12T10:00:00Z'),
+]
+const base = (extra: Partial<InstantInput> = {}): InstantInput => ({ scopes: SCOPES, deposits: [], review: null, attempts: [], ...extra })
+
+describe('pickInstantUnit', () => {
+  it('returns null when the student has no notes anywhere', () => {
+    expect(pickInstantUnit({ scopes: [], deposits: [], review: null, attempts: [] })).toBeNull()
+    expect(pickInstantUnit({ scopes: null, deposits: [], review: review([{ course: 'X', unit: 'Y', due: 4, new: 0 }]), attempts: [] })).toBeNull()
+  })
+
+  it('picks the unit with the most due cards first', () => {
+    const pick = pickInstantUnit(base({
+      review: review([
+        { course: 'AP Biology', unit: 'Photosynthesis', due: 2, new: 5 },
+        { course: 'US History', unit: 'WWI causes', due: 6, new: 0 },
+      ]),
+      attempts: attempts('Chemistry', 'Stoichiometry', 0, 5),
+    }))
+    expect(pick).toMatchObject({ course: 'US History', unit: 'WWI causes', reason: 'due', due: 6 })
+  })
+
+  it('ignores due counts for units without notes', () => {
+    const pick = pickInstantUnit(base({ review: review([{ course: 'Spanish', unit: 'Verbs', due: 9, new: 0 }]) }))
+    expect(pick?.reason).toBe('recent')
+  })
+
+  it('falls back to the weakest unit by quiz accuracy', () => {
+    const pick = pickInstantUnit(base({
+      review: review([{ course: 'AP Biology', unit: 'Photosynthesis', due: 0, new: 4 }]),
+      attempts: [...attempts('AP Biology', 'Photosynthesis', 3, 2), ...attempts('US History', 'WWI causes', 1, 3)],
+    }))
+    expect(pick).toMatchObject({ course: 'US History', unit: 'WWI causes', reason: 'weak', accuracy: 0.25 })
+  })
+
+  it('needs a few answers and a low score before calling a unit weak', () => {
+    // Two answers is too few to judge; 90% is not weak.
+    const pick = pickInstantUnit(base({ attempts: [...attempts('AP Biology', 'Photosynthesis', 0, 2), ...attempts('US History', 'WWI causes', 9, 1)] }))
+    expect(pick).toMatchObject({ course: 'Chemistry', unit: 'Stoichiometry', reason: 'recent' })
+  })
+
+  it('uses server topic stats when this device has no attempts for the unit', () => {
+    const pick = pickInstantUnit(base({ topics: [{ topic: 'Photosynthesis', attempts: 10, correct_answers: 4, accuracy: 40 }] }))
+    expect(pick).toMatchObject({ unit: 'Photosynthesis', reason: 'weak', accuracy: 0.4 })
+  })
+
+  it('otherwise studies the most recently added notes, counting notes on this device', () => {
+    expect(pickInstantUnit(base())).toMatchObject({ course: 'Chemistry', unit: 'Stoichiometry', reason: 'recent' })
+    const deposits: NoteDeposit[] = [{ id: 'n1', course: 'Art', unit: 'Color', fileName: 'a.txt', createdAt: '2026-10-15T08:00:00Z' }]
+    expect(pickInstantUnit(base({ deposits }))).toMatchObject({ course: 'Art', unit: 'Color', notes: 1 })
+  })
+
+  it('moves on to another unit for another round, then comes back when all had a turn', () => {
+    const due = review([{ course: 'US History', unit: 'WWI causes', due: 6, new: 0 }])
+    const first = pickInstantUnit(base({ review: due }))!
+    const second = pickInstantUnit(base({ review: due, exclude: [unitKey(first.course, first.unit)] }))!
+    expect(second).toMatchObject({ course: 'Chemistry', reason: 'recent' })
+    const everything = SCOPES.map((item) => unitKey(item.course, item.unit))
+    expect(pickInstantUnit(base({ review: due, exclude: everything }))).toMatchObject({ unit: 'WWI causes', reason: 'due' })
+  })
+
+  it('matches names the way the server trims them', () => {
+    const pick = pickInstantUnit(base({ review: review([{ course: 'AP Biology ', unit: ' Photosynthesis', due: 3, new: 0 }]) }))
+    expect(pick).toMatchObject({ unit: 'Photosynthesis', due: 3 })
+  })
+})
+
+describe('hint text', () => {
+  it('reads as minutes, course and unit', () => {
+    const pick = pickInstantUnit(base({ review: review([{ course: 'AP Biology', unit: 'Photosynthesis', due: 3, new: 5 }]) }))
+    expect(instantHint(pick)).toBe('5 min · AP Biology · Photosynthesis')
+    expect(instantReason(pick!)).toBe('3 cards due')
+    expect(instantHint(null)).toMatch(/Add notes/)
+  })
+
+  it('keeps sessions short', () => {
+    expect(sessionMinutes({ due: 0, fresh: 0 })).toBe(5)
+    expect(sessionMinutes({ due: 40, fresh: 40 })).toBe(5)
+  })
+})
