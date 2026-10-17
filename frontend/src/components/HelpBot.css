@@ -255,9 +255,21 @@
   .helpbot__close { width: 44px; height: 44px; margin: -8px -2px 0 0; }
 }
 
+.helpbot__scrim { display: none; }
+
 /* Phones: a full-width bottom sheet over the tab bar, lifted above the on-screen keyboard,
-   padded clear of the home bar and the notch in landscape. The wide shadow dims the page. */
+   padded clear of the home bar and the notch in landscape. The backdrop below it dims the
+   page and takes taps on it (a box-shadow scrim would let them through to the page). */
 @media (max-width: 600px) {
+  .helpbot__scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 34;
+    display: block;
+    background: rgba(10, 10, 14, .38);
+    animation: helpbot-scrim .2s var(--ease-out, ease-out) both;
+    -webkit-tap-highlight-color: transparent;
+  }
   .helpbot__panel {
     right: 0;
     bottom: var(--keyboard-inset, 0px);
@@ -267,7 +279,7 @@
     max-height: calc(100dvh - var(--phone-topbar) - var(--keyboard-inset, 0px));
     border-width: 1px 0 0;
     border-radius: 18px 18px 0 0;
-    box-shadow: 0 -8px 32px rgba(0, 0, 0, .18), 0 0 0 100vmax rgba(10, 10, 14, .38);
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, .18);
     animation-name: helpbot-sheet;
   }
   .helpbot__head { padding: var(--space-4) calc(var(--space-2) + env(safe-area-inset-right)) var(--space-4) calc(var(--space-5) + env(safe-area-inset-left)); }
@@ -276,6 +288,7 @@
   :root.is-typing .helpbot__form { padding-bottom: var(--space-3); }
 }
 @keyframes helpbot-sheet { from { transform: translateY(24px); opacity: 0; } }
+@keyframes helpbot-scrim { from { opacity: 0; } }
 
 /* Narrow phones: no corner button at all; Help lives in the Menu sheet. */
 @media (max-width: 399px) {
@@ -285,5 +298,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .helpbot__fab, .helpbot__chip, .helpbot__link { transition: none; }
-  .helpbot__panel { animation: none; }
+  .helpbot__panel, .helpbot__scrim { animation: none; }
 }

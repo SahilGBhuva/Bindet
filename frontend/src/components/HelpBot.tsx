@@ -142,6 +142,9 @@ export function HelpBot({ screen, session }: { screen: Screen; session: AuthSess
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5v.01" /></svg>
         <span className="helpbot__fab-label">Help</span>
       </button>}
+      {/* Phones: a real backdrop under the sheet. A tap on the dimmed page closes the sheet and
+          stops there, instead of passing through to whatever is underneath. */}
+      {open ? <div className="helpbot__scrim" aria-hidden="true" onClick={() => close(false)} /> : null}
       {open ? (
         <Suspense fallback={<div className="helpbot__panel helpbot__panel--loading" aria-busy="true" aria-label="Loading help"><span className="ui-skeleton" /><span className="ui-skeleton" /></div>}>
           <HelpBotPanel session={session} onClose={close} />

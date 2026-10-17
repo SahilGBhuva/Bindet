@@ -104,6 +104,9 @@ export function HelpBotPanel({ session, onClose }: { session: AuthSession; onClo
       const target = event.target as Node | null
       if (!target || panel.current?.contains(target)) return
       if (target instanceof Element && target.closest('.helpbot__fab')) return
+      // Phones: the backdrop closes the sheet on its click, so the tap ends on the backdrop.
+      // Closing here, on pointerdown, would remove it before the click lands on the page.
+      if (target instanceof Element && target.closest('.helpbot__scrim')) return
       onClose(false)
     }
     document.addEventListener('pointerdown', outside)
