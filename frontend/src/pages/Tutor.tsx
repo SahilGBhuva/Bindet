@@ -14,6 +14,7 @@ import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
 import { useAnnounce } from '../lib/announce'
+import { awaitingReply, REPLY_RECHECKS_MS, replyArrivedAfter } from '../lib/ottoReplies'
 import { HEIC_ACCEPT, HeicTooLargeError, isHeicFile, isImageFile } from '../lib/heic'
 import { FileThumb } from '../components/FileThumb'
 import './Tutor.css'
@@ -289,48 +290,89 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     return () => window.clearInterval(timer)
   }, [])
 
+  /*
+   * Puts the server's copy of a thread on screen, keeping anything still in flight here.
+   * A question with no reply after it gets the error and Retry it had when it failed, unless
+   * `stillAnswering`: it was sent moments ago (the page reloaded mid-reply), so the reply
+   * may simply not be saved yet.
+   */
+  function mergeServerThread(threadId: string, items: TutorMessage[], stillAnswering: boolean) {
+    setThreads((current) => {
+      const local = current[threadId] ?? []
+      // Keep anything still in flight that the server has not returned yet, including a just-sent
+      // question the server accepted but is still saving (no id yet). If the server already has
+      // it, its copy gives way to the local one so the question shows once.
+      const inFlight = local.filter((message) => message.status || message.id === 0)
+      const unsaved = inFlight.filter((message) => message.role === 'user').map((message) => message.content)
+      // The server doesn't keep which notes a reply drew on (a fast or replayed reply can
+      // finish before this page loads): keep the sources this page was told while it streamed.
+      const grounded = new Map(local.filter((message) => message.grounded?.length).map((message) => [message.id, message.grounded]))
+      const serverItems = [...items]
+      for (const content of unsaved) {
+        const index = serverItems.map((item) => item.role === 'user' && item.content === content).lastIndexOf(true)
+        if (index >= 0) serverItems.splice(index, 1)
+      }
+      const merged = serverItems.map((item) => {
+        const message = toLocal(item)
+        const sources = grounded.get(item.id)
+        return sources ? { ...message, grounded: sources } : message
+      })
+      if (token && grounded.size) setCachedTutorMessages(token, threadId, merged)
+      // The server reuses the saved turn on Retry.
+      const last = merged[merged.length - 1]
+      if (!inFlight.length && !stillAnswering && last?.role === 'user' && !last.attachments?.length) {
+        merged[merged.length - 1] = { ...last, status: 'failed', error: 'Otto didn’t answer this message.' }
+      }
+      return { ...current, [threadId]: [...merged, ...inFlight] }
+    })
+  }
+
   // Opening a conversation never blocks: cached messages show first, then the latest page replaces them.
   useEffect(() => {
     if (!token || activeId === NEW || activeId.startsWith('pending')) return
     let live = true
-    const timer = window.setTimeout(() => { if (live) setLoadingThread(activeId) }, 120)
-    void getTutorMessages(token, activeId).then((items) => {
+    const threadId = activeId
+    const timer = window.setTimeout(() => { if (live) setLoadingThread(threadId) }, 120)
+    // A question sent moments ago with no reply yet: the page was probably reloaded while
+    // Otto was answering, so look again shortly before calling it unanswered.
+    const pause = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+    void getTutorMessages(token, threadId).then(async (first) => {
       if (!live) return
-      setThreads((current) => {
-        const local = current[activeId] ?? []
-        // Keep anything still in flight that the server has not returned yet, including a just-sent
-        // question the server accepted but is still saving (no id yet). If the server already has
-        // it, its copy gives way to the local one so the question shows once.
-        const inFlight = local.filter((message) => message.status || message.id === 0)
-        const unsaved = inFlight.filter((message) => message.role === 'user').map((message) => message.content)
-        // The server doesn't keep which notes a reply drew on (a fast or replayed reply can
-        // finish before this page loads): keep the sources this page was told while it streamed.
-        const grounded = new Map(local.filter((message) => message.grounded?.length).map((message) => [message.id, message.grounded]))
-        const serverItems = [...items]
-        for (const content of unsaved) {
-          const index = serverItems.map((item) => item.role === 'user' && item.content === content).lastIndexOf(true)
-          if (index >= 0) serverItems.splice(index, 1)
-        }
-        const merged = serverItems.map((item) => {
-          const message = toLocal(item)
-          const sources = grounded.get(item.id)
-          return sources ? { ...message, grounded: sources } : message
-        })
-        if (grounded.size) setCachedTutorMessages(token, activeId, merged)
-        // A question with no reply after it (the reply failed, or was stopped before any text)
-        // gets the same error and Retry it had when it failed; the server reuses the saved turn.
-        const last = merged[merged.length - 1]
-        if (!inFlight.length && last?.role === 'user' && !last.attachments?.length) {
-          merged[merged.length - 1] = { ...last, status: 'failed', error: 'Otto didn’t answer this message.' }
-        }
-        return { ...current, [activeId]: [...merged, ...inFlight] }
-      })
+      let items = first
+      let waiting = awaitingReply(items, Date.now())
+      mergeServerThread(threadId, items, waiting)
+      window.clearTimeout(timer)
+      setLoadingThread((current) => current === threadId ? null : current)
+      for (let attempt = 0; waiting && attempt < REPLY_RECHECKS_MS.length; attempt += 1) {
+        await pause(REPLY_RECHECKS_MS[attempt])
+        if (!live) return
+        items = await getTutorMessages(token, threadId).catch(() => items)
+        if (!live) return
+        waiting = attempt < REPLY_RECHECKS_MS.length - 1 && awaitingReply(items, Date.now())
+        mergeServerThread(threadId, items, waiting)
+      }
     }).catch((error: unknown) => {
       if (!live) return
       if (error instanceof Error && /not found/i.test(error.message)) { setActiveId(NEW) } else { setNotice('Older messages could not be loaded. They will appear when you are back online.') }
-    }).finally(() => { window.clearTimeout(timer); if (live) setLoadingThread((current) => current === activeId ? null : current) })
+    }).finally(() => { window.clearTimeout(timer); if (live) setLoadingThread((current) => current === threadId ? null : current) })
     return () => { live = false; window.clearTimeout(timer) }
+    // mergeServerThread only reads token (a dependency) and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeId, setActiveId])
+
+  /* Retry on a question the server already saved: look first, in case the reply arrived
+     meanwhile (resending would then store the question and a second answer). */
+  async function retry(message: LocalMessage) {
+    if (token && message.id && activeId !== NEW && !activeId.startsWith('pending')) {
+      const threadId = activeId
+      const items = await getTutorMessages(token, threadId).catch(() => null)
+      if (items && replyArrivedAfter(items, message.id)) {
+        mergeServerThread(threadId, items, false)
+        return
+      }
+    }
+    send(message.content, [], message.key)
+  }
 
   useEffect(() => {
     if (token && conversations) setCachedTutorConversations(token, conversations)
@@ -985,7 +1027,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                     {message.status === 'failed' ? (
                       <div className="tutor-message__failed" role="alert">
                         <span>{message.error ?? 'Not sent.'}</span>
-                        <button type="button" className="ui-link" onClick={() => send(message.content, [], message.key)}>Retry</button>
+                        <button type="button" className="ui-link" onClick={() => void retry(message)}>Retry</button>
                       </div>
                     ) : null}
                     {isReply && !message.status && message.grounded?.length ? (
