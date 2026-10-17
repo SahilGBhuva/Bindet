@@ -684,3 +684,26 @@
 .bindit-rail:not(.is-collapsed) .bindit-rail__tool:hover { background: var(--color-surface); }
 .bindit-rail:not(.is-collapsed) .bindit-rail__tool.is-active { background: var(--color-surface); box-shadow: var(--shadow-xs); }
 .bindit-rail:not(.is-collapsed) .bindit-rail__top { margin: 2px 0 10px; }
+
+/*
+ * Color: every page has its own hue (CLAUDE.md: color tells things apart). The icon wears the
+ * hue's text color, hover is a faint wash of it, and the current page is its tint with a
+ * colored edge. The three top tools and the add-course link follow the same rule.
+ */
+.bindit-rail__page svg { color: var(--tone-text, currentColor); }
+.bindit-rail__page:hover { background: color-mix(in srgb, var(--tone, var(--color-accent)) 9%, transparent); }
+.bindit-rail__page.is-current {
+  background: var(--tone-tint, var(--color-brand-tint));
+  color: var(--tone-text, var(--color-brand-text));
+  box-shadow: inset 3px 0 0 var(--tone, var(--color-accent));
+}
+.bindit-rail.is-collapsed .bindit-rail__page.is-current { box-shadow: none; }
+
+.bindit-rail__tool { color: var(--tone-text, var(--color-text-secondary)); }
+.bindit-rail__tool:hover,
+.bindit-rail:not(.is-collapsed) .bindit-rail__tool:hover { background: color-mix(in srgb, var(--tone, var(--color-accent)) 14%, transparent); color: var(--tone-text); }
+.bindit-rail__tool.is-active,
+.bindit-rail:not(.is-collapsed) .bindit-rail__tool.is-active { background: var(--tone-tint); color: var(--tone-text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 40%, transparent); }
+
+.bindit-rail__entry--add { color: var(--color-accent); }
+.bindit-rail__entry--add:hover { background: var(--color-blue-tint); color: var(--color-blue-text); }

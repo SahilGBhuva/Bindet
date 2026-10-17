@@ -9,7 +9,7 @@ import { openHelp } from './helpEvents'
 import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
-import { courseInitial, toneClass, toneForName } from './tones'
+import { courseInitial, toneClass, toneForName, type Tone } from './tones'
 import { saveThemePreference, useSystemDark, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
@@ -50,14 +50,14 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
  * (group project analytics) sits under Tasks. Settings, Study and Practice lab are the three
  * icons at the top of the rail, so none of them is listed twice.
  */
-const MAIN_PAGES: (NavItem & { sub?: boolean })[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'tutor', label: 'Otto' },
-  { id: 'goals', label: 'Tasks' },
-  { id: 'stats', label: 'Project stats', sub: true },
-  { id: 'chat', label: 'Messages' },
-  { id: 'profile', label: 'Friends & groups' },
-  { id: 'progress', label: 'Progress' },
+const MAIN_PAGES: (NavItem & { sub?: boolean; tone: Tone })[] = [
+  { id: 'home', label: 'Home', tone: 'blue' },
+  { id: 'tutor', label: 'Otto', tone: 'violet' },
+  { id: 'goals', label: 'Tasks', tone: 'green' },
+  { id: 'stats', label: 'Project stats', sub: true, tone: 'green' },
+  { id: 'chat', label: 'Messages', tone: 'teal' },
+  { id: 'profile', label: 'Friends & groups', tone: 'pink' },
+  { id: 'progress', label: 'Progress', tone: 'orange' },
 ]
 /* Full names for the folded strip's tooltips. */
 const MAIN_TITLES: Partial<Record<Screen, string>> = { tutor: 'Otto, your tutor', stats: 'Project statistics' }
@@ -617,14 +617,14 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
 
   /* Settings, Study and Practice lab: icons at the top of the rail, named on hover and for screen readers. */
   const toolLinks = [
-    { id: 'settings', href: '#settings', label: 'Settings', glyph: glyphs.gear },
-    { id: 'tools', href: '#tools', label: 'Study', glyph: glyphs.folder },
-    { id: 'games', href: '#games', label: 'Practice lab', glyph: glyphs.play },
+    { id: 'settings', href: '#settings', label: 'Settings', glyph: glyphs.gear, tone: 'blue' },
+    { id: 'tools', href: '#tools', label: 'Study', glyph: glyphs.folder, tone: 'amber' },
+    { id: 'games', href: '#games', label: 'Practice lab', glyph: glyphs.play, tone: 'green' },
   ] as const
   const tools = (
     <div className="bindit-rail__tools">
       {toolLinks.map((tool) => (
-        <a key={tool.id} className={`bindit-rail__tool${active === tool.id ? ' is-active' : ''}`} href={tool.href} aria-label={tool.label} title={tool.label} aria-current={active === tool.id ? 'page' : undefined} onPointerEnter={() => tool.id !== 'settings' && onPrefetch?.(tool.id)}>{tool.glyph}</a>
+        <a key={tool.id} className={`bindit-rail__tool ui-tone--${tool.tone}${active === tool.id ? ' is-active' : ''}`} href={tool.href} aria-label={tool.label} title={tool.label} aria-current={active === tool.id ? 'page' : undefined} onPointerEnter={() => tool.id !== 'settings' && onPrefetch?.(tool.id)}>{tool.glyph}</a>
       ))}
     </div>
   )
@@ -656,7 +656,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         return (
           <li key={item.id} className={item.sub ? 'is-sub' : undefined}>
             <a
-              className={`bindit-rail__item bindit-rail__page${current ? ' is-current' : ''}`}
+              className={`bindit-rail__item bindit-rail__page ui-tone--${item.tone}${current ? ' is-current' : ''}`}
               href={`#${item.id}`}
               aria-current={current ? 'page' : undefined}
               title={isCollapsed ? label : undefined}
