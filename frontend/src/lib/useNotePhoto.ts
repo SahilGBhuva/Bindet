@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useData } from './dataSource'
+import { isHeicFile } from './heic'
 import { photoNoteName, prepareNotePhoto, type PhotoJob } from './notePhoto'
 import type { NotePlace } from './noteUpload'
 
@@ -44,15 +45,17 @@ export function useNotePhoto(options: NotePhotoOptions) {
     const { course, unit } = place
     options.onStart?.()
     const listed = options.notesIn(place)
+    // No preview URL for a photo the browser may not be able to draw (iPhone HEIC): a file chip shows instead.
+    const preview = (file: File) => isHeicFile(file) ? '' : URL.createObjectURL(file)
     let name = ''
     if (listed instanceof Promise) {
       // The unit's notes are still being read: show the photo straight away, named once they are in.
-      setPhoto({ file: taken, preview: URL.createObjectURL(taken), name, course, unit, stage: 'preparing' })
+      setPhoto({ file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
       name = photoNoteName(data.now(), await listed.catch((): NoteNames => []))
       setPhoto((current) => current && current.file === taken ? { ...current, name } : current)
     } else {
       name = photoNoteName(data.now(), listed)
-      setPhoto({ file: taken, preview: URL.createObjectURL(taken), name, course, unit, stage: 'preparing' })
+      setPhoto({ file: taken, preview: preview(taken), name, course, unit, stage: 'preparing' })
     }
     let prepared: File
     try {
@@ -62,7 +65,7 @@ export function useNotePhoto(options: NotePhotoOptions) {
       options.onPrepareError(error instanceof Error ? error.message : 'That photo could not be prepared.')
       return
     }
-    const job: PhotoJob = { file: prepared, preview: URL.createObjectURL(prepared), name, course, unit, stage: 'uploading' }
+    const job: PhotoJob = { file: prepared, preview: preview(prepared), name, course, unit, stage: 'uploading' }
     setPhoto(job)
     await resend(job)
   }

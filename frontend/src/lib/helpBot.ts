@@ -41,13 +41,13 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'photo-notes',
     question: 'How do I add notes from a photo?',
-    answer: 'Open Study (#tools), pick a course and a unit, and stay on the Notes view. Choose Take a photo of your notes: each photo becomes its own note, and Add another page adds the next one. bindet reads the text, then makes flashcards for you.',
-    terms: ['photo', 'camera', 'handwritten', 'take a photo', 'scan', 'another page', 'upload photo', 'photo of my notes'],
+    answer: 'Open Study (#tools), pick a course and a unit, and stay on the Notes view. Choose Take a photo of your notes: each photo becomes its own note, and Add another page adds the next one. bindet reads the text, then makes flashcards for you. iPhone photos (HEIC) work too, as well as JPG, PNG and WebP.',
+    terms: ['photo', 'camera', 'handwritten', 'take a photo', 'scan', 'another page', 'upload photo', 'photo of my notes', 'heic', 'heif', 'iphone photo'],
   },
   {
     id: 'upload-notes',
     question: 'How do I upload or paste notes?',
-    answer: 'In Study (#tools), pick a course and a unit, then use Upload a file (PDF, DOCX, TXT, Markdown, CSV or JSON, up to 4 MB) on the Notes view. To paste text, paste it and choose Add typed notes; it isn’t saved until you do. You can remove a note from the unit’s note list at any time.',
+    answer: 'In Study (#tools), pick a course and a unit, then use Upload a file (PDF, DOCX, TXT, Markdown, CSV or JSON, or a JPG, PNG, WebP or iPhone HEIC photo, up to 4 MB) on the Notes view. To paste text, paste it and choose Add typed notes; it isn’t saved until you do. You can remove a note from the unit’s note list at any time.',
     terms: ['upload', 'pdf', 'docx', 'file', 'paste', 'typed notes', 'add notes', 'import', 'delete note', 'where notes'],
   },
   {
@@ -89,7 +89,7 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'otto',
     question: 'What can Otto help with?',
-    answer: 'Otto (#tutor) is your AI tutor: pick a course and unit so answers use your notes first, and attach up to 3 images. It explains your notes, guides you through homework, helps you prepare for exams and quizzes you. It has hourly and daily limits and can make mistakes.',
+    answer: 'Otto (#tutor) is your AI tutor: pick a course and unit so answers use your notes first, and attach up to 3 images (JPG, PNG, WebP, GIF or iPhone HEIC photos). It explains your notes, guides you through homework, helps you prepare for exams and quizzes you. It has hourly and daily limits and can make mistakes.',
     terms: ['otto', 'tutor', 'ai', 'explain', 'homework help', 'ask otto', 'chatbot'],
   },
   {

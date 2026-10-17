@@ -27,10 +27,12 @@ export function nameRejected(error: unknown) {
 export function uploadFailure(error: unknown, source: NoteSource): { message: string; retry: boolean } {
   if (nameRejected(error)) return { message: NAME_TOO_LONG_MESSAGE, retry: false }
   const what = source === 'paste' ? 'Those notes' : source === 'photo' ? 'That photo' : 'That file'
+  // A photo the server couldn't read or convert (an unreadable iPhone HEIC, a disguised file): sending it again won't help.
+  if (error instanceof ApiError && error.status === 415) return { message: /[.!?]$/.test(error.message) ? error.message : `${error.message}.`, retry: false }
   if (error instanceof ApiError && error.status === 413) return { message: 'Notes must be 4 MB or smaller. Try a smaller file, or split it into parts.', retry: false }
   if (error instanceof ApiError && error.status === 400) {
     const reason = error.message
-    if (/^Use a /.test(reason)) return { message: 'bindet can’t read that kind of file. Use a PDF, Word document (DOCX), text file (TXT, Markdown, CSV or JSON), or a photo (PNG, JPG or WebP).', retry: false }
+    if (/^Use a /.test(reason)) return { message: 'bindet can’t read that kind of file. Use a PDF, Word document (DOCX), text file (TXT, Markdown, CSV or JSON), or a photo (PNG, JPG, WebP or iPhone HEIC).', retry: false }
     if (/empty/i.test(reason)) return { message: `${what} ${source === 'paste' ? 'are' : 'is'} empty. Pick a file with your notes in it.`, retry: false }
     if (/no readable text/i.test(reason)) return { message: `bindet couldn’t find any text in ${what.toLowerCase()}. If it’s a scan, try Take a photo of your notes, or paste the text instead.`, retry: false }
     if (/could not read/i.test(reason)) return { message: `bindet couldn’t open ${what.toLowerCase()}. It may be damaged or password-protected. Try saving or exporting it again.`, retry: false }

@@ -35,6 +35,7 @@ describe('matchHelp', () => {
   it.each([
     ['How do I add notes from a photo?', 'photo-notes'],
     ['can i take a picture of my handwritten notes', 'photo-notes'],
+    ['do iphone heic photos work', 'photo-notes'],
     ['how do i upload a pdf', 'upload-notes'],
     ['How do I join a study group with an invite code?', 'join-group'],
     ['how do I delete my account', 'delete-account'],

@@ -1,6 +1,7 @@
 import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, refreshAuthSession } from './auth'
 import { getStudentId } from './session'
 import { isoDay } from './time'
+import { heicOriginal, isHeicFile, labelledDataUrl } from './heic'
 
 export type Topic = 'addition' | 'subtraction' | 'multiplication' | 'division' | 'mixed'
 // choices is optional: when present, the quiz offers them as answer buttons (the demo questions use it).
@@ -366,11 +367,13 @@ async function sendRequest<T>(path: string, options?: RequestInit & { timeoutMs?
 }
 
 async function optimizedImage(file: File): Promise<File> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return file
+  // HEIC is tried too: Safari can decode it, and the original is kept (for the server to
+  // convert) wherever the browser can't.
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) && !isHeicFile(file)) return file
   try {
     const bitmap = await createImageBitmap(file)
     const largestSide = Math.max(bitmap.width, bitmap.height)
-    if (file.size < 1_000_000 && largestSide <= 1800) {
+    if (file.size < 1_000_000 && largestSide <= 1800 && !isHeicFile(file)) {
       bitmap.close()
       return file
     }
@@ -390,7 +393,7 @@ async function optimizedImage(file: File): Promise<File> {
       blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.82))
     }
     bitmap.close()
-    if (!blob || blob.size >= file.size) return file
+    if (!blob || (blob.size >= file.size && !isHeicFile(file))) return file
     return new File([blob], file.name.replace(/\.[^.]+$/, '.webp'), { type: 'image/webp', lastModified: file.lastModified })
   } catch {
     return file
@@ -1010,16 +1013,26 @@ export function deleteTutorConversation(accessToken: string, conversationId: str
   return request<{ deleted: boolean }>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' }, accessToken)
 }
 
+/*
+ * The most an image the browser couldn't shrink (an iPhone HEIC in Chrome or Firefox) may be:
+ * the server accepts 3 MB of images per message, so one photo can use all of it.
+ */
+export const TUTOR_UNSHRUNK_MAX_BYTES = 3 * 1024 * 1024
+
 /* Shrinks large photos before they are attached, then returns a data URL. */
-export async function prepareTutorImage(file: File): Promise<{ name: string; dataUrl: string; size: number }> {
-  const prepared = await optimizedImage(file)
-  const dataUrl = await new Promise<string>((resolve, reject) => {
+export async function prepareTutorImage(file: File): Promise<{ name: string; dataUrl: string; size: number; previewable: boolean }> {
+  let prepared = await optimizedImage(file)
+  // Still HEIC: the server turns it into a JPEG, if it isn't too large to send.
+  const unshrunkHeic = isHeicFile(prepared)
+  if (unshrunkHeic) prepared = heicOriginal(prepared, TUTOR_UNSHRUNK_MAX_BYTES)
+  const read = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
     reader.onerror = () => reject(new Error('That image could not be read.'))
     reader.readAsDataURL(prepared)
   })
-  return { name: file.name || 'image', dataUrl, size: prepared.size }
+  const dataUrl = labelledDataUrl(read, prepared)
+  return { name: file.name || 'image', dataUrl, size: prepared.size, previewable: !unshrunkHeic }
 }
 
 /* The longest silence allowed on a tutor stream before it is treated as lost. The

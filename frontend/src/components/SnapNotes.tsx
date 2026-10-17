@@ -8,6 +8,7 @@ import { courseInitial } from '../lib/tones'
 import type { Notebook, NoteDeposit } from '../lib/types'
 import { useNotePhoto } from '../lib/useNotePhoto'
 import { Icons } from './Icons'
+import { FileThumb } from './FileThumb'
 
 /*
  * Home's "Snap notes" (phones only): one tap opens the camera, and the photo is filed as a
@@ -105,14 +106,16 @@ export function SnapNotes({ accessToken, notebook, onNotebook }: { accessToken?:
 
       {photo && !showPicker ? (
         <div className={`home-snap__job is-${photo.stage}`}>
-          <img
-            src={photo.preview}
-            alt=""
-            width="52"
-            height="52"
-            decoding="async"
-            onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
-          />
+          {photo.preview ? (
+            <img
+              src={photo.preview}
+              alt=""
+              width="52"
+              height="52"
+              decoding="async"
+              onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+            />
+          ) : <FileThumb name={photo.file.name || 'photo'} size={52} />}
           <div className="home-snap__text">
             <b>
               {photo.stage === 'preparing' ? 'Preparing the photo…'

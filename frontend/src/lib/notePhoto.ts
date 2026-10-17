@@ -2,8 +2,15 @@
  * Photos of notes taken with the phone camera: turned the right way up (EXIF orientation),
  * shrunk so the long edge is at most 1800px (the size uploadNote already aims for, so it
  * is not re-encoded) and saved as JPEG, which every browser can encode. A 12-megapixel
- * camera photo of 3–5 MB becomes a few hundred KB, well under the 10 MB note limit.
+ * camera photo of 3–5 MB becomes a few hundred KB, well under the 4 MB note limit.
+ *
+ * An iPhone HEIC that this browser can't decode (Chrome, Firefox) is sent as it is, if it
+ * fits under the note limit: the server converts it to JPEG and strips its metadata.
  */
+import { heicOriginal, isHeicFile } from './heic'
+
+/* The server's limit for one note file (MAX_NOTE_BYTES). */
+export const NOTE_PHOTO_MAX_BYTES = 4 * 1024 * 1024
 
 const MAX_EDGE = 1800
 const TARGET_BYTES = 950_000
@@ -38,9 +45,14 @@ function encode(canvas: HTMLCanvasElement, quality: number) {
 export async function prepareNotePhoto(file: File, name: string): Promise<File> {
   // The browser's own decode errors ("The source image cannot be decoded.") mean nothing to a
   // student: a file that isn't a photo it can read gets a plain answer and a next step.
-  const image = await decode(file).catch(() => {
+  const image = await decode(file).catch(() => null)
+  if (!image) {
+    if (isHeicFile(file)) {
+      const original = heicOriginal(file, NOTE_PHOTO_MAX_BYTES)
+      return new File([original], `${name}.heic`, { type: 'image/heic', lastModified: Date.now() })
+    }
     throw new Error('That photo couldn’t be opened. Try taking it again, or use Upload a file for a PDF or document.')
-  })
+  }
   const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width
   const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height
   if (!width || !height) throw new Error('That photo could not be opened. Try taking it again.')

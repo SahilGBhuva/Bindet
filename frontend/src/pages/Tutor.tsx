@@ -14,6 +14,8 @@ import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
 import { useAnnounce } from '../lib/announce'
+import { HEIC_ACCEPT, HeicTooLargeError, isHeicFile, isImageFile } from '../lib/heic'
+import { FileThumb } from '../components/FileThumb'
 import './Tutor.css'
 
 /*
@@ -399,19 +401,21 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   }, [draft])
 
   const addFiles = useCallback((files: FileList | File[]) => {
-    const list = Array.from(files).filter((file) => file.type.startsWith('image/'))
+    const list = Array.from(files).filter(isImageFile)
     if (!list.length) { setNotice('Only images can be sent to Otto.'); return }
     setAttachments((current) => {
       const room = MAX_IMAGES - current.length
       if (room <= 0) { setNotice(`You can attach up to ${MAX_IMAGES} images.`); return current }
       const next = list.slice(0, room).map((file) => {
-        const attachment: Attachment = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: file.name || 'image', preview: URL.createObjectURL(file), state: 'preparing' }
-        if (!ACCEPTED.includes(file.type)) return { ...attachment, state: 'failed' as const, error: 'Use JPG, PNG, WebP, or GIF' }
+        // Chrome and Firefox can't draw an iPhone HEIC, so it gets a file chip until (unless) it is converted.
+        const heic = isHeicFile(file)
+        const attachment: Attachment = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: file.name || 'image', preview: heic ? '' : URL.createObjectURL(file), state: 'preparing' }
+        if (!ACCEPTED.includes(file.type) && !heic) return { ...attachment, state: 'failed' as const, error: 'Use JPG, PNG, WebP, GIF, or HEIC' }
         void prepareTutorImage(file).then((prepared) => {
           setAttachments((items) => items.map((item) => item.id === attachment.id
-            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 4 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size }
+            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 4 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size, preview: item.preview || (prepared.previewable ? prepared.dataUrl : '') }
             : item))
-        }).catch(() => setAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, state: 'failed', error: 'Could not read this image' } : item)))
+        }).catch((error: unknown) => setAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, state: 'failed', error: error instanceof HeicTooLargeError ? error.short : 'Could not read this image' } : item)))
         return attachment
       })
       if (list.length > room) setNotice(`Only the first ${room} ${room === 1 ? 'image was' : 'images were'} attached.`)
@@ -553,7 +557,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.files)
-    if (files.some((file) => file.type.startsWith('image/'))) { event.preventDefault(); addFiles(files) }
+    if (files.some(isImageFile)) { event.preventDefault(); addFiles(files) }
   }
 
   function onDrop(event: DragEvent) {
@@ -937,7 +941,9 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                   <div className="tutor-message__body">
                     <span className="sr-only">{isReply ? 'Otto said:' : 'You said:'}</span>
                     {message.previews?.length ? (
-                      <div className="tutor-message__images">{message.previews.map((src, imageIndex) => <img key={src} src={src} alt={message.attachments[imageIndex] ?? 'Attached image'} width="120" height="120" loading="lazy" decoding="async" />)}</div>
+                      <div className="tutor-message__images">{message.previews.map((src, imageIndex) => src
+                        ? <img key={src} src={src} alt={message.attachments[imageIndex] ?? 'Attached image'} width="120" height="120" loading="lazy" decoding="async" />
+                        : <FileThumb key={`file-${imageIndex}`} name={message.attachments[imageIndex] ?? 'image'} size={120} />)}</div>
                     ) : files.length ? (
                       <div className="tutor-message__files">{files.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
                     ) : null}
@@ -1022,7 +1028,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               <ul className="tutor__attachments" aria-label="Attached images">
                 {attachments.map((item) => (
                   <li key={item.id} className={`is-${item.state}`}>
-                    <img src={item.preview} alt="" width="40" height="40" />
+                    {item.preview ? <img src={item.preview} alt="" width="40" height="40" /> : <FileThumb name={item.name} size={40} />}
                     <span><b>{item.name}</b><small>{item.state === 'preparing' ? 'Preparing…' : item.state === 'failed' ? item.error : `${Math.max(1, Math.round((item.size ?? 0) / 1024))} KB`}</small></span>
                     <button type="button" onClick={() => removeAttachment(item.id)} aria-label={`Remove ${item.name}`}>×</button>
                   </li>
@@ -1068,7 +1074,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               </div>
             </div>
             <p className="tutor__disclaimer">Otto can make mistakes. Check important info.<span id="tutor-hint" className="sr-only"> Enter sends, Shift+Enter adds a new line.</span></p>
-            <input ref={fileInput} className="ui-file-input" type="file" accept={ACCEPTED.join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
+            <input ref={fileInput} className="ui-file-input" type="file" accept={[...ACCEPTED, HEIC_ACCEPT].join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
             <input ref={cameraInput} className="ui-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
           </form>
         </div>

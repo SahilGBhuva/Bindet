@@ -851,3 +851,19 @@
   .ui-tab { min-width: 44px; justify-content: center; }
   .ui-dialog { max-height: calc(100dvh - var(--space-8) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 }
+
+/* A photo the browser can't preview (iPhone HEIC in Chrome/Firefox): icon + extension, sized by FileThumb. */
+.ui-file-thumb {
+  flex: none;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+}
+.ui-file-thumb svg { width: 45%; max-width: 28px; height: auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.ui-file-thumb small { font-size: var(--text-2xs); font-weight: 700; line-height: 1; letter-spacing: .02em; }

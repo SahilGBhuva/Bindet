@@ -42,6 +42,7 @@ import {
 import type { InstructionKind } from '../lib/studyPrefs'
 import { useAnnounce } from '../lib/announce'
 import { isoDay } from '../lib/time'
+import { FileThumb } from '../components/FileThumb'
 import './Tools.css'
 
 type ToolView = 'scan' | 'cards' | 'quiz' | 'guides'
@@ -2227,15 +2228,17 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </button>
                     {photo && photo.course === activeCourse && photo.unit === activeUnit ? (
                       <div className={`tools__photo-job is-${photo.stage}`}>
-                        <img
-                          src={photo.preview}
-                          alt={`Photo: ${photo.name}`}
-                          width="56"
-                          height="56"
-                          decoding="async"
-                          // A file the browser can't show (the reason it failed) leaves an empty frame, not a broken image.
-                          onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
-                        />
+                        {photo.preview ? (
+                          <img
+                            src={photo.preview}
+                            alt={`Photo: ${photo.name}`}
+                            width="56"
+                            height="56"
+                            decoding="async"
+                            // A file the browser can't show (the reason it failed) leaves an empty frame, not a broken image.
+                            onError={(event) => { event.currentTarget.style.visibility = 'hidden' }}
+                          />
+                        ) : <FileThumb name={photo.file.name || photo.name} size={56} />}
                         <div className="tools__photo-text">
                           <b>{photo.name}</b>
                           <span>
@@ -2287,7 +2290,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                           ref={fileInput}
                           className="ui-file-input"
                           type="file"
-                          accept=".png,.jpg,.jpeg,.webp,.pdf,.docx,.txt,.md,.csv,.json"
+                          accept=".png,.jpg,.jpeg,.webp,.heic,.heif,.pdf,.docx,.txt,.md,.csv,.json"
                           onChange={onPickFile}
                         />
                         <button
