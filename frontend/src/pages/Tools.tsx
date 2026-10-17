@@ -23,6 +23,9 @@ import { useReviewSummary } from '../lib/useReviewSummary'
 import { useNotePhoto } from '../lib/useNotePhoto'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
+import { LevelChip, LevelPicker } from '../components/LevelPicker'
+import { deckLevel, LEVEL_INFO, levelRemakeQuestion } from '../lib/levels'
+import type { Level } from '../lib/levels'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
 import type { StudyGuide } from '../lib/studyGuides'
 import { COURSE_NAME_MAX, NAME_TOO_LONG_MESSAGE, nameRejected, noteDeposit, uploadFailure, UNIT_NAME_MAX } from '../lib/noteUpload'
@@ -385,6 +388,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [savedCards, setSavedCards] = useState<Flashcard[]>([])
   const [serverNotes, setServerNotes] = useState<NoteDeposit[]>([])
   const [noteCards, setNoteCards] = useState<Record<string, NoteCards>>({})
+  // The level each note's cards were made at (custom: the student's own instructions).
+  const [noteLevels, setNoteLevels] = useState<Record<string, Level | 'custom'>>({})
   // cardsFailed: the notes loaded but their flashcards didn't (each is shown on its own).
   const [library, setLibrary] = useState<{ key: string; status: 'loading' | 'ready' | 'error'; error: string; cardsFailed: boolean }>({ key: '', status: 'loading', error: '', cardsFailed: false })
   const [libraryRequest, setLibraryRequest] = useState(0)
@@ -505,6 +510,8 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     noteCards[note.id] ?? (libraryLoaded && !library.cardsFailed ? { status: 'none', count: 0, error: '', retry: false } : undefined)
   const notesWith = (status: NoteFlashcardStatus) => unitNotes.filter((note) => cardsFor(note)?.status === status)
   const makingNotes = notesWith('generating')
+  // The level of the unit's deck: the notes with cards, by the level each was made at.
+  const currentDeckLevel = deckLevel(unitNotes.filter((note) => cardsFor(note)?.status === 'ready').map((note) => noteLevels[note.id] ?? 'medium'))
   const failedNotes = notesWith('failed')
   const waitingNotes = notesWith('none')
   const shortNotes = notesWith('too_short')
@@ -675,6 +682,13 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     setServerNotes((current) => [...current.filter((note) => !sameName(note.course, course) || !sameName(note.unit, unit)), ...incoming])
     if (!result) return
     setSavedCards((current) => mergeCards(current, result.cards))
+    setNoteLevels((current) => {
+      const next = { ...current }
+      for (const state of result.notes) {
+        if (!generatingNotes.current.has(state.note_id)) next[state.note_id] = state.level ?? 'medium'
+      }
+      return next
+    })
     setNoteCards((current) => {
       const next = { ...current }
       for (const state of result.notes) {
@@ -1672,6 +1686,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   }
 
   const cardPosition = cards.length ? (cardIndex % cards.length) + 1 : 0
+  // The level the shown card was made at (none for cards made with the student's own instructions).
+  const cardNoteLevel = card ? noteLevels[card.note_id] ?? 'medium' : null
+  const cardLevel = cardNoteLevel && cardNoteLevel !== 'custom' ? cardNoteLevel : null
 
   // The flashcard state next to each note: being written, how many, too short, or what went wrong.
   function noteCardsStatus(note: NoteDeposit) {
@@ -1757,12 +1774,16 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     if (!data.sandboxed) saveInstructions(key, next)
   }
 
-  // Replaces each note's flashcards with new ones made using the unit's instructions, one note at a time.
-  async function remakeCards() {
+  // Replaces each note's flashcards with new ones made using the unit's instructions (or at
+  // a level: a fixed preset on the server), one note at a time.
+  async function remakeCards(level?: Level) {
     const instructions = cardInstructions.trim()
     const notes = unitNotes.filter((note) => cardsFor(note)?.status !== 'too_short' && !generatingNotes.current.has(note.id))
-    if (!instructions || !notes.length || remaking) return
-    if (!data.confirm(`Replace the flashcards for ${plural(notes.length, 'note')} in ${activeUnit} with new ones made with your instructions?`)) return
+    if ((!level && !instructions) || !notes.length || remaking) return
+    const question = level
+      ? levelRemakeQuestion(level, currentDeckLevel, activeUnit)
+      : `Replace the flashcards for ${plural(notes.length, 'note')} in ${activeUnit} with new ones made with your instructions?`
+    if (!data.confirm(question)) return
     const key = cardInstructionsKey
     setRemaking({ done: 0, total: notes.length })
     try {
@@ -1774,9 +1795,12 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
         generatingNotes.current.add(note.id)
         setNoteCards((current) => ({ ...current, [note.id]: { status: 'generating', count: 0, error: '', retry: false } }))
         try {
-          const result = await data.remakeNoteFlashcards(note.id, instructions, accessToken)
+          const result = level
+            ? await data.remakeNoteFlashcardsAtLevel(note.id, level, accessToken)
+            : await data.remakeNoteFlashcards(note.id, instructions, accessToken)
           if (!mounted.current) return
           followRenames(origin, since)
+          setNoteLevels((current) => ({ ...current, [note.id]: level ?? 'custom' }))
           setSavedCards((current) => mergeCards(current.filter((item) => item.note_id !== note.id), result.cards))
           setNoteCards((current) => ({ ...current, [note.id]: { status: result.status, count: result.cards.length, error: '', retry: false } }))
           setCardIndex(0)
@@ -1800,7 +1824,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
         }
         setRemaking({ done: index + 1, total: notes.length })
       }
-      setNotice(`Made new flashcards for ${plural(notes.length, 'note')} in ${activeUnit}.`)
+      setNotice(level
+        ? `${activeUnit} now has ${LEVEL_INFO[level].label} flashcards.`
+        : `Made new flashcards for ${plural(notes.length, 'note')} in ${activeUnit}.`)
       announceReviewChange()
     } finally {
       if (mounted.current) setRemaking(null)
@@ -2465,7 +2491,10 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                         <button className="ui-button" type="button" data-card-key="" onClick={() => goCard('prev')} disabled={cards.length < 2}>
                           <ArrowIcon direction="left" />Previous
                         </button>
-                        <span className="tools__card-count" aria-live="polite">{cardPosition} of {cards.length}</span>
+                        <span className="tools__card-meta">
+                          <span className="tools__card-count" aria-live="polite">{cardPosition} of {cards.length}</span>
+                          {cardLevel ? <LevelChip level={cardLevel} className="tools__card-level" /> : null}
+                        </span>
                         <button className="ui-button" type="button" data-card-key="" onClick={() => goCard('next')} disabled={cards.length < 2}>
                           Next<ArrowIcon direction="right" />
                         </button>
@@ -2515,6 +2544,17 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                     </div>
                   )}
                   {deckStatus}
+                  {unitNotes.length && !libraryLoading ? (
+                    <LevelPicker
+                      className="tools__levels"
+                      kind="cards"
+                      legend="Card level"
+                      note={currentDeckLevel === 'custom' ? 'Now: made with your instructions' : currentDeckLevel === 'mixed' ? 'Now: mixed levels' : undefined}
+                      value={currentDeckLevel === 'custom' || currentDeckLevel === 'mixed' ? null : currentDeckLevel ?? 'medium'}
+                      onChange={(next) => void remakeCards(next)}
+                      disabled={Boolean(remaking) || makingNotes.length > 0}
+                    />
+                  ) : null}
                   {unitNotes.length && !libraryLoading ? instructionsField('cards', cardInstructionsKey, cardInstructions, (
                     <button
                       className={`ui-button${remaking ? ' is-busy' : ''}`}

@@ -5,8 +5,11 @@ import type { PracticeTest as PracticeTestData, PracticeTestOptions, PracticeTes
 import { useAnnounce } from '../../lib/announce'
 import { useData } from '../../lib/dataSource'
 import { clearPracticeDraft, formatClock, loadPracticeDraft, savePracticeDraft, suggestedMinutes } from '../../lib/practice'
+import { defaultTestMode, DEFAULT_LEVEL, levelOf } from '../../lib/levels'
+import type { Level } from '../../lib/levels'
 import { INSTRUCTIONS_MAX } from '../../lib/studyPrefs'
 import { lowerMeridiem } from '../../lib/time'
+import { LevelChip, LevelPicker } from '../LevelPicker'
 import { MathText } from '../math/Math'
 import './PracticeTest.css'
 
@@ -56,6 +59,11 @@ function when(value: string | null) {
   return Number.isNaN(time) ? '' : lowerMeridiem(dayTime.format(time))
 }
 
+/* Test mode results open on the missed questions (when there are any); otherwise every question. */
+function firstReviewFilter(test: PracticeTestData): 'missed' | 'all' {
+  return test.test_mode && test.items.some((item) => item.correct === false) ? 'missed' : 'all'
+}
+
 function CheckIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
 }
@@ -77,6 +85,10 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const scopeLabel = unit ?? `all of ${course}`
   const [stage, setStage] = useState<Stage>(openId ? 'loading' : 'setup')
   const [count, setCount] = useState(10)
+  const [level, setLevel] = useState<Level>(DEFAULT_LEVEL)
+  // Exam conditions: on by default for Hard (defaultTestMode), a choice for the others.
+  const [testMode, setTestMode] = useState(defaultTestMode(DEFAULT_LEVEL))
+  const [reviewFilter, setReviewFilter] = useState<'missed' | 'all'>('all')
   const [timed, setTimed] = useState(!data.sandboxed)
   const [minutes, setMinutes] = useState(String(suggestedMinutes(10)))
   const [minutesEdited, setMinutesEdited] = useState(false)
@@ -117,8 +129,10 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
     return () => { mounted.current = false }
   }, [])
 
-  const timeLimit = timed ? Math.min(60, Math.max(5, Math.round(Number(minutes)) || suggestedMinutes(count))) : null
-  const minutesValid = !timed || (/^\d{1,2}$/.test(minutes.trim()) && Number(minutes) >= 5 && Number(minutes) <= 60)
+  // Test mode is always timed (the server ignores "untimed" there too); the demo's clock is fixed, so it stays untimed.
+  const timedNow = timed || (testMode && !data.sandboxed)
+  const timeLimit = timedNow ? Math.min(60, Math.max(5, Math.round(Number(minutes)) || suggestedMinutes(count, level))) : null
+  const minutesValid = !timedNow || (/^\d{1,2}$/.test(minutes.trim()) && Number(minutes) >= 5 && Number(minutes) <= 60)
   const deadline = test?.deadline ? parseServerTime(test.deadline) : NaN
   const remaining = Number.isNaN(deadline) ? null : Math.max(0, (deadline - (now + clockOffset)) / 1000)
   const items = test?.items ?? []
@@ -164,6 +178,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
     setConfirmOpen(false)
     setSubmitError('')
     if (next.status === 'submitted') {
+      setReviewFilter(firstReviewFilter(next))
       setStage('results')
       return
     }
@@ -224,7 +239,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   function startFromSetup() {
     if (!minutesValid) return
     // A test from these notes was taken before: write new questions rather than repeat it.
-    void start({ course, unit, count, timeLimitMin: timeLimit, instructions, newQuestions: scopeHistory.length > 0 })
+    void start({ course, unit, count, timeLimitMin: timeLimit, instructions, newQuestions: scopeHistory.length > 0, difficulty: level, testMode })
   }
 
   async function submit() {
@@ -250,6 +265,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
       }
       if (!mounted.current) return
       if (!data.sandboxed) clearPracticeDraft(test.id)
+      setReviewFilter(firstReviewFilter(graded))
       setTest(graded)
       setStage('results')
       onChanged?.()
@@ -324,7 +340,14 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
 
   function chooseCount(next: number) {
     setCount(next)
-    if (!minutesEdited) setMinutes(String(suggestedMinutes(next)))
+    if (!minutesEdited) setMinutes(String(suggestedMinutes(next, level)))
+  }
+
+  // A new level suggests its own time (unless the student typed one) and its test mode default.
+  function chooseLevel(next: Level) {
+    setLevel(next)
+    setTestMode(defaultTestMode(next))
+    if (!minutesEdited) setMinutes(String(suggestedMinutes(count, next)))
   }
 
   function setAnswer(position: number, value: string) {
@@ -338,6 +361,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   function retake(newQuestions: boolean, overrides?: Partial<PracticeTestOptions>) {
     const base: PracticeTestOptions = lastOptions.current ?? {
       course, unit, count: test?.question_count ?? count, timeLimitMin: test?.time_limit_s ? Math.round(test.time_limit_s / 60) : null,
+      difficulty: levelOf(test?.difficulty), testMode: Boolean(test?.test_mode),
     }
     void start({ ...base, ...overrides, newQuestions })
   }
@@ -378,6 +402,10 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                     {done ? <span className={`ui-badge ${percent >= 70 ? 'ui-badge--positive' : 'ui-badge--warning'}`}>{percent}%</span> : null}
                     {entry.over_time ? <span className="ui-badge">Over time</span> : null}
                   </span>
+                  <span className="practice__history-tags">
+                    <LevelChip level={levelOf(entry.difficulty)} />
+                    {entry.test_mode ? <span className="ui-badge practice__mode-badge">Test mode</span> : null}
+                  </span>
                   <span className="ui-row__meta">{when(entry.created_at)} · {plural(entry.question_count, 'question')}{entry.time_limit_s ? ` · ${Math.round(entry.time_limit_s / 60)} min` : ' · untimed'}</span>
                 </div>
                 <button className="ui-button ui-button--sm practice__history-open" type="button" onClick={() => void open(entry.id)}>
@@ -401,6 +429,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
           <p className="practice__status"><span className="ui-spinner" />Opening your test…</p>
         ) : (
           <div className="practice__setup" aria-busy={busy}>
+            <LevelPicker className="practice__level" kind="test" legend="Level" value={level} onChange={chooseLevel} disabled={busy} />
             <fieldset className="practice__field">
               <legend className="practice__label">Questions</legend>
               <div className="ui-segmented practice__segmented">
@@ -418,10 +447,10 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
               ) : (
                 <div className="practice__time">
                   <div className="ui-segmented practice__segmented">
-                    <button type="button" className="ui-segmented__item practice__timed" aria-pressed={timed} disabled={busy} onClick={() => setTimed(true)}>Timed</button>
-                    <button type="button" className="ui-segmented__item practice__timed" aria-pressed={!timed} disabled={busy} onClick={() => setTimed(false)}>Untimed</button>
+                    <button type="button" className="ui-segmented__item practice__timed" aria-pressed={timedNow} disabled={busy} onClick={() => setTimed(true)}>Timed</button>
+                    <button type="button" className="ui-segmented__item practice__timed" aria-pressed={!timedNow} disabled={busy || testMode} onClick={() => setTimed(false)}>Untimed</button>
                   </div>
-                  {timed ? (
+                  {timedNow ? (
                     <label className="practice__minutes">
                       <input
                         className="ui-input practice__minutes-input"
@@ -440,12 +469,23 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                   ) : null}
                 </div>
               )}
-              {!data.sandboxed && timed ? (
+              {!data.sandboxed && timedNow ? (
                 <p className={`practice__hint${minutesValid ? '' : ' is-error'}`} id="practice-minutes-hint">
-                  {minutesValid ? `Suggested: ${suggestedMinutes(count)} minutes for ${count} questions. The timer can’t be paused.` : 'Choose between 5 and 60 minutes.'}
+                  {minutesValid
+                    ? `Suggested for ${level === 'medium' ? 'Medium' : level === 'easy' ? 'Easy' : 'Hard'}: ${suggestedMinutes(count, level)} minutes for ${count} questions. The timer can’t be paused.`
+                    : 'Choose between 5 and 60 minutes.'}
                 </p>
               ) : null}
             </fieldset>
+            <label className={`practice__mode${testMode ? ' is-on' : ''}`}>
+              <input className="ui-checkbox" type="checkbox" checked={testMode} disabled={busy} onChange={(event) => setTestMode(event.target.checked)} />
+              <span className="practice__mode-text">
+                <span className="practice__mode-title">Test mode</span>
+                <span className="practice__mode-desc">
+                  Like the real exam: {data.sandboxed ? 'no hints' : 'a strict timer that hands in at zero, no hints'}, and nothing is checked until you hand in.
+                </span>
+              </span>
+            </label>
             <div className="tools__instructions practice__instructions">
               <label className="tools__label" htmlFor="practice-instructions">Instructions <span className="tools__optional">optional</span></label>
               <input
@@ -489,12 +529,17 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
     const percent = total ? Math.round((score / total) * 100) : 0
     const topics = [...(test.topics ?? [])].sort((a, b) => a.correct / a.total - b.correct / b.total)
     const weak = topics.filter((topic) => topic.weak).map((topic) => topic.topic)
+    const missed = test.items.filter((entry) => !entry.correct)
     return (
       <div ref={root} className={`practice practice--results${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test results">
         <div className="practice__head">
           <div className="practice__head-text">
             <span className="ui-eyebrow">Practice test · {test.unit ?? 'Whole course'}</span>
             <h2 className="practice__title" ref={resultsHeading} tabIndex={-1}>Your results</h2>
+            <span className="practice__tags">
+              <LevelChip level={levelOf(test.difficulty)} />
+              {test.test_mode ? <span className="ui-badge practice__mode-badge">Test mode</span> : null}
+            </span>
           </div>
           <div className="practice__head-actions">
             <button className="ui-button ui-button--ghost practice__close" type="button" onClick={onClose}>Done</button>
@@ -565,9 +610,21 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
         {error ? <div className="ui-alert"><span>{error}</span></div> : null}
 
         <section className="practice__review" aria-labelledby="practice-review-title">
-          <h3 className="practice__label" id="practice-review-title">Every question</h3>
+          <div className="practice__review-head-row">
+            <h3 className="practice__label" id="practice-review-title">{reviewFilter === 'missed' ? 'Missed questions' : 'Every question'}</h3>
+            {missed.length && missed.length < test.items.length ? (
+              <div className="ui-segmented practice__review-filter" role="group" aria-label="Show">
+                <button type="button" className="ui-segmented__item practice__filter" aria-pressed={reviewFilter === 'missed'} onClick={() => setReviewFilter('missed')}>
+                  Missed <span className="ui-count">{missed.length}</span>
+                </button>
+                <button type="button" className="ui-segmented__item practice__filter" aria-pressed={reviewFilter === 'all'} onClick={() => setReviewFilter('all')}>
+                  All <span className="ui-count">{test.items.length}</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
           <ol className="practice__review-list">
-            {test.items.map((entry) => (
+            {(reviewFilter === 'missed' && missed.length ? missed : test.items).map((entry) => (
               <li key={entry.position} className={`practice__review-item ${entry.correct ? 'is-correct' : 'is-incorrect'}`}>
                 <p className="practice__review-head">
                   <span className="practice__verdict" aria-hidden="true">{entry.correct ? <CheckIcon /> : <CrossIcon />}</span>
@@ -603,12 +660,20 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
   const flagged = flags.includes(position)
   const lowTime = remaining !== null && remaining <= 60
   const submittingNow = stage === 'submitting'
+  // Test mode: exam wording ("Hand in"), no hints, and a navigator key with counts.
+  const examMode = Boolean(test.test_mode)
+  const handIn = examMode ? 'Hand in' : 'Submit test'
+  const flaggedCount = flags.filter((flag) => items.some((entry) => entry.position === flag)).length
   return (
     <div ref={root} className={`practice practice--test${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="region" aria-label="Practice test">
       <div className="practice__bar-top">
         <div className="practice__progress-text">
           <span className="ui-eyebrow">Practice test · {test.unit ?? 'Whole course'}</span>
           <span className="practice__counter">{items.length - unanswered.length} of {items.length} answered</span>
+          <span className="practice__tags">
+            <LevelChip level={levelOf(test.difficulty)} />
+            {examMode ? <span className="ui-badge practice__mode-badge">Test mode</span> : null}
+          </span>
         </div>
         <div className="practice__bar-actions">
           {remaining !== null ? (
@@ -618,7 +683,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
           ) : <span className="practice__timer is-untimed">Untimed</span>}
           {focusControls}
           <button className="ui-button ui-button--primary practice__submit" type="button" disabled={submittingNow} onClick={() => setConfirmOpen(true)}>
-            {submittingNow ? 'Grading…' : 'Submit test'}
+            {submittingNow ? 'Grading…' : handIn}
           </button>
         </div>
       </div>
@@ -645,6 +710,13 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
             )
           })}
         </ol>
+        {examMode ? (
+          <p className="practice__nav-key" aria-hidden="true">
+            <span className="practice__key is-answered">{items.length - unanswered.length} answered</span>
+            <span className="practice__key is-flagged">{flaggedCount} flagged</span>
+            <span className="practice__key is-blank">{unanswered.length} blank</span>
+          </p>
+        ) : null}
       </nav>
 
       {item ? (
@@ -697,7 +769,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                   }
                 }}
               />
-              <p className="practice__hint">A word, number or short phrase is enough.</p>
+              {examMode ? null : <p className="practice__hint">A word, number or short phrase is enough.</p>}
             </div>
           )}
           <div className="practice__steps">
@@ -705,7 +777,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
             {current < items.length - 1 ? (
               <button className="ui-button practice__step" type="button" onClick={() => setCurrent(current + 1)}>Next</button>
             ) : (
-              <button className="ui-button practice__step" type="button" disabled={submittingNow} onClick={() => setConfirmOpen(true)}>Review and submit</button>
+              <button className="ui-button practice__step" type="button" disabled={submittingNow} onClick={() => setConfirmOpen(true)}>{examMode ? 'Review and hand in' : 'Review and submit'}</button>
             )}
           </div>
         </section>
@@ -723,12 +795,12 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
         <div className="ui-dialog-backdrop practice__confirm" role="presentation" onClick={() => setConfirmOpen(false)}>
           <div className="ui-dialog practice__dialog" role="dialog" aria-modal="true" aria-labelledby="practice-confirm-title" aria-describedby="practice-confirm-body" onClick={(event) => event.stopPropagation()}>
             <div className="ui-dialog__header">
-              <h2 className="ui-dialog__title" id="practice-confirm-title">Submit your test?</h2>
+              <h2 className="ui-dialog__title" id="practice-confirm-title">{examMode ? 'Hand in your test?' : 'Submit your test?'}</h2>
             </div>
             <div className="practice__dialog-body" id="practice-confirm-body">
               {unanswered.length ? (
                 <>
-                  <p>{unanswered.length === 1 ? '1 question is' : `${unanswered.length} questions are`} not answered yet:</p>
+                  <p>{unanswered.length === 1 ? '1 question is' : `${unanswered.length} questions are`} {examMode ? 'blank' : 'not answered yet'}:</p>
                   <ul className="practice__missing">
                     {unanswered.map((missing) => (
                       <li key={missing}>
@@ -741,11 +813,11 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
                 </>
               ) : <p>Every question has an answer.</p>}
               {flags.length ? <p>{plural(flags.length, 'question')} flagged for review: {[...flags].sort((a, b) => a - b).map((flag) => flag + 1).join(', ')}.</p> : null}
-              <p className="practice__hint">You can’t change your answers after you submit.</p>
+              <p className="practice__hint">{examMode ? 'You can’t change your answers after you hand in. Nothing is marked until then.' : 'You can’t change your answers after you submit.'}</p>
             </div>
             <div className="ui-dialog__footer">
               <button className="ui-button practice__keep" type="button" onClick={() => setConfirmOpen(false)}>Keep working</button>
-              <button className="ui-button ui-button--primary practice__confirm-submit" type="button" ref={confirmButton} onClick={() => void submit()}>Submit test</button>
+              <button className="ui-button ui-button--primary practice__confirm-submit" type="button" ref={confirmButton} onClick={() => void submit()}>{handIn}</button>
             </div>
           </div>
         </div>

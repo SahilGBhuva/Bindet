@@ -1733,3 +1733,13 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
   .tools__cards.is-focus .tools__card,
   .tools__cards.is-focus .tools__review-card { min-height: min(40svh, 400px); }
 }
+
+/* Flashcard levels: the level chip under the card counter, and the level picker. */
+.tools__card-meta {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.tools__levels { margin-top: var(--space-4); }

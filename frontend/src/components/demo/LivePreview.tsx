@@ -38,6 +38,12 @@ const ALLOWED = [
   // Practice tests: the sandbox writes, grades and lists them in memory only.
   '.tools__practice-entry',
   '.practice__count',
+  // Level and test mode only change the setup; the result review filter only changes what is shown.
+  '.practice__level .level-picker__option',
+  '.practice__level input',
+  '.practice__mode',
+  '.practice__mode input',
+  '.practice__filter',
   '#practice-instructions',
   '.practice__start',
   '.practice__close',
@@ -100,6 +106,7 @@ const ACTION_NAMES: [string, string][] = [
   ['.tools__course-menu *', 'Course options'],
   ['.tools__note-cards *', 'Make flashcards'],
   ['.tools__deck-status *', 'Make flashcards'],
+  ['.tools__levels *', 'Make flashcards at another level'],
   ['.tools__source *', 'Remove notes'],
   ['.guides__make', 'Make a study guide'],
   ['.guide__tools *', 'Print or save a study guide'],

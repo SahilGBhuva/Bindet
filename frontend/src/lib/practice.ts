@@ -1,3 +1,6 @@
+import { MINUTES_PER_QUESTION } from './levels'
+import type { Level } from './levels'
+
 /*
  * Practice test answers in progress, kept in this tab's sessionStorage under the test's ID,
  * so a refresh doesn't lose them. Cleared when the test is submitted, and with every other
@@ -49,7 +52,8 @@ export function formatClock(totalSeconds: number) {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`
 }
 
-/* The suggested time limit: 1.5 minutes a question, rounded up, between 5 and 60. */
-export function suggestedMinutes(count: number) {
-  return Math.min(60, Math.max(5, Math.ceil(count * 1.5)))
+/* The suggested time limit: the level's minutes a question (Easy 2, Medium 1.5, Hard 1.2),
+ * rounded up, between 5 and 60. */
+export function suggestedMinutes(count: number, level: Level = 'medium') {
+  return Math.min(60, Math.max(5, Math.ceil(count * MINUTES_PER_QUESTION[level] - 1e-9)))
 }
