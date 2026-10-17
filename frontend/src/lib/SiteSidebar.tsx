@@ -10,7 +10,7 @@ import { useData } from './dataSource'
 import type { Screen } from './screens'
 import { withCourseTones } from './session'
 import { courseInitial, toneClass, toneForName } from './tones'
-import { saveThemePreference, useThemePreference, type ThemePreference } from './theme'
+import { saveThemePreference, useSystemDark, useThemePreference, type ThemePreference } from './theme'
 import type { Course, Notebook } from './types'
 import { useDrawer, useMediaQuery } from './useDrawer'
 import { REVIEW_ALL_HASH, useReviewSummary } from './useReviewSummary'
@@ -105,7 +105,8 @@ function ThemeButton() {
 /* Light or dark, in plain words: two clear choices instead of a cycling icon. */
 function ThemeSwitch() {
   const preference = useThemePreference()
-  const systemDark = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+  // Follows the OS while the preference is 'system', so the pressed button changes with it.
+  const systemDark = useSystemDark()
   const current = preference === 'system' ? (systemDark ? 'dark' : 'light') : preference
   return (
     <div className="bindit-rail__themes" role="group" aria-label="Color theme">

@@ -70,6 +70,18 @@ export function useThemePreference(enabled = true): ThemePreference {
   return useSyncExternalStore(enabled ? subscribeTheme : ignore, enabled ? loadThemePreference : SYSTEM, SYSTEM)
 }
 
+function subscribeSystemTheme(onChange: () => void) {
+  media?.addEventListener('change', onChange)
+  return () => media?.removeEventListener('change', onChange)
+}
+const systemIsDark = () => Boolean(media?.matches)
+const NOT_DARK = () => false
+
+/* Whether the OS is in dark mode right now, updating when it switches (e.g. at sunset). */
+export function useSystemDark(): boolean {
+  return useSyncExternalStore(subscribeSystemTheme, systemIsDark, NOT_DARK)
+}
+
 /* Follow OS changes while the preference is 'system'. Call once at startup. */
 export function watchSystemTheme() {
   media?.addEventListener('change', () => { if (loadThemePreference() === 'system') applyTheme('system') })
