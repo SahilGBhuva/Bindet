@@ -1001,7 +1001,7 @@ button.chat-photo:hover img { transform: scale(1.025); }
 :root[data-theme="dark"] .chat__chip.is-time span { background: none; }
 
 :root[data-theme="dark"] .chat-run {
-  --chat-other-bg: color-mix(in srgb, var(--tone, var(--color-blue)) 22%, var(--color-surface));
+  --chat-other-bg: color-mix(in srgb, var(--tone, var(--color-blue)) 11%, var(--color-surface-raised));
   --chat-other-line: color-mix(in srgb, var(--tone, var(--color-blue)) 34%, var(--color-surface));
 }
 :root[data-theme="dark"] .chat-run__name,
