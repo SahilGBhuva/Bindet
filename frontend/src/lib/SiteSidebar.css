@@ -653,3 +653,21 @@
 .bindit-rail__themes button:first-child.is-on svg { color: var(--color-amber-text); }
 .bindit-rail__themes button:last-child.is-on svg { color: var(--color-violet-text); }
 .bindit-rail.is-collapsed .bindit-rail__themes { display: none; }
+
+/* Settings, Study and Practice lab icons at the top of the rail; the fold handle sits at the right. */
+.bindit-rail:not(.is-collapsed) .bindit-rail__top { justify-content: space-between; margin: 0 -6px 6px; }
+.bindit-rail__tools { display: flex; align-items: center; gap: 2px; }
+.bindit-rail.is-collapsed .bindit-rail__tools { flex-direction: column; margin: 4px 0 6px; }
+.bindit-rail__tool {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  transition: background-color var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+.bindit-rail__tool:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.bindit-rail__tool.is-active { background: color-mix(in srgb, var(--color-violet) 16%, var(--color-surface)); color: var(--color-violet-text); }
+.bindit-rail__tool:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.bindit-rail__tool svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

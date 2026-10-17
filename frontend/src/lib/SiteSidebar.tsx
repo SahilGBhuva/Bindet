@@ -47,11 +47,11 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
 
 /*
  * The desktop rail's main pages, top to bottom, each with an icon and a label. Project stats
- * (group project analytics) sits under Tasks. Practice lab is in Quick study, Settings is the gear.
+ * (group project analytics) sits under Tasks. Settings, Study and Practice lab are the three
+ * icons at the top of the rail, so none of them is listed twice.
  */
 const MAIN_PAGES: (NavItem & { sub?: boolean })[] = [
   { id: 'home', label: 'Home' },
-  { id: 'tools', label: 'Study' },
   { id: 'tutor', label: 'Otto' },
   { id: 'goals', label: 'Tasks' },
   { id: 'stats', label: 'Project stats', sub: true },
@@ -216,6 +216,8 @@ function nestGroups(groups: StudyGroup[]) {
 
 const svg = (body: ReactNode, size = 16) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">{body}</svg>
 const glyphs = {
+  folder: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.2c0-.6.4-1 1-1h3.2l1.4 1.6H13c.6 0 1 .4 1 1v6.4c0 .6-.4 1-1 1H3c-.6 0-1-.4-1-1z" /></svg>,
+  play: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 3v10l8.5-5z" /></svg>,
   gear: <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" /><path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3" /></svg>,
   handle: <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.2 3v10M9.8 3v10" /></svg>,
   chevron: <svg className="bindit-rail__chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></svg>,
@@ -491,7 +493,6 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const studyLinks = [
     { key: 'review', tone: 'violet', glyph: glyphs.cards, href: REVIEW_ALL_HASH, label: reviewDue ? `Review · ${reviewDue} due` : 'Review flashcards', review: true },
     { key: 'test', tone: 'blue', glyph: glyphs.test, href: '#tools', label: 'Practice test' },
-    { key: 'lab', tone: 'orange', glyph: glyphs.bolt, href: '#games', label: 'Practice lab', current: active === 'games' },
   ] as const
 
   const sections: Record<SectionId, { count?: number; hatch?: boolean; body: ReactNode }> = {
@@ -614,6 +615,20 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
   const canCollapse = Boolean(onCollapsedChange)
   const isCollapsed = canCollapse && collapsed
 
+  /* Settings, Study and Practice lab: icons at the top of the rail, named on hover and for screen readers. */
+  const toolLinks = [
+    { id: 'settings', href: '#settings', label: 'Settings', glyph: glyphs.gear },
+    { id: 'tools', href: '#tools', label: 'Study', glyph: glyphs.folder },
+    { id: 'games', href: '#games', label: 'Practice lab', glyph: glyphs.play },
+  ] as const
+  const tools = (
+    <div className="bindit-rail__tools">
+      {toolLinks.map((tool) => (
+        <a key={tool.id} className={`bindit-rail__tool${active === tool.id ? ' is-active' : ''}`} href={tool.href} aria-label={tool.label} title={tool.label} aria-current={active === tool.id ? 'page' : undefined} onPointerEnter={() => tool.id !== 'settings' && onPrefetch?.(tool.id)}>{tool.glyph}</a>
+      ))}
+    </div>
+  )
+
   const handle = canCollapse ? (
     <button
       type="button"
@@ -671,6 +686,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
         {isCollapsed ? (
           <>
             <div className="bindit-rail__top">{handle}</div>
+            {tools}
             {pages}
             {/* Then the quick-study shortcuts and courses as icons. */}
             <ul className="bindit-rail__strip" aria-label="Quick study and courses">
@@ -695,23 +711,17 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
                   </a>
                 </li>
               ))}
-              <li>
-                <a className={`bindit-rail__strip-link bindit-rail__strip-settings${active === 'settings' ? ' is-current' : ''}`} href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined}>
-                  <NavIcon kind="settings" />
-                </a>
-              </li>
             </ul>
           </>
         ) : (
           <>
+            <div className="bindit-rail__top">{tools}{handle}</div>
             <div className="bindit-rail__account">
               {avatar
                 ? <img className="bindit-rail__avatar" src={avatar} alt="" width={28} height={28} />
                 : <span className={`ui-avatar bindit-rail__avatar ${toneClass(toneForName(displayName))}`} aria-hidden="true">{initials}</span>}
               <a className="bindit-rail__name" href="#profile" aria-label={`Your profile, ${displayName}`}>{displayName}</a>
               <PlanBadge plan={profile?.plan} className="bindit-rail__plan" />
-              <a className={`bindit-rail__mini bindit-rail__settings${active === 'settings' ? ' is-current' : ''}`} href="#settings" aria-label="Settings" title="Settings" aria-current={active === 'settings' ? 'page' : undefined}>{glyphs.gear}</a>
-              {handle}
             </div>
 
             {onOpenCommand ? (
