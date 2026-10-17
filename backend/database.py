@@ -194,6 +194,23 @@ friend_streak_marks = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+# Streak freezes (rewards). One row per student. A freeze is earned on the student's first
+# study day of each local week (weeks start Monday), with at most MAX_STREAK_FREEZES banked.
+# When a day is missed, the next study day spends one freeze per missed day so the streak
+# carries on (_advance_streak); with too few freezes the streak restarts and none are spent.
+# saved_streak / saved_on hold the latest save until rewards.py announces it once.
+# Friend streaks never use freezes. Deleted with the account.
+streak_freezes = Table(
+    "streak_freezes", metadata,
+    Column("student_id", String(100), ForeignKey("student_progress.student_id", ondelete="CASCADE"), primary_key=True),
+    Column("banked", Integer, nullable=False, default=0),
+    Column("granted_week", Date),  # Monday of the last local week a freeze was earned
+    Column("used_total", Integer, nullable=False, default=0),
+    Column("saved_streak", Integer),  # a save not announced yet: the streak it kept
+    Column("saved_on", Date),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 uploaded_images = Table(
     "uploaded_images", metadata,
     Column("id", String(36), primary_key=True),
@@ -315,6 +332,11 @@ study_tasks = Table(
 RLS_TABLES = (
     "classroom_feeds",
     "classroom_items",
+    "daily_chests",
+    "daily_quests",
+    "earned_badges",
+    "reward_marks",
+    "study_activity",
     "account_onboarding",
     "account_plans",
     "cache_refs",
@@ -348,6 +370,7 @@ RLS_TABLES = (
     "study_group_members",
     "study_groups",
     "student_progress",
+    "streak_freezes",
     "study_days",
     "study_guide_cache",
     "study_guides",
@@ -379,6 +402,11 @@ RLS_TABLES = (
 CLIENT_REVOKED_TABLES = (
     "classroom_feeds",
     "classroom_items",
+    "daily_chests",
+    "daily_quests",
+    "earned_badges",
+    "reward_marks",
+    "study_activity",
     "account_onboarding",
     "account_plans",
     "cache_refs",
@@ -401,6 +429,7 @@ CLIENT_REVOKED_TABLES = (
     "practice_test_items",
     "practice_tests",
     "seen_questions",
+    "streak_freezes",
     "study_days",
     "study_guide_cache",
     "study_guides",
@@ -766,12 +795,29 @@ def init_db() -> None:
             _backfill_study_days(connection)
 
 
-def _next_streak(current_streak: int, last_active: date | None, correct: bool, today: date) -> int:
+# Most streak freezes a student can bank (one is earned per local week of study).
+MAX_STREAK_FREEZES = 2
+
+
+def _missed_days(last_active: date | None, today: date) -> int:
+    """Whole days between the last active day and today with no study (0 when consecutive)."""
+    return 0 if last_active is None else max(0, (today - last_active).days - 1)
+
+
+def _week_start(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+def _next_streak(current_streak: int, last_active: date | None, correct: bool, today: date, freezes: int = 0) -> int:
+    """The streak after a study day. `freezes` banked freezes can cover that many missed days:
+    the streak then carries on (+1 for today; a frozen day itself adds nothing)."""
     # last_active can be AFTER today when the student's offset moves the local day back
     # (travel, a DST change, a different device): the streak already counts that day.
     if not correct or (last_active is not None and last_active >= today):
         return current_streak
     if last_active == today - timedelta(days=1):
+        return current_streak + 1
+    if current_streak and 0 < _missed_days(last_active, today) <= max(0, freezes):
         return current_streak + 1
     return 1
 
@@ -795,13 +841,14 @@ def local_today(now: datetime | None = None) -> date:
     return (current - timedelta(minutes=client_tz_offset.get())).date()
 
 
-def live_streak(streak: int | None, last_date: date | None, today: date | None = None) -> int:
-    """A streak only counts while it's alive: active today or yesterday. Otherwise it's 0
-    (the stored value is kept until the next active day restarts it at 1)."""
+def live_streak(streak: int | None, last_date: date | None, today: date | None = None, freezes: int = 0) -> int:
+    """A streak only counts while it's alive: active today or yesterday, or earlier when the
+    banked freezes cover every day missed since. Otherwise it's 0 (the stored value is kept
+    until the next active day restarts it at 1)."""
     if not streak or last_date is None:
         return 0
     today = today or local_today()
-    return int(streak) if last_date >= today - timedelta(days=1) else 0
+    return int(streak) if last_date >= today - timedelta(days=1 + max(0, int(freezes or 0))) else 0
 
 
 def _active_date(last_active: date | None, today: date) -> date:
@@ -815,6 +862,90 @@ def _next_login_streak(current_streak: int, last_login: date | None, today: date
     if last_login == today - timedelta(days=1):
         return current_streak + 1
     return 1
+
+
+def _freeze_row(connection, student_id: str, today: date, earn: bool) -> dict:
+    """The student's freeze row (created empty if missing). With earn, this local week's
+    freeze is added first if it hasn't been yet (capped at MAX_STREAK_FREEZES). Call under
+    the xp:{student_id} lock, with the student_progress row already there."""
+    now = datetime.now(timezone.utc)
+    _insert_ignore(connection, streak_freezes, [{
+        "student_id": student_id, "banked": 0, "granted_week": None, "used_total": 0,
+        "saved_streak": None, "saved_on": None, "updated_at": now,
+    }], ["student_id"])
+    row = dict(connection.execute(select(streak_freezes).where(streak_freezes.c.student_id == student_id)).mappings().one())
+    week = _week_start(today)
+    if earn and (row["granted_week"] is None or row["granted_week"] < week):
+        row["banked"] = min(MAX_STREAK_FREEZES, int(row["banked"]) + 1)
+        row["granted_week"] = week
+        connection.execute(update(streak_freezes).where(streak_freezes.c.student_id == student_id).values(
+            banked=row["banked"], granted_week=week, updated_at=now,
+        ))
+    return row
+
+
+def _advance_streak(connection, student_id: str, progress, active: bool, today: date) -> int:
+    """The new streak for a study action (update_progress, award_xp, award_xp_in,
+    mark_study_day), spending streak freezes on missed days when there are enough.
+
+    Order on a study day: this week's freeze is earned first, then missed days are covered.
+    A save is remembered (saved_streak) so the next rewards response can announce it."""
+    current = int(progress["streak"] or 0)
+    last = progress["last_active_date"]
+    if not active:
+        return current
+    row = _freeze_row(connection, student_id, today, earn=True)
+    if last is not None and last >= today:
+        return current
+    banked = int(row["banked"])
+    streak = _next_streak(current, last, True, today, banked)
+    missed = _missed_days(last, today)
+    if missed and streak == current + 1:
+        connection.execute(update(streak_freezes).where(streak_freezes.c.student_id == student_id).values(
+            banked=banked - missed, used_total=int(row["used_total"]) + missed,
+            saved_streak=current, saved_on=today, updated_at=datetime.now(timezone.utc),
+        ))
+    return streak
+
+
+def _banked_freezes(connection, student_ids) -> dict[str, int]:
+    ids = list(student_ids)
+    if not ids:
+        return {}
+    return {owner: int(banked) for owner, banked in connection.execute(
+        select(streak_freezes.c.student_id, streak_freezes.c.banked).where(streak_freezes.c.student_id.in_(ids))
+    ).all()}
+
+
+def freeze_status(student_id: str) -> dict:
+    """{"banked", "max", "covering"}: freezes in the bank, and how many of them the days missed
+    since the last study day will use when the student studies today (0 when nothing is missed
+    or the streak can't be saved)."""
+    init_db()
+    today = local_today()
+    with engine().connect() as connection:
+        progress = connection.execute(select(student_progress.c.streak, student_progress.c.last_active_date).where(
+            student_progress.c.student_id == student_id)).mappings().first()
+        banked = _banked_freezes(connection, [student_id]).get(student_id, 0)
+    covering = 0
+    if progress is not None and progress["streak"] and progress["last_active_date"] is not None:
+        missed = _missed_days(progress["last_active_date"], today)
+        covering = missed if 0 < missed <= banked else 0
+    return {"banked": banked, "max": MAX_STREAK_FREEZES, "covering": covering}
+
+
+def pop_streak_saved(student_id: str) -> dict | None:
+    """The latest streak save not announced yet ({"streak", "on"}), cleared so it is announced once."""
+    init_db()
+    with engine().begin() as connection:
+        _advisory_lock(connection, f"xp:{student_id}")
+        row = connection.execute(select(streak_freezes.c.saved_streak, streak_freezes.c.saved_on).where(
+            streak_freezes.c.student_id == student_id)).mappings().first()
+        if row is None or row["saved_streak"] is None:
+            return None
+        connection.execute(update(streak_freezes).where(streak_freezes.c.student_id == student_id).values(
+            saved_streak=None, updated_at=datetime.now(timezone.utc)))
+    return {"streak": int(row["saved_streak"]), "on": row["saved_on"].isoformat() if row["saved_on"] else None}
 
 
 def _advisory_lock(connection, key: str) -> None:
@@ -920,7 +1051,7 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
             xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
         progress = _progress_row(connection, student_id, now)
 
-        streak = _next_streak(progress["streak"], progress["last_active_date"], correct, today)
+        streak = _advance_streak(connection, student_id, progress, correct, today)
         # Counters are relative updates, so no answer is lost even if a writer skips the lock.
         connection.execute(
             update(student_progress)
@@ -988,9 +1119,11 @@ def update_progress(student_id: str, topic: str, correct: bool, xp: int) -> dict
     }
 
 
-def award_xp(student_id: str, xp: int) -> dict:
+def award_xp(student_id: str, xp: int, study_day: bool = True) -> dict:
     """Add XP that is not tied to one answer (a finished practice test). Respects the daily
-    cap and counts no attempt. Returns {"xp_awarded", "total_xp", "streak"}."""
+    cap and counts no attempt. Returns {"xp_awarded", "total_xp", "streak"}.
+    study_day=False (quest and chest bonuses, rewards.py) adds the XP only: the streak and
+    study days are left alone, since the bonus itself is not studying."""
     init_db()
     now = datetime.now(timezone.utc)
     with engine().begin() as connection:
@@ -1004,21 +1137,31 @@ def award_xp(student_id: str, xp: int) -> dict:
         # Finishing a practice test is a study day for the streak, even with no XP left today.
         today = local_today(now)
         if progress is None:
+            first = 1 if study_day else 0
             connection.execute(student_progress.insert().values(
-                student_id=student_id, total_xp=xp, attempts=0, correct_answers=0, streak=1, best_streak=1,
-                last_active_date=today, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
+                student_id=student_id, total_xp=xp, attempts=0, correct_answers=0, streak=first, best_streak=first,
+                last_active_date=today if study_day else None, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
             ))
-            total, streak = xp, 1
+            total, streak = xp, first
+            if study_day:
+                _freeze_row(connection, student_id, today, earn=True)
+        elif not study_day:
+            total = int(progress["total_xp"]) + xp
+            streak = live_streak(progress["streak"], progress["last_active_date"], today)
+            connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
+                total_xp=student_progress.c.total_xp + xp, updated_at=now,
+            ))
         else:
             total = int(progress["total_xp"]) + xp
-            streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
+            streak = _advance_streak(connection, student_id, progress, True, today)
             connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
                 total_xp=total, streak=streak, best_streak=max(int(progress["best_streak"]), streak),
                 last_active_date=_active_date(progress["last_active_date"], today), updated_at=now,
             ))
         if xp > 0:
             connection.execute(xp_events.insert().values(student_id=student_id, xp=xp, created_at=now))
-        record_study_day(connection, student_id, today)
+        if study_day:
+            record_study_day(connection, student_id, today)
     return {"xp_awarded": xp, "total_xp": total, "streak": streak}
 
 
@@ -1042,7 +1185,7 @@ def award_xp_in(connection, student_id: str, xp: int, active: bool) -> dict:
         xp = max(0, min(xp, DAILY_XP_CAP - int(earned_today)))
     xp = max(0, xp)
     progress = _progress_row(connection, student_id, now)
-    streak = _next_streak(progress["streak"], progress["last_active_date"], active, today)
+    streak = _advance_streak(connection, student_id, progress, active, today)
     connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
         total_xp=student_progress.c.total_xp + xp,
         streak=streak,
@@ -1073,13 +1216,14 @@ def mark_study_day(student_id: str) -> int:
                 student_id=student_id, total_xp=0, attempts=0, correct_answers=0, streak=1, best_streak=1,
                 last_active_date=today, login_streak=0, best_login_streak=0, last_login_date=None, updated_at=now,
             ))
+            _freeze_row(connection, student_id, today, earn=True)
             record_study_day(connection, student_id, today)
             return 1
         # Written even when the streak already counts today (idempotent), so the day is never missed.
         record_study_day(connection, student_id, today)
+        streak = _advance_streak(connection, student_id, progress, True, today)
         if progress["last_active_date"] is not None and progress["last_active_date"] >= today:
             return int(progress["streak"])
-        streak = _next_streak(int(progress["streak"]), progress["last_active_date"], True, today)
         connection.execute(update(student_progress).where(student_progress.c.student_id == student_id).values(
             streak=streak, best_streak=max(int(progress["best_streak"]), streak), last_active_date=today, updated_at=now,
         ))
@@ -1357,12 +1501,14 @@ def record_daily_login(student_id: str, require_profile: bool = False) -> dict |
         topics = connection.execute(
             select(topic_progress).where(topic_progress.c.student_id == student_id)
         ).mappings().all()
+        freezes = _banked_freezes(connection, [student_id]).get(student_id, 0)
     return {
         "student_id": progress["student_id"],
         "total_xp": progress["total_xp"],
         "attempts": progress["attempts"],
         "correct_answers": progress["correct_answers"],
-        "streak": live_streak(progress["streak"], progress["last_active_date"]),
+        "streak": live_streak(progress["streak"], progress["last_active_date"], freezes=freezes),
+        "streak_freezes": freezes,
         "best_streak": progress["best_streak"],
         "login_streak": live_streak(progress.get("login_streak", 0), progress.get("last_login_date")),
         "best_login_streak": progress.get("best_login_streak", 0),
@@ -1426,13 +1572,15 @@ def get_progress(student_id: str) -> dict | None:
         topics = connection.execute(
             select(topic_progress).where(topic_progress.c.student_id == student_id)
         ).mappings().all()
+        freezes = _banked_freezes(connection, [student_id]).get(student_id, 0)
 
     return {
         "student_id": progress["student_id"],
         "total_xp": progress["total_xp"],
         "attempts": progress["attempts"],
         "correct_answers": progress["correct_answers"],
-        "streak": live_streak(progress["streak"], progress["last_active_date"]),
+        "streak": live_streak(progress["streak"], progress["last_active_date"], freezes=freezes),
+        "streak_freezes": freezes,
         "best_streak": progress["best_streak"],
         "login_streak": live_streak(progress.get("login_streak", 0), progress.get("last_login_date")),
         "best_login_streak": progress.get("best_login_streak", 0),
@@ -1503,6 +1651,7 @@ def get_profile(student_id: str) -> dict | None:
             .join(student_progress, profiles.c.student_id == student_progress.c.student_id)
             .where(profiles.c.student_id == student_id)
         ).mappings().first()
+        freezes = _banked_freezes(connection, [student_id]).get(student_id, 0)
     if row is None:
         return None
     return {
@@ -1516,7 +1665,7 @@ def get_profile(student_id: str) -> dict | None:
         "allow_friend_requests": bool(row["allow_friend_requests"]),
         "allow_nudges": bool(row["allow_nudges"]) if row.get("allow_nudges") is not None else True,
         "total_xp": row["total_xp"],
-        "streak": live_streak(row["streak"], row["last_active_date"]),
+        "streak": live_streak(row["streak"], row["last_active_date"], freezes=freezes),
         "best_streak": row["best_streak"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -1793,6 +1942,7 @@ def list_friends(student_id: str) -> list[dict]:
         days = _study_days(connection, [student_id, *friend_ids], today - timedelta(days=STREAK_LOOKBACK_DAYS))
         names = {student_id: connection.execute(select(profiles.c.display_name).where(
             profiles.c.student_id == student_id)).scalar_one_or_none() or "Your friend"}
+        freezes = _banked_freezes(connection, friend_ids)
     mine = days.get(student_id, set())
     friends = []
     for row in rows:
@@ -1801,7 +1951,7 @@ def list_friends(student_id: str) -> list[dict]:
         names[row["student_id"]] = row["display_name"]
         friends.append({
             **dict(row), "accepts_nudges": row["accepts_nudges"] is not False,
-            "streak": live_streak(row["streak"], row["last_active_date"], today),
+            "streak": live_streak(row["streak"], row["last_active_date"], today, freezes.get(row["student_id"], 0)),
             "active_today": row["last_active_date"] == today, "weekly_xp": weekly.get(row["student_id"], 0),
             **_streak_view(mine, days.get(row["student_id"], set()), today),
         })
@@ -2319,13 +2469,15 @@ def friend_leaderboard(student_id: str) -> list[dict]:
             .where(profiles.c.student_id.in_(friend_ids))
             .order_by(func.coalesce(weekly_xp.c.weekly_xp, 0).desc(), profiles.c.username.asc())
         ).mappings().all()
+        freezes = _banked_freezes(connection, friend_ids)
     today = local_today()
     return [
         {
             "student_id": row["student_id"], "username": row["username"],
             "display_name": row["display_name"], "total_xp": row["total_xp"],
             "weekly_xp": row["weekly_xp"],
-            "streak": live_streak(row["streak"], row["last_active_date"], today), "active_today": row["last_active_date"] == today,
+            "streak": live_streak(row["streak"], row["last_active_date"], today, freezes.get(row["student_id"], 0)),
+            "active_today": row["last_active_date"] == today,
         }
         for row in rows
     ]
@@ -2520,6 +2672,7 @@ def reset_db() -> None:
         connection.execute(delete(social_blocks))
         connection.execute(delete(friend_streak_marks))
         connection.execute(delete(study_days))
+        connection.execute(delete(streak_freezes))
         connection.execute(delete(xp_events))
         connection.execute(delete(friend_quests))
         connection.execute(delete(friendships))

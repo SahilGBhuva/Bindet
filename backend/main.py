@@ -54,6 +54,7 @@ import practice
 import practice_tests
 import rate_limit
 import review
+import rewards
 import storage
 import study_guides
 import tutor
@@ -360,6 +361,8 @@ class AnswerResponse(BaseModel):
     xp_earned: int
     total_xp: int
     streak: int
+    # Quests, chest, badges, level-up, streak save (rewards.record); absent when nothing happened.
+    rewards: dict | None = None
 
 
 def _clip_names(max_items: int, max_chars: int) -> BeforeValidator:
@@ -634,6 +637,7 @@ class NoteResponse(BaseModel):
     created_at: datetime
     pages_skipped: int = 0
     notice: str | None = None
+    rewards: dict | None = None
 
 
 class TopicStat(BaseModel):
@@ -658,6 +662,8 @@ class ProgressResponse(BaseModel):
     best_streak: int
     login_streak: int = 0
     best_login_streak: int = 0
+    # Streak freezes in the bank (rewards): each covers one missed day automatically.
+    streak_freezes: int = 0
     weak_topics: list[str]
     topics: list[TopicStat] = Field(default_factory=list)
     recent_xp: list[DailyXp] = Field(default_factory=list)
@@ -1096,6 +1102,7 @@ def progress_response(student_id: str, record: dict) -> ProgressResponse:
         best_streak=record["best_streak"],
         login_streak=record.get("login_streak", 0),
         best_login_streak=record.get("best_login_streak", 0),
+        streak_freezes=record.get("streak_freezes", 0),
         weak_topics=weak,
         topics=topic_stats(record),
     )
@@ -1467,7 +1474,9 @@ async def upload_note(
     content = await file.read(note_ingestion.MAX_NOTE_BYTES + 1)
     if len(content) > note_ingestion.MAX_NOTE_BYTES:
         raise HTTPException(status_code=413, detail=NOTE_FILE_TOO_LARGE)
-    return await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
+    note = await run_in_threadpool(ingest_note, user["id"], course, unit, file.filename or "notes", file.content_type, content)
+    note.rewards = await run_in_threadpool(rewards.record, user["id"], "note")
+    return note
 
 
 def cached_ocr_text(owner: str, cache_key: str) -> str | None:
@@ -2485,6 +2494,12 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
             # for a new conversation, a memory update now and then) on the same open stream.
             tutor_streams.release(owner, slot)
             refused = fixed_reply is not None or reply["content"].strip() == ai_tutor.TUTOR_REFUSAL
+            if not refused and old_reply_id is None:
+                # A real new question to Otto (not a refusal or a regenerated reply): quests
+                # and badges, announced after "done" like the title and memory events.
+                earned = rewards.record(owner, "tutor")
+                if earned:
+                    yield sse("rewards", earned)
             if not refused:
                 # A replayed (cached) first reply costs no AI call, and neither does its title
                 # (a cached or heuristic title only).
@@ -3605,6 +3620,9 @@ def grade_review_card(card_id: str, data: ReviewGradeRequest, authorization: Ann
     if not result.get("duplicate"):
         # Reviewing flashcards counts as studying today for the streak (no XP).
         database.mark_study_day(owner)
+        earned = rewards.record(owner, "review", cards=1)
+        if earned:
+            result["rewards"] = earned
     return result
 
 
@@ -3779,6 +3797,8 @@ def analyze_answer(data: AnswerRequest, authorization: Annotated[str | None, Hea
         xp_earned=record.get("xp_awarded", xp),
         total_xp=record["total_xp"],
         streak=record["streak"],
+        # Guests have no quests or badges.
+        rewards=rewards.record(student_id, "quiz", xp=record.get("xp_awarded", xp), results=[correct]) if authorization else None,
     )
 
 
@@ -4144,6 +4164,10 @@ def submit_practice_test(
         practice_tests.set_xp_awarded(owner, test_id, award["xp_awarded"])
     public["xp_earned"] = award["xp_awarded"]
     public["total_xp"] = award["total_xp"]
+    answered = [results[position]["correct"] for position in sorted(results) if (answers.get(position) or results[position].get("student_answer") or "").strip()]
+    earned = rewards.record(owner, "practice_test", xp=award["xp_awarded"], results=answered)
+    if earned:
+        public["rewards"] = earned
     return public
 
 
@@ -4776,10 +4800,15 @@ def submit_practice_round(data: PracticeRoundCreate, authorization: Annotated[st
     owner = auth.authenticated_user(authorization)["id"]
     practice_limit(owner, "practice_round", PRACTICE_ROUNDS_PER_HOUR, 60, "You’ve saved a lot of rounds this hour. Take a short break.")
     try:
-        return practice.submit_round(owner, course=data.course.strip(), unit=data.unit.strip(), length_s=data.length_s,
-                                     mode=data.mode, answers=[(answer.card_id, answer.correct) for answer in data.answers])
+        result = practice.submit_round(owner, course=data.course.strip(), unit=data.unit.strip(), length_s=data.length_s,
+                                       mode=data.mode, answers=[(answer.card_id, answer.correct) for answer in data.answers])
     except practice.PracticeError as error:
         raise lab_error(error) from error
+    earned = rewards.record(owner, "lab_round", xp=int(result.get("xp_earned") or 0),
+                            cards=int(result.get("round", {}).get("total") or 0))
+    if earned:
+        result["rewards"] = earned
+    return result
 
 
 @app.get("/api/practice/bests")
@@ -5024,3 +5053,61 @@ def daily_login(data: DailyLoginRequest, authorization: Annotated[str | None, He
     limit_action(student_id, "daily_login", 30)
     record = database.record_daily_login(student_id)
     return progress_response(student_id, record)
+
+
+# --- Rewards: daily quests, badges, streak freezes, weekly recap (rewards.py) --------------
+#
+# Study routes add an optional `rewards` object to their responses (rewards.record). These
+# routes read the state for Home and Friends. No AI; reads are cheap and per account.
+
+INSTANT_COMPLETIONS_PER_DAY = 30
+REWARD_WRITES_PER_HOUR = 60
+
+
+@app.get("/api/quests/today")
+def quests_today(authorization: Annotated[str | None, Header()] = None):
+    """Today's three quests (the student's local day), the chest and the daily goal."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return rewards.today_state(owner)
+
+
+@app.get("/api/badges")
+def my_badges(authorization: Annotated[str | None, Header()] = None):
+    """Every badge: earned (with when) and locked (with progress), plus banked streak freezes."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return rewards.badges(owner)
+
+
+@app.get("/api/friends/{friend_id}/badges")
+def friend_badges(friend_id: Annotated[str, PathParam(min_length=1, max_length=100)], authorization: Annotated[str | None, Header()] = None):
+    """A friend's earned badges: accepted friends only, never across a block."""
+    owner = auth.authenticated_user(authorization)["id"]
+    earned = rewards.friend_badges(owner, friend_id)
+    if earned is None:
+        raise HTTPException(status_code=404, detail="Friend not found")
+    return {"badges": earned}
+
+
+@app.get("/api/recap/last-week")
+def last_week_recap(authorization: Annotated[str | None, Header()] = None):
+    """Last Monday-Sunday (local): days studied, XP, cards, best subject, longest streak, badges."""
+    owner = auth.authenticated_user(authorization)["id"]
+    return rewards.last_week(owner)
+
+
+@app.post("/api/recap/last-week/dismiss")
+def dismiss_last_week_recap(authorization: Annotated[str | None, Header()] = None):
+    owner = auth.authenticated_user(authorization)["id"]
+    limit_action(owner, "reward_write", REWARD_WRITES_PER_HOUR)
+    return rewards.dismiss_recap(owner)
+
+
+@app.post("/api/instant-study/complete")
+def complete_instant_study(authorization: Annotated[str | None, Header()] = None):
+    """An Instant Study round finished. Counts only after real study today (a graded card or
+    a correct answer already recorded the study day), so it can't be farmed by itself."""
+    owner = auth.authenticated_user(authorization)["id"]
+    limit_action(owner, "instant_complete", INSTANT_COMPLETIONS_PER_DAY, 1440)
+    if not rewards.studied_today(owner):
+        raise HTTPException(status_code=409, detail={"code": "nothing_studied", "message": "Study a card or answer a question first."})
+    return {"recorded": True, "rewards": rewards.record(owner, "instant")}
