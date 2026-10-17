@@ -63,6 +63,11 @@ export function guideKind(kind: string) {
   return GUIDE_KINDS.find((item) => item.id === kind) ?? GUIDE_KINDS[0]
 }
 
+/* Answers start hidden for practice problems and test-style questions; worked examples show theirs. */
+export function guideHidesAnswers(kind: GuideKind, section: Pick<GuideSection, 'heading'>) {
+  return kind === 'practice' || /question|quiz|test|practice|check/i.test(section.heading)
+}
+
 export function listStudyGuides(course: string, unit: string | null, accessToken?: string, signal?: AbortSignal) {
   const query = new URLSearchParams({ course })
   if (unit !== null) query.set('unit', unit)

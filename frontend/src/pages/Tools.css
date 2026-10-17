@@ -1545,6 +1545,9 @@ img.tools__thumb { box-shadow: inset 0 0 0 1px var(--color-border); }
 
 .tools__review-counts strong { color: var(--color-text); font-weight: var(--weight-semibold); }
 
+.tools__card-tools { align-items: center; gap: var(--space-2); }
+.tools__cards.is-focus .tools__cards-pdf { display: none; }
+
 .tools__focus-bar.tools__review-focus { width: auto; max-width: none; margin-left: auto; }
 
 .tools__review-progress { height: 4px; }

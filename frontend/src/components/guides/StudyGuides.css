@@ -227,7 +227,6 @@
 }
 
 /* Only on paper. */
-.guide__print-note { display: none; }
 
 .guide__rename {
   display: flex;
@@ -398,45 +397,4 @@
   .guide__tools .ui-button { flex: none; min-height: 44px; white-space: nowrap; }
   .guides__head-actions { width: 100%; }
   .guides__head-actions .guides__make { flex: 1; }
-}
-
-/* Paper: only the guide (a copy placed in .guide-print), black on white, every answer shown. */
-
-.guide-print { display: none; }
-
-@media print {
-  html.is-printing-guide body > *:not(.guide-print) { display: none !important; }
-  html.is-printing-guide,
-  html.is-printing-guide body { background: #fff !important; }
-
-  .guide-print {
-    display: block;
-    color: #000;
-    font-size: 11pt;
-  }
-
-  .guide-print .guide { gap: 10pt; }
-  .guide-print .guide__head { gap: 4pt; padding-bottom: 8pt; border-bottom: 1px solid #000; }
-  .guide-print .guide__kind { padding: 0; background: none; color: #000; font-size: 9pt; }
-  .guide-print .guide__kind .ui-icon { display: none; }
-  .guide-print .guide__title { color: #000; font-size: 22pt; }
-  .guide-print .guide__meta,
-  .guide-print .guide__print-note { display: block; margin: 0; color: #333; font-size: 9pt; }
-  .guide-print .guide__body { max-width: none; gap: 12pt; color: #000; font-size: 11pt; line-height: 1.4; }
-  .guide-print .guide__section { gap: 6pt; break-inside: auto; }
-  .guide-print .guide__heading { padding-left: 0; border-left: 0; color: #000; font-size: 13pt; break-after: avoid; }
-  .guide-print .guide__bullets li::marker,
-  .guide-print .guide__items > li::marker,
-  .guide-print .guide__term dt,
-  .guide-print .guide__when,
-  .guide-print .guide__answer-label { color: #000; }
-  .guide-print .guide__terms { border-color: #999; }
-  .guide-print .guide__term + .guide__term { border-color: #ccc; }
-  .guide-print .guide__term,
-  .guide-print .guide__item,
-  .guide-print .guide__timeline li { break-inside: avoid; }
-  .guide-print .guide__timeline li { border-left-color: #999; }
-  .guide-print .guide__timeline li::before { background: #000; }
-  .guide-print .guide__answer { padding: 4pt 0 0 8pt; border-left: 2px solid #999; border-radius: 0; background: none; color: #000; }
-  .guide-print .guide__answer[hidden] { display: block; }
 }

@@ -1,0 +1,349 @@
+/*
+ * "Download PDF": the options sheet, the print layout shown over the app, and the paper.
+ *
+ * The paper (.pdoc) is always black ink on white, in either theme: it uses fixed colors,
+ * not the theme tokens. On screen it is shown at its printed width (186mm: A4 and US Letter
+ * with 12mm side margins) so long equations are measured and fitted against the real line.
+ */
+
+/* The button: the same small outlined button with a document icon everywhere. */
+.pdf-button svg { flex: none; }
+
+/* Otto's chat card for a guide it made, with a PDF button beside it. */
+.guide-card__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.guide-card__row .guide-card { margin-top: var(--space-1); }
+.guide-card__row .guide-card__pdf { margin-top: var(--space-1); }
+
+/* Options sheet */
+
+.pdf-sheet-backdrop { z-index: 120; }
+
+.pdf-sheet { width: min(480px, 100%); display: flex; flex-direction: column; }
+.pdf-sheet__header { align-items: flex-start; }
+.pdf-sheet__what { margin: 2px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.pdf-sheet__body { display: grid; gap: var(--space-4); padding: var(--space-5) var(--space-6); }
+.pdf-sheet__group { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.pdf-sheet__label { margin-bottom: var(--space-2); padding: 0; color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: .02em; text-transform: uppercase; }
+.pdf-sheet__choices { display: grid; gap: var(--space-2); }
+
+.pdf-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.pdf-choice.is-selected { border-color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 7%, var(--color-surface)); }
+.pdf-choice.is-disabled { cursor: not-allowed; opacity: .6; }
+.pdf-choice input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--color-accent); }
+.pdf-choice__text { display: grid; gap: 2px; min-width: 0; }
+.pdf-choice__label { color: var(--color-text); font-size: var(--text-base); font-weight: var(--weight-medium); }
+.pdf-choice__hint { color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.4; }
+
+.pdf-sheet__hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-blue-tint, var(--color-surface-sunken));
+  color: var(--color-blue-text, var(--color-text));
+  font-size: var(--text-sm);
+}
+
+.pdf-sheet__hint svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+/* Phones: a bottom sheet with full-width actions. */
+@media (max-width: 640px) {
+  .pdf-sheet-backdrop { place-items: end stretch; padding: 0; }
+  .pdf-sheet {
+    width: 100%;
+    max-height: calc(100dvh - var(--space-8));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: pdf-sheet-up var(--duration-base, 200ms) var(--ease-out, ease-out);
+  }
+  .pdf-sheet__header,
+  .pdf-sheet__body { padding-inline: var(--space-4); }
+  .pdf-sheet__footer { padding-inline: var(--space-4); }
+  .pdf-sheet__footer .ui-button { flex: 1; height: 44px; }
+  .pdf-choice { min-height: 44px; }
+}
+
+@keyframes pdf-sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pdf-sheet { animation: none; }
+}
+
+/* The print layout, over the app */
+
+.print-root {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface-sunken, #ecebe6);
+  color: var(--color-text);
+}
+
+.print-root__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  padding-top: max(var(--space-3), env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.print-root__text { min-width: 0; }
+.print-root__title { margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); overflow-wrap: anywhere; }
+.print-root__hint { display: flex; align-items: center; gap: var(--space-2); margin: 2px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.print-root__actions { display: flex; gap: var(--space-2); }
+
+.print-root__stage {
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-6) var(--space-4) calc(var(--space-8) + env(safe-area-inset-bottom));
+}
+
+/* Paper */
+
+.pdoc {
+  --pdoc-ink: #000;
+  --pdoc-soft: #444;
+  --pdoc-rule: #9a9a9a;
+  --pdoc-hair: #d4d4d4;
+  width: 186mm;
+  margin: 0 auto;
+  color: var(--pdoc-ink);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color-scheme: light;
+  text-align: left;
+}
+
+.pdoc *,
+.pdoc .katex,
+.pdoc .katex * { color: var(--pdoc-ink) !important; }
+
+/* On screen: white sheets with a shadow, at a readable size on phones (scaled, never reflowed). */
+@media screen {
+  .pdoc-frame,
+  .pdoc-page { background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18), 0 8px 24px rgba(0, 0, 0, .08); }
+  .pdoc-frame { padding: 12mm; }
+  .pdoc-page { padding: 12mm; }
+  .pdoc-page + .pdoc-page { margin-top: 8mm; }
+  .pdoc { width: calc(186mm + 24mm); }
+}
+
+/* Narrow screens see the sheet scaled down to fit (PdfExport sets --pdoc-zoom), never reflowed. */
+@media screen {
+  .pdoc { zoom: var(--pdoc-zoom, 1); }
+}
+
+.pdoc-frame { width: 100%; border-collapse: collapse; }
+.pdoc-frame > thead > tr > td,
+.pdoc-frame > tfoot > tr > td,
+.pdoc-frame__body { padding: 0; vertical-align: top; }
+
+.pdoc-running {
+  display: flex;
+  justify-content: space-between;
+  gap: 6mm;
+  padding-bottom: 2mm;
+  margin-bottom: 5mm;
+  border-bottom: .5pt solid var(--pdoc-rule);
+  font-size: 8pt;
+  line-height: 1.3;
+}
+
+.pdoc-running > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdoc-running__title { font-weight: 600; }
+.pdoc-running__scope,
+.pdoc-running--foot { color: var(--pdoc-soft) !important; }
+.pdoc-running--foot { justify-content: flex-end; margin: 5mm 0 0; padding: 2mm 0 0; border-top: .5pt solid var(--pdoc-hair); border-bottom: 0; }
+.pdoc-running--foot span { color: var(--pdoc-soft) !important; }
+
+/* Document head */
+
+.pdoc-head { margin-bottom: 6mm; padding-bottom: 4mm; border-bottom: 1.2pt solid var(--pdoc-ink); break-after: avoid; }
+.pdoc-eyebrow { margin: 0 0 1mm; font-size: 8.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pdoc-title { margin: 0; font-size: 22pt; font-weight: 800; line-height: 1.12; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.pdoc-meta { margin: 2mm 0 0; font-size: 9.5pt; }
+.pdoc-note { margin: 1mm 0 0; color: var(--pdoc-soft) !important; font-size: 8.5pt; }
+.pdoc-line { display: block; }
+.pdoc p { orphans: 3; widows: 3; }
+
+/* Math on paper: never scrolls or clips; long equations are scaled to fit (PdfExport). */
+.pdoc .math { overflow: visible; contain: none; max-width: 100%; }
+.pdoc .math--display { max-height: none; overflow: visible; margin: 2mm 0; break-inside: avoid; }
+.pdoc .math--source { background: none; padding: 0; }
+
+/* Guides */
+
+.pdoc-section { margin-top: 6mm; }
+.pdoc-h2 {
+  margin: 0 0 2.5mm;
+  padding-bottom: 1mm;
+  border-bottom: .5pt solid var(--pdoc-rule);
+  font-size: 13pt;
+  font-weight: 700;
+  line-height: 1.25;
+  break-after: avoid;
+  break-inside: avoid;
+}
+
+.pdoc-bullets { margin: 0 0 3mm; padding-left: 5mm; }
+.pdoc-bullets li { margin: 0 0 1.2mm; padding-left: 1mm; break-inside: avoid; }
+
+.pdoc-table { width: 100%; margin: 1mm 0 3mm; border-collapse: collapse; font-size: 10pt; }
+.pdoc-table th,
+.pdoc-table td { padding: 1.8mm 2.5mm; border: .5pt solid var(--pdoc-rule); text-align: left; vertical-align: top; }
+.pdoc-table thead th { font-size: 8pt; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; background: #f2f2f2; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.pdoc-table tr { break-inside: avoid; }
+.pdoc-terms tbody th { width: 32%; font-weight: 700; }
+
+.pdoc-items { margin: 0; padding-left: 6mm; }
+.pdoc-item { margin: 0 0 4mm; padding-left: 1mm; break-inside: avoid; }
+.pdoc-item::marker { font-weight: 700; }
+.pdoc-item__q { font-weight: 500; }
+.pdoc-answer { margin-top: 1.5mm; padding: 1mm 0 1mm 3mm; border-left: 1.5pt solid var(--pdoc-rule); }
+.pdoc-answer__label { display: inline-block; margin-right: 2mm; font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pdoc-answer > .pdoc-answer__label { display: block; margin-bottom: .5mm; }
+
+/* Lines to write on */
+.pdoc-write { display: block; margin-top: 1mm; }
+.pdoc-write span { display: block; height: 8mm; border-bottom: .6pt solid var(--pdoc-rule); }
+
+/* Flashcards: list */
+
+.pdoc-qa th,
+.pdoc-qa td { width: 47%; }
+.pdoc-qa .pdoc-qa__num { width: 6%; text-align: right; font-variant-numeric: tabular-nums; color: var(--pdoc-soft) !important; }
+
+/* Flashcards: cut-out sheets. Each sheet is one page: label, 2 x 4 grid, footer. */
+
+.pdoc--paged .pdoc-page { break-after: page; break-inside: avoid; }
+.pdoc--paged .pdoc-page:last-child { break-after: auto; }
+.pdoc-sheet__label { margin: 0 0 3mm; font-size: 8.5pt; }
+.pdoc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 90mm);
+  grid-auto-rows: 57mm;
+  justify-content: center;
+}
+
+.pdoc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4mm 5mm;
+  overflow: hidden;
+  border-right: .8pt dashed var(--pdoc-rule);
+  border-bottom: .8pt dashed var(--pdoc-rule);
+}
+
+/* Cut lines on the outside of the grid too. */
+.pdoc-card:nth-child(-n + 2) { border-top: .8pt dashed var(--pdoc-rule); }
+.pdoc-card:nth-child(odd) { border-left: .8pt dashed var(--pdoc-rule); }
+
+.pdoc-card__top { display: flex; justify-content: space-between; gap: 2mm; font-size: 7pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.pdoc-card__num { color: var(--pdoc-soft) !important; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.pdoc-card__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+  padding: 1mm 0;
+  font-size: 12pt;
+  line-height: 1.3;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.pdoc-card--front .pdoc-card__text { font-weight: 600; }
+.pdoc-card__topic { font-size: 7pt; color: var(--pdoc-soft) !important; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Practice tests */
+
+.pdoc-fields { display: flex; flex-wrap: wrap; gap: 3mm 8mm; margin: 0 0 4mm; font-size: 10pt; font-weight: 600; }
+.pdoc-field { display: inline-flex; align-items: flex-end; gap: 2mm; }
+.pdoc-field__line { display: inline-block; width: 32mm; border-bottom: .6pt solid var(--pdoc-ink); }
+.pdoc-field--name { flex: 1; }
+.pdoc-field--name .pdoc-field__line { flex: 1; min-width: 50mm; }
+.pdoc-field--score .pdoc-field__line { width: 12mm; }
+.pdoc-instructions { margin: 0 0 5mm; color: var(--pdoc-soft) !important; font-size: 9pt; font-style: italic; }
+
+.pdoc-questions { margin: 0; padding-left: 7mm; }
+.pdoc-question { margin: 0 0 6mm; padding-left: 1mm; break-inside: avoid; }
+.pdoc-question::marker { font-weight: 700; }
+.pdoc-question__prompt { font-weight: 500; }
+.pdoc-choices { display: grid; gap: 1.5mm; margin: 2mm 0 0; padding: 0; list-style: none; }
+.pdoc-choices li { display: flex; align-items: baseline; gap: 2.5mm; }
+.pdoc-bubble {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 5mm;
+  height: 5mm;
+  border: .7pt solid var(--pdoc-ink);
+  border-radius: 50%;
+  font-size: 7.5pt;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(.6mm);
+}
+
+.pdoc-key--new-page { break-before: page; }
+.pdoc-key--new-page .pdoc-head { margin-top: 0; }
+.pdoc-key__list { margin: 0; padding-left: 7mm; }
+.pdoc-key__item { margin: 0 0 4mm; padding-left: 1mm; break-inside: avoid; }
+.pdoc-key__item::marker { font-weight: 700; }
+.pdoc-key__prompt { color: var(--pdoc-soft) !important; font-size: 9.5pt; }
+.pdoc-key__prompt * { color: var(--pdoc-soft) !important; }
+.pdoc-key__answer { margin: 1mm 0 0; font-weight: 600; }
+.pdoc-key__letter { margin-right: 2mm; }
+.pdoc-key__why { margin: 1mm 0 0; font-size: 9.5pt; }
+.pdoc-key__topic { margin: .5mm 0 0; color: var(--pdoc-soft) !important; font-size: 8pt; }
+
+/* Paper only: just the document, black on white, whatever the theme. */
+
+@page { margin: 12mm; }
+
+@media print {
+  html.is-printing body > *:not(.print-root) { display: none !important; }
+  html.is-printing,
+  html.is-printing body {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+    color-scheme: light;
+  }
+  html.is-printing .print-root { position: static; display: block; background: #fff; }
+  html.is-printing .print-root__bar { display: none; }
+  html.is-printing .print-root__stage { overflow: visible; padding: 0; }
+  .pdoc { width: auto; zoom: 1; }
+  .pdoc-frame,
+  .pdoc-page { padding: 0; margin: 0; box-shadow: none; background: none; }
+}

@@ -24,6 +24,7 @@ import { useNotePhoto } from '../lib/useNotePhoto'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
 import { GuideReader, StudyGuides } from '../components/guides/StudyGuides'
+import { FlashcardsPdfButton } from '../components/print/PdfButtons'
 import type { StudyGuide } from '../lib/studyGuides'
 import { COURSE_NAME_MAX, NAME_TOO_LONG_MESSAGE, nameRejected, noteDeposit, uploadFailure, UNIT_NAME_MAX } from '../lib/noteUpload'
 import type { NoteSource } from '../lib/noteUpload'
@@ -2440,7 +2441,12 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                       next={{ label: `Quiz yourself on ${activeUnit}`, onClick: () => setPanelFn('quiz') }}
                     />
                   ) : null}
-                  {cardMode === 'browse' && card ? <div className="tools__focus-bar">{focusControls}</div> : null}
+                  {cardMode === 'browse' && card ? (
+                    <div className="tools__focus-bar tools__card-tools">
+                      <FlashcardsPdfButton cards={cards} course={activeCourse} unit={activeUnit} className="tools__cards-pdf" />
+                      {focusControls}
+                    </div>
+                  ) : null}
                   {cardMode === 'review' ? null : card ? (
                     <>
                       <button

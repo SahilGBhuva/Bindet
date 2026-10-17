@@ -8,6 +8,7 @@ import { clearPracticeDraft, formatClock, loadPracticeDraft, savePracticeDraft, 
 import { INSTRUCTIONS_MAX } from '../../lib/studyPrefs'
 import { lowerMeridiem } from '../../lib/time'
 import { MathText } from '../math/Math'
+import { PracticeTestPdfButton } from '../print/PdfButtons'
 import './PracticeTest.css'
 
 /*
@@ -497,6 +498,7 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
             <h2 className="practice__title" ref={resultsHeading} tabIndex={-1}>Your results</h2>
           </div>
           <div className="practice__head-actions">
+            <PracticeTestPdfButton test={test} className="practice__pdf" />
             <button className="ui-button ui-button--ghost practice__close" type="button" onClick={onClose}>Done</button>
           </div>
         </div>
@@ -718,6 +720,10 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
         <button className="practice__link practice__close" type="button" onClick={onClose}>Leave the test</button>
         {remaining !== null ? ' (the timer keeps running)' : ''}.
       </p>
+      <div className="practice__print">
+        <PracticeTestPdfButton test={test} className="practice__pdf" />
+        <span className="practice__hint">A paper copy of these questions. The answer key comes with your results.</span>
+      </div>
 
       {confirmOpen ? (
         <div className="ui-dialog-backdrop practice__confirm" role="presentation" onClick={() => setConfirmOpen(false)}>
