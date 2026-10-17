@@ -1657,7 +1657,10 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
             and_(friendships.c.requester_id == recipient_id, friendships.c.recipient_id == requester_id),
         ))).mappings().first()
         if existing:
-            raise ValueError("friendship_exists")
+            # Say which: already friends, a request of yours still waiting, or theirs waiting for you.
+            if existing["status"] == "accepted":
+                raise ValueError("already_friends")
+            raise ValueError("request_pending" if existing["requester_id"] == requester_id else "request_waiting_for_you")
         result = connection.execute(friendships.insert().values(
             requester_id=requester_id, recipient_id=recipient_id,
             status="pending", created_at=datetime.now(timezone.utc),
@@ -1707,6 +1710,22 @@ def pending_friend_requests(student_id: str) -> list[dict]:
                 requester.c.username, requester.c.display_name,
             ).join(requester, friendships.c.requester_id == requester.c.student_id)
             .where(friendships.c.recipient_id == student_id, friendships.c.status == "pending")
+            .order_by(friendships.c.created_at.desc())
+        ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def sent_friend_requests(student_id: str) -> list[dict]:
+    """Requests this student sent that are still waiting, so they can see and cancel them."""
+    init_db()
+    recipient = profiles.alias("recipient")
+    with engine().connect() as connection:
+        rows = connection.execute(
+            select(
+                friendships.c.id.label("request_id"), friendships.c.created_at,
+                recipient.c.student_id, recipient.c.username, recipient.c.display_name,
+            ).join(recipient, friendships.c.recipient_id == recipient.c.student_id)
+            .where(friendships.c.requester_id == student_id, friendships.c.status == "pending")
             .order_by(friendships.c.created_at.desc())
         ).mappings().all()
     return [dict(row) for row in rows]

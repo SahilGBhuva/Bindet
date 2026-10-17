@@ -1115,6 +1115,9 @@ def social_error(error: ValueError) -> HTTPException:
         "friend_not_found": (404, "No learner was found with that friend code"),
         "cannot_friend_self": (400, "You cannot add yourself"),
         "friendship_exists": (409, "You are already friends or a request is pending"),
+        "already_friends": (409, "You’re already friends."),
+        "request_pending": (409, "You already sent them a request. It’s waiting for their answer."),
+        "request_waiting_for_you": (409, "They already sent you a request. Accept it on your Friends page."),
         "friend_requests_disabled": (403, "This learner is not accepting friend requests"),
         "profile_not_found": (400, "Finish setting up your profile first"),
         "request_not_found": (404, "Friend request not found"),
@@ -1587,6 +1590,7 @@ def get_friends(authorization: Annotated[str | None, Header()] = None):
     readers = {
         "friends": database.list_friends,
         "requests": database.pending_friend_requests,
+        "sent": database.sent_friend_requests,
         "leaderboard": database.friend_leaderboard,
         "quests": database.active_friend_quests,
         "suggestions": database.suggested_people,

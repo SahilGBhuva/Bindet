@@ -48,6 +48,22 @@ class FriendsTests(unittest.TestCase):
         self.assertEqual(leaderboard[0]["student_id"], "alex-id")
         self.assertEqual(leaderboard[0]["total_xp"], 30)
 
+    def test_sent_requests_are_listed_until_answered_or_cancelled(self):
+        database.send_friend_request("alex-id", self.sam["friend_code"])
+        sent = database.sent_friend_requests("alex-id")
+        self.assertEqual([(row["student_id"], row["display_name"]) for row in sent], [("sam-id", "Sam")])
+        self.assertEqual(database.sent_friend_requests("sam-id"), [])
+        with self.assertRaisesRegex(ValueError, "request_pending"):
+            database.send_friend_request("alex-id", self.sam["friend_code"])
+        with self.assertRaisesRegex(ValueError, "request_waiting_for_you"):
+            database.send_friend_request("sam-id", self.alex["friend_code"])
+        self.assertTrue(database.remove_friend("alex-id", "sam-id"))
+        self.assertEqual(database.sent_friend_requests("alex-id"), [])
+        self.become_friends()
+        with self.assertRaisesRegex(ValueError, "already_friends"):
+            database.send_friend_request("sam-id", self.alex["friend_code"])
+        self.assertEqual(database.pending_friend_requests("sam-id"), [])
+
     def test_friend_quest_tracks_combined_xp(self):
         self.become_friends()
         quest = database.create_friend_quest("alex-id", "sam-id", 100)
