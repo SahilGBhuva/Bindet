@@ -183,10 +183,22 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const listPanel = useRef<HTMLElement>(null)
   const closeList = useCallback(() => setListOpen(false), [])
   useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
+  const listToggle = useRef<HTMLButtonElement>(null)
+  const listFirst = useRef<HTMLButtonElement>(null)
+  // Where keyboard focus goes once the list has been hidden or shown (the button that was
+  // pressed disappears or becomes inert, which would otherwise drop focus to the page).
+  const focusAfterToggle = useRef<'toggle' | 'list' | null>(null)
   const hideList = useCallback((hidden: boolean) => {
+    focusAfterToggle.current = hidden ? 'toggle' : 'list'
     setListHidden(hidden)
     try { localStorage.setItem(LIST_HIDDEN_KEY, hidden ? '1' : '0') } catch { /* private window: not remembered */ }
   }, [])
+  useEffect(() => {
+    const target = focusAfterToggle.current
+    focusAfterToggle.current = null
+    if (target === 'toggle') listToggle.current?.focus()
+    else if (target === 'list') listFirst.current?.focus()
+  }, [listHidden])
   const showConversations = () => { if (narrow) setListOpen(true); else hideList(false) }
   // Phones: mode, course, unit and Personalize live in a small sheet under a one-row head.
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -759,15 +771,15 @@ export function Tutor({ session }: { session: AuthSession | null }) {
       {/* The page heading comes first, before the conversation list's group headings.
           The visible conversation title below is an h2 under it. */}
       <h1 className="sr-only">Otto</h1>
-      <aside ref={listPanel} className="tutor__list" aria-label="Conversations" inert={narrow ? !listOpen : listHidden} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
+      <aside ref={listPanel} id="tutor-conversations" className="tutor__list" aria-label="Conversations" inert={narrow ? !listOpen : listHidden} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
         <div className="tutor__list-head">
           <span className="tutor__list-brand"><img src={MASCOT} alt="" width="24" height="24" decoding="async" />Otto</span>
           <span className="tutor__list-tools">
-            <button type="button" className="tutor__new" onClick={newConversation}>
+            <button ref={listFirst} type="button" className="tutor__new" onClick={newConversation}>
               <Icon name="edit" /><span>New chat</span>
             </button>
             {narrow ? null : (
-              <button type="button" className="tutor__head-icon tutor__list-hide" onClick={() => hideList(true)} aria-label="Hide chats" title="Hide chats">
+              <button type="button" className="tutor__head-icon tutor__list-hide" onClick={() => hideList(true)} aria-label="Hide chats" title="Hide chats" aria-expanded={!listHidden} aria-controls="tutor-conversations">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15M15.5 10l-2 2 2 2" /></svg>
               </button>
             )}
@@ -824,7 +836,8 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         onDrop={onDrop}
       >
         <header className="tutor__head">
-          <button type="button" className="tutor__list-toggle tutor__head-icon" onClick={showConversations} aria-label="Show chats" title="Show chats">
+          <button ref={listToggle} type="button" className="tutor__list-toggle tutor__head-icon" onClick={showConversations} aria-label="Show chats" title="Show chats"
+            aria-expanded={narrow ? listOpen : !listHidden} aria-controls="tutor-conversations">
             {narrow
               ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>
               : <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="3" /><path d="M9.5 4.5v15M13.5 10l2 2-2 2" /></svg>}
