@@ -13,6 +13,8 @@ import { Icons } from '../components/Icons'
 import { canNudge, firstName, rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
 import { useAnnounce } from '../lib/announce'
 import { notificationHref, notificationLabel } from '../lib/planLabels'
+import { BadgesSection, FriendBadges } from '../components/rewards/BadgesSection'
+import { rewardIcon } from '../components/rewards/RewardIcon'
 import './Profile.css'
 
 /*
@@ -595,6 +597,11 @@ export function Profile({ session, onError }: ProfileProps) {
           <span className="profile-stat__label">Study streak</span>
           <span className="profile-stat__value">{streak}<small> {streak === 1 ? 'day' : 'days'}</small></span>
           <span className="profile-stat__meta">{bestStreak > streak ? `Best: ${streakDays(bestStreak)}` : streak ? 'Your best yet' : 'Study today to start one'}</span>
+          {data.sandboxed ? null : (
+            <span className="rw-freeze-pill" title="A streak freeze covers one missed day automatically. You earn one each week you study, up to 2. Friend streaks don’t use them.">
+              <span aria-hidden="true">{rewardIcon('freeze')}</span>{stats?.streak_freezes ?? 0} of 2 freezes<span className="sr-only"> banked</span>
+            </span>
+          )}
           {streak >= 7 ? <img className="ui-mascot-cheer profile-stat__cheer" src="/bindit-mascot-cutout.webp" alt="" width="36" height="43" title={`${streak}-day streak`} /> : null}
         </li>
         <li className="profile-stat ui-tone--pink">
@@ -797,6 +804,8 @@ export function Profile({ session, onError }: ProfileProps) {
             ) : null}
           </section>
 
+          <BadgesSection token={token} />
+
           <section className="ui-section" aria-labelledby="league-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="league-title">
@@ -994,6 +1003,7 @@ export function Profile({ session, onError }: ProfileProps) {
                           {open ? (
                             <FriendStreakDetail
                               id={detailId}
+                              token={token}
                               friend={friend}
                               nudged={nudged.has(friend.student_id)}
                               busy={socialBusy}
@@ -1568,8 +1578,9 @@ const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'narrow', timeZone
 const longDay = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' })
 
 /* The last 14 days as two rows of dots, you over your friend; a day both studied is joined by a thread. */
-function FriendStreakDetail({ id, friend, nudged, busy, onNudge }: {
+function FriendStreakDetail({ id, token, friend, nudged, busy, onNudge }: {
   id: string
+  token?: string
   friend: Friend
   nudged: boolean
   busy: boolean
@@ -1625,6 +1636,8 @@ function FriendStreakDetail({ id, friend, nudged, busy, onNudge }: {
           </button>
         ) : null}
       </div>
+      <p className="profile__streak-note">Friend streaks count days you both study. Streak freezes don’t apply to them.</p>
+      <FriendBadges token={token} friendId={friend.student_id} name={name} />
     </div>
   )
 }
