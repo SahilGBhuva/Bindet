@@ -1664,11 +1664,20 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
         ))
         request_id = result.inserted_primary_key[0]
         requester_name = connection.execute(select(profiles.c.display_name).where(profiles.c.student_id == requester_id)).scalar_one()
-        connection.execute(social_notifications.insert().values(
-            recipient_id=recipient_id, actor_id=requester_id, kind="friend_request",
-            message=f"{requester_name} sent you a friend request.", is_read=False,
-            created_at=datetime.now(timezone.utc),
-        ))
+        # Send, cancel, send again must not become a stream of notifications: one per
+        # requester and recipient per week is enough to know someone asked.
+        already_told = connection.execute(select(social_notifications.c.id).where(
+            social_notifications.c.recipient_id == recipient_id,
+            social_notifications.c.actor_id == requester_id,
+            social_notifications.c.kind == "friend_request",
+            social_notifications.c.created_at >= datetime.now(timezone.utc) - timedelta(days=7),
+        ).limit(1)).first()
+        if already_told is None:
+            connection.execute(social_notifications.insert().values(
+                recipient_id=recipient_id, actor_id=requester_id, kind="friend_request",
+                message=f"{requester_name} sent you a friend request.", is_read=False,
+                created_at=datetime.now(timezone.utc),
+            ))
     # Only what a profile card shows; never the recipient's privacy settings or timestamps.
     friend = {key: recipient[key] for key in ("student_id", "username", "display_name", "avatar_path")}
     return {"request_id": request_id, "status": "pending", "friend": friend}

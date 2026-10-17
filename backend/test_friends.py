@@ -22,6 +22,18 @@ class FriendsTests(unittest.TestCase):
         if os.path.exists(TEST_DB.name):
             os.unlink(TEST_DB.name)
 
+    def test_send_cancel_send_notifies_only_once(self):
+        from sqlalchemy import func, select
+        for _ in range(3):
+            database.send_friend_request("alex-id", self.sam["friend_code"])
+            database.remove_friend("alex-id", "sam-id")
+        with database.engine().connect() as connection:
+            count = connection.execute(select(func.count()).select_from(database.social_notifications).where(
+                database.social_notifications.c.recipient_id == "sam-id",
+                database.social_notifications.c.kind == "friend_request",
+            )).scalar_one()
+        self.assertEqual(count, 1)
+
     def become_friends(self):
         request = database.send_friend_request("alex-id", self.sam["friend_code"])
         database.respond_to_friend_request(request["request_id"], "sam-id", True)

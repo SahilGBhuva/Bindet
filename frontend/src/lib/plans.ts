@@ -17,5 +17,5 @@ export function grantPlan(entry: { email: string; plan: PlanGrant['plan']; note?
 }
 
 export function revokePlan(email: string, accessToken?: string) {
-  return request<{ removed: boolean }>(`/api/admin/plans/${encodeURIComponent(email)}`, { method: 'DELETE' }, accessToken)
+  return request<{ removed: boolean }>('/api/admin/plans/revoke', { method: 'POST', body: JSON.stringify({ email }) }, accessToken)
 }

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 import warnings
 
 log = logging.getLogger("bindet.images")
@@ -21,10 +22,15 @@ NOT_HEIF_BRANDS = frozenset({b"avif", b"avis"})
 HEIF_MIME = "image/heic"
 HEIF_CONTENT_TYPES = frozenset({"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence"})
 
-MAX_PIXELS = 40_000_000  # about 40 MP; an iPhone 48 MP photo is saved as 12 or 24 MP HEIC
+MAX_PIXELS = 24_000_000  # about 24 MP: the largest HEIC an iPhone saves (48 MP shots are stored at 12 or 24)
 MAX_EDGE = 2000
 JPEG_QUALITY = 85
 HEIC_UNREADABLE = "That photo couldn’t be read. Try a JPG or PNG."
+PHOTOS_BUSY = "bindet is busy reading other photos. Try again in a moment."
+# A decoded photo can take a few hundred MB; at most this many are decoded at once per server
+# instance, so a burst of large photos can't run it out of memory.
+_decode_slots = threading.BoundedSemaphore(2)
+DECODE_WAIT_SECONDS = 15
 
 
 class ImageConversionError(ValueError):
@@ -68,6 +74,15 @@ def heif_to_jpeg(raw: bytes) -> bytes:
     if Image is None:
         log.warning("heic_unavailable pillow-heif is not installed")
         raise ImageConversionError()
+    if not _decode_slots.acquire(timeout=DECODE_WAIT_SECONDS):
+        raise ImageConversionError(PHOTOS_BUSY)
+    try:
+        return _heif_to_jpeg(Image, raw)
+    finally:
+        _decode_slots.release()
+
+
+def _heif_to_jpeg(Image, raw: bytes) -> bytes:
     from PIL import ImageOps
 
     try:
@@ -82,7 +97,8 @@ def heif_to_jpeg(raw: bytes) -> bytes:
                 if width < 1 or height < 1 or width * height > MAX_PIXELS:
                     raise ImageConversionError()
                 source.load()
-                upright = ImageOps.exif_transpose(source)
+                ImageOps.exif_transpose(source, in_place=True)  # no second full-size copy
+                upright = source
                 upright.thumbnail((MAX_EDGE, MAX_EDGE), Image.Resampling.LANCZOS)
                 # A brand-new image carries no info dict: no EXIF, GPS, XMP or maker notes.
                 clean = Image.new("RGB", upright.size, (255, 255, 255))
@@ -99,3 +115,47 @@ def heif_to_jpeg(raw: bytes) -> bytes:
     except Exception as error:  # noqa: BLE001 - any decoder failure is the same answer for a student
         log.info("heic_unreadable %s", type(error).__name__)
         raise ImageConversionError() from error
+
+
+_REENCODE = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+
+
+def without_metadata(raw: bytes, content_type: str) -> bytes:
+    """A JPEG, PNG or WebP re-saved right way up with no EXIF/GPS/XMP, same format.
+
+    Used for every photo before it goes to the vision model. GIFs, and any image Pillow
+    can't open (or no Pillow installed), are passed through unchanged: this only removes
+    metadata, it never blocks a photo that the rest of the checks already accepted.
+    """
+    format_name = _REENCODE.get(content_type)
+    if format_name is None:
+        return raw
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return raw
+    if not _decode_slots.acquire(timeout=DECODE_WAIT_SECONDS):
+        raise ImageConversionError(PHOTOS_BUSY)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as source:
+                width, height = source.size
+                if width < 1 or height < 1 or width * height > MAX_PIXELS:
+                    raise ImageConversionError()
+                source.load()
+                ImageOps.exif_transpose(source, in_place=True)  # no second full-size copy
+                upright = source
+                mode = "RGBA" if upright.mode in {"RGBA", "LA", "P"} and format_name != "JPEG" else "RGB"
+                clean = Image.new(mode, upright.size)
+                clean.paste(upright.convert(mode))
+        output = io.BytesIO()
+        clean.save(output, format=format_name, **({"quality": JPEG_QUALITY} if format_name in {"JPEG", "WEBP"} else {}))
+        return output.getvalue()
+    except ImageConversionError:
+        raise
+    except Exception as error:  # noqa: BLE001 - keep the photo rather than fail on a metadata pass
+        log.info("strip_metadata_skipped %s", type(error).__name__)
+        return raw
+    finally:
+        _decode_slots.release()

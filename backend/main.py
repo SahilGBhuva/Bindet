@@ -1461,6 +1461,9 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
             if actual_type == photos.HEIF_MIME:
                 # iPhone photos become a plain, metadata-free JPEG for OCR, the cache and the row.
                 content, content_type = heif_as_jpeg(content), "image/jpeg"
+            else:
+                # Other photos lose their EXIF/GPS too before the vision model sees them.
+                content = photo_without_metadata(content, content_type)
             # The same image was read before (by anyone: the key hashes its full bytes),
             # so reuse that text without an OCR quota, budget or model call.
             cache_key = ai_cache.extraction_key(content, content_type)
@@ -2022,6 +2025,15 @@ def heif_as_jpeg(raw: bytes) -> bytes:
         raise HTTPException(status_code=415, detail=str(error)) from error
 
 
+def photo_without_metadata(raw: bytes, content_type: str) -> bytes:
+    """A JPEG/PNG/WebP re-saved without EXIF or GPS before a model sees it (see images.py)."""
+    try:
+        return photos.without_metadata(raw, content_type)
+    except photos.ImageConversionError as error:
+        status = 503 if str(error) == photos.PHOTOS_BUSY else 415
+        raise HTTPException(status_code=status, detail=str(error), headers={"Retry-After": "5"} if status == 503 else None) from error
+
+
 def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
     """Validate data URLs (type, size, real base64, magic bytes) before anything is sent to a model."""
     parts = []
@@ -2053,8 +2065,9 @@ def tutor_image_parts(images: list[TutorImage]) -> list[dict]:
             converted = heif_as_jpeg(raw)
             parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(converted).decode()}})
             continue
-        # A mislabelled but genuine image is relabelled with its real type.
-        data_url = image.data_url if actual_type == content_type else f"data:{actual_type};base64,{encoded}"
+        # Re-saved without EXIF/GPS (and relabelled with its real type) before the model sees it.
+        cleaned = photo_without_metadata(raw, actual_type)
+        data_url = f"data:{actual_type};base64,{base64.b64encode(cleaned).decode()}" if cleaned is not raw or actual_type != content_type else image.data_url
         parts.append({"type": "image_url", "image_url": {"url": data_url}})
     return parts
 
@@ -2110,11 +2123,12 @@ def send_tutor_message(data: TutorMessageRequest, authorization: Annotated[str |
     content = data.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="Write a message first")
-    image_parts = tutor_image_parts(data.images)
+    # The stream slot first: photo decoding is the expensive part and must not run unbounded.
     slot = tutor_streams.acquire(owner, OWNER_MAX_CONCURRENT_STREAMS if rate_limit.skips_student_limits(owner) else TUTOR_MAX_CONCURRENT_STREAMS)
     if slot is None:
         raise HTTPException(status_code=429, detail=TUTOR_TOO_MANY_STREAMS, headers={"Retry-After": "10"})
     try:
+        image_parts = tutor_image_parts(data.images)
         return _send_tutor_message(data, owner, content, image_parts, slot)
     except BaseException:
         tutor_streams.release(owner, slot)
@@ -4350,10 +4364,16 @@ def admin_grant_plan(data: PlanGrantRequest, authorization: Annotated[str | None
         raise HTTPException(status_code=400, detail={"code": str(error), "message": PLAN_ERRORS.get(str(error), "Couldn’t save that.")}) from error
 
 
-@app.delete("/api/admin/plans/{email}")
-def admin_revoke_plan(email: Annotated[str, PathParam(max_length=254)], authorization: Annotated[str | None, Header()] = None):
+class PlanRevoke(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=254)
+
+
+# The email goes in the body, never the URL, so it stays out of request logs and history.
+@app.post("/api/admin/plans/revoke")
+def admin_revoke_plan(data: PlanRevoke, authorization: Annotated[str | None, Header()] = None):
     require_plan_admin(authorization)
-    return {"removed": plans.revoke(email)}
+    return {"removed": plans.revoke(data.email)}
 
 
 @app.get("/api/admin/feedback")

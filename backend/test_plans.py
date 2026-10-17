@@ -89,10 +89,10 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(made.json()["plan"], "pro")
         listed = self.call("GET", "/api/admin/plans", OWNER).json()["grants"]
         self.assertEqual([(g["email"], g["plan"], g["note"]) for g in listed], [("pro.student@example.com", "pro", "beta tester")])
-        removed = self.call("DELETE", "/api/admin/plans/pro.student@example.com", OWNER)
+        removed = self.call("POST", "/api/admin/plans/revoke", OWNER, json={"email": "pro.student@example.com"})
         self.assertEqual(removed.json(), {"removed": True})
         self.assertEqual(self.call("GET", "/api/admin/plans", OWNER).json()["grants"], [])
-        self.assertEqual(self.call("DELETE", "/api/admin/plans/pro.student@example.com", OWNER).json(), {"removed": False})
+        self.assertEqual(self.call("POST", "/api/admin/plans/revoke", OWNER, json={"email": "pro.student@example.com"}).json(), {"removed": False})
 
     def test_admin_emails_may_grant_too(self):
         made = self.call("POST", "/api/admin/plans", ADMIN, json={"email": "tester@example.com", "plan": "unlimited"})
@@ -105,7 +105,7 @@ class PlanTests(unittest.TestCase):
         for user in (None, FREE, TESTER, unconfirmed_owner):
             for method, path, body in (("GET", "/api/admin/plans", None), ("GET", "/api/admin/access", None),
                                        ("POST", "/api/admin/plans", {"email": "x@example.com"}),
-                                       ("DELETE", "/api/admin/plans/tester@example.com", None)):
+                                       ("POST", "/api/admin/plans/revoke", {"email": "tester@example.com"})):
                 response = self.call(method, path, user, json=body)
                 self.assertEqual(response.status_code, 404, (user, method, path))
         self.assertEqual(len(plans.list_grants()), 1)
@@ -169,7 +169,7 @@ class PlanTests(unittest.TestCase):
         plans.grant("pro.student@example.com", "pro", "owner-1")
         self.sign_in(PRO)
         self.assertTrue(rate_limit.is_pro("pro-1"))
-        self.assertEqual(self.call("DELETE", "/api/admin/plans/pro.student@example.com", OWNER).status_code, 200)
+        self.assertEqual(self.call("POST", "/api/admin/plans/revoke", OWNER, json={"email": "pro.student@example.com"}).status_code, 200)
         self.sign_in(PRO)  # served from the verified-token cache; the plan is re-read
         self.assertFalse(rate_limit.is_pro("pro-1"))
 
@@ -217,7 +217,7 @@ class PlanTests(unittest.TestCase):
         self.sign_in(PRO)
         self.call("POST", "/api/admin/plans", OWNER, json={"email": "pro.student@example.com", "plan": "unlimited"})
         self.sign_in(PRO)
-        self.call("DELETE", "/api/admin/plans/pro.student@example.com", OWNER)
+        self.call("POST", "/api/admin/plans/revoke", OWNER, json={"email": "pro.student@example.com"})
         self.sign_in(PRO)
         plans.grant("pro.student@example.com", "pro", "owner-1")
         self.sign_in(PRO)

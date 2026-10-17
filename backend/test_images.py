@@ -243,3 +243,35 @@ class NoteHeicTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StripMetadataTests(unittest.TestCase):
+    def test_jpeg_gps_is_removed_and_format_kept(self):
+        from PIL import Image
+        exif = Image.Exif()
+        exif[0x8825] = {1: 'N', 2: (40.0, 0.0, 0.0)}  # GPSInfo
+        buffer = BytesIO()
+        Image.new('RGB', (40, 30), (200, 10, 10)).save(buffer, format='JPEG', exif=exif)
+        raw = buffer.getvalue()
+        self.assertIn(b'Exif', raw)
+        cleaned = images.without_metadata(raw, 'image/jpeg')
+        self.assertNotIn(b'Exif', cleaned)
+        with Image.open(BytesIO(cleaned)) as result:
+            self.assertEqual(result.format, 'JPEG')
+            self.assertEqual(result.size, (40, 30))
+
+    def test_unreadable_or_gif_passes_through(self):
+        self.assertEqual(images.without_metadata(b'not an image', 'image/png'), b'not an image')
+        self.assertEqual(images.without_metadata(b'GIF89a...', 'image/gif'), b'GIF89a...')
+
+    def test_busy_when_decode_slots_are_taken(self):
+        held = [images._decode_slots.acquire(timeout=1) for _ in range(2)]
+        try:
+            with patch.object(images, "DECODE_WAIT_SECONDS", 0.05):
+                with self.assertRaises(images.ImageConversionError) as caught:
+                    images.without_metadata(b'x', 'image/png')
+            self.assertEqual(str(caught.exception), images.PHOTOS_BUSY)
+        finally:
+            for ok in held:
+                if ok:
+                    images._decode_slots.release()
