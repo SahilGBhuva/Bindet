@@ -318,6 +318,21 @@ class AccountDeletionTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertIn("alex@example.com", {grant["email"] for grant in plans.list_grants()})
 
+    def test_deleting_an_alias_account_keeps_the_real_inboxs_grant(self):
+        supabase = FakeSupabase()
+        for alias in ("alex+school@example.com", "Alex+Old@Example.com"):
+            with patch.dict(os.environ, ENV), patch.object(auth, "authenticated_user", return_value={
+                    "id": EVE, "email": alias, "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+                post, request, http_delete = supabase.patches()
+                with post, request, http_delete:
+                    result = self.client.request("DELETE", "/api/account", json=CONFIRM, headers={"Authorization": fresh_token(EVE)})
+            self.assertEqual(result.status_code, 200, result.text)
+        self.assertIn("alex@example.com", {grant["email"] for grant in plans.list_grants()})
+        # The canonical inbox's own account still takes its grant with it, whatever its case.
+        with database.engine().begin() as connection:
+            plans.delete_for_account_in(connection, ALEX, " Alex@Example.com ")
+        self.assertNotIn("alex@example.com", {grant["email"] for grant in plans.list_grants()})
+
     def test_every_locked_table_is_checked(self):
         checked = {table.name for table_metadata in ALL_METADATA for table in table_metadata.sorted_tables}
         self.assertLessEqual(set(database.RLS_TABLES) | {"study_notes"}, checked)

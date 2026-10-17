@@ -23,8 +23,9 @@ safe for foreign keys:
 - Practice lab: rounds and personal bests, and every challenge the student sent or
   received (the friend's copy of a received challenge goes too), and feedback they sent.
 - First-run setup state (account_onboarding).
-- The plan grant for the account's confirmed email (account_plans); grants the account
-  made for other people stay, without its id.
+- The plan grant for the account's confirmed email (account_plans), unless the account is
+  only an alias of the granted inbox; grants the account made for other people stay,
+  without its id.
 - On Postgres, the browser-written group chat rows: messages the student sent, their
   read receipts and typing state.
 
@@ -248,7 +249,8 @@ def _delete_social(connection, student_id: str) -> None:
 def delete_account_data(student_id: str, email: str | None = None) -> dict:
     """Delete every row tied to student_id in one transaction. Returns a summary
     ({"groups_deleted", "groups_transferred", "tasks_handed_over", "cache_rows",
-    "image_paths"}); email is the account's confirmed inbox, whose plan grant goes too.
+    "image_paths"}); email is the account's exact confirmed email; when it is the
+    canonical inbox (not a '+tag' or Gmail-dots alias), that inbox's plan grant goes too.
     image_paths are the private-bucket objects named by uploaded_images,
     which the caller deletes from storage."""
     if not student_id:

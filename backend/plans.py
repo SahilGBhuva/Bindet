@@ -75,6 +75,15 @@ def confirmed_inbox(user: dict | None) -> str:
     return inbox_of(user.get("email"))
 
 
+def confirmed_email(user: dict | None) -> str:
+    """The exact (lowercased) email of a verified account with a confirmed email, else ''.
+    Unlike confirmed_inbox it keeps '+tag' and Gmail dots, so callers can tell the
+    canonical inbox's own account from an alias of it."""
+    if not user or user.get("is_anonymous") or not user.get("email_confirmed_at"):
+        return ""
+    return (user.get("email") or "").strip().lower()
+
+
 def plan_for_email(inbox: str) -> str:
     if not inbox:
         return "free"
@@ -192,10 +201,15 @@ def list_grants() -> list[dict]:
 
 def delete_for_account_in(connection, student_id: str, email: str | None) -> None:
     """Account deletion, inside its transaction: the grant for the account's own confirmed
-    inbox goes, and grants it made for other people stay (they keep their plan) but no
-    longer name it."""
-    inbox = inbox_of(email)
-    if inbox:
+    email goes, and grants it made for other people stay (they keep their plan) but no
+    longer name it.
+
+    email is the account's exact confirmed address (confirmed_email). Aliases share the
+    canonical inbox's grant, so the grant only goes when the deleted account IS that
+    inbox: deleting kid+alt@gmail.com must not end kid@gmail.com's Pro."""
+    exact = (email or "").strip().lower()
+    inbox = inbox_of(exact)
+    if inbox and exact == inbox:
         connection.execute(delete(account_plans).where(account_plans.c.email == inbox))
     connection.execute(update(account_plans).where(account_plans.c.granted_by == student_id).values(granted_by=""))
     rate_limit.forget_plans()

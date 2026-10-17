@@ -2720,7 +2720,7 @@ def delete_account(data: Annotated[AccountDeleteRequest | None, Body()] = None,
     _delete_account_images(student_id, account_deletion.group_ids(student_id))
     # The plan grant for the account's own email goes with it, but only for a confirmed
     # email: an unconfirmed sign-up must not be able to remove someone else's grant.
-    summary = account_deletion.delete_account_data(student_id, plans.confirmed_inbox(user))
+    summary = account_deletion.delete_account_data(student_id, plans.confirmed_email(user))
     _delete_leftover_images(student_id, summary)
     if not auth.delete_auth_user(student_id):
         account_logger.warning("account_delete_auth_failed %s", json.dumps({"student": ai_tutor.student_hash(student_id)}))
