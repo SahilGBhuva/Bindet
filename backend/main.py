@@ -1576,7 +1576,7 @@ def get_account_profile(authorization: Annotated[str | None, Header()] = None):
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
-    profile["plan"] = rate_limit.plan_of(user["id"])
+    profile["plan"] = plans.shown_plan(user["id"])
     return profile
 
 
@@ -2539,7 +2539,7 @@ def update_account_profile(data: AccountProfileUpdate, authorization: Annotated[
     if progress:
         profile["login_streak"] = progress.get("login_streak", 0)
         profile["best_login_streak"] = progress.get("best_login_streak", 0)
-    profile["plan"] = rate_limit.plan_of(user["id"])
+    profile["plan"] = plans.shown_plan(user["id"])
     return profile
 
 

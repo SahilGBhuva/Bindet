@@ -158,6 +158,13 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(self.call("GET", "/api/account/profile", FREE).json()["plan"], "free")
         self.assertEqual(self.call("GET", "/api/account/profile", TESTER).json()["plan"], "unlimited")
 
+    def test_owner_sees_unlimited_on_their_profile(self):
+        database.onboard_account(OWNER["id"], "owneruser", "Owner", None)
+        self.assertEqual(self.call("GET", "/api/account/profile", OWNER).json()["plan"], "unlimited")
+        unconfirmed = {**OWNER, "id": "owner-3", "email_confirmed_at": None}
+        database.onboard_account("owner-3", "owneruser3", "Owner", None)
+        self.assertEqual(self.call("GET", "/api/account/profile", unconfirmed).json()["plan"], "free")
+
     def test_revoking_ends_pro_at_the_next_sign_in_check(self):
         plans.grant("pro.student@example.com", "pro", "owner-1")
         self.sign_in(PRO)

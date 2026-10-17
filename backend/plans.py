@@ -95,6 +95,12 @@ def refresh(user: dict) -> None:
     rate_limit.mark_plan(student_id, plan)
 
 
+def shown_plan(student_id: str) -> str:
+    """The plan the student sees. Owner accounts have no per-student limits, so they are
+    shown as Unlimited (student-facing text never calls them owners)."""
+    return "unlimited" if rate_limit.is_owner(student_id) else rate_limit.plan_of(student_id)
+
+
 def grant(email: str, plan: str, granted_by: str, note: str | None = None) -> dict:
     """Grant (or change) a plan for an email. Raises ValueError('invalid_email' |
     'disposable_email' | 'invalid_plan')."""
