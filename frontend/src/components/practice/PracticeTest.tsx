@@ -168,7 +168,9 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
       return
     }
     const draft = data.sandboxed ? null : loadPracticeDraft(next.id)
-    setAnswers(draft?.answers ?? {})
+    // Answers already checked in Otto's inline quiz are kept (the server locked them).
+    const checked = Object.fromEntries(next.items.filter((item) => item.checked && item.student_answer).map((item) => [item.position, item.student_answer as string]))
+    setAnswers({ ...(draft?.answers ?? {}), ...checked })
     setFlags(draft?.flags ?? [])
     setCurrent(Math.min(Math.max(0, draft?.current ?? 0), Math.max(0, next.items.length - 1)))
     setStage('test')

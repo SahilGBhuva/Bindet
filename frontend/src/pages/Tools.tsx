@@ -335,6 +335,21 @@ function guideRequested() {
   return screen === 'tools' ? new URLSearchParams(query).get('guide') ?? '' : ''
 }
 
+/* "#tools?test=<id>&course=…&unit=…" (Otto's inline quiz): the practice test to open full size. */
+function testRequested() {
+  const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
+  const params = new URLSearchParams(query)
+  const id = screen === 'tools' ? params.get('test') ?? '' : ''
+  return id ? { id, course: params.get('course') ?? '', unit: params.get('unit') } : null
+}
+
+/* "#tools?view=cards" (Otto's deck card): the unit's Flashcards view. */
+function viewRequested(): ToolView | null {
+  const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
+  const view = screen === 'tools' ? new URLSearchParams(query).get('view') : null
+  return view === 'cards' || view === 'quiz' || view === 'guides' || view === 'scan' ? view : null
+}
+
 function reviewRequested() {
   const [screen, query = ''] = window.location.hash.replace('#', '').split('?')
   return screen === 'tools' && new URLSearchParams(query).get('review') === 'all'
@@ -623,6 +638,25 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       setPractice(null)
       setReviewAll(false)
       setGuideView({ course: '', openId: id, key: Date.now() })
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
+    }
+    sync()
+    window.addEventListener('hashchange', sync)
+    return () => window.removeEventListener('hashchange', sync)
+  }, [data])
+
+  // Otto's chat links to a practice test ("Open as full practice test") or a unit's flashcards
+  // ("Open in Study"): open it, then drop the request from the address.
+  useEffect(() => {
+    if (data.sandboxed) return
+    const sync = () => {
+      const test = testRequested()
+      const view = viewRequested()
+      if (!test && !view) return
+      setReviewAll(false)
+      setGuideView(null)
+      if (test && test.course) setPractice({ course: test.course, unit: test.unit, openId: test.id, key: Date.now() })
+      else if (view) { setPractice(null); setPanelFn(view) }
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#tools`)
     }
     sync()

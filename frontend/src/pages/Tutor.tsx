@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
-  deleteTutorConversation, generateNoteFlashcards, getCachedOttoProfile, getCachedProfile, getCachedTutorConversations, getCachedTutorMessages,
-  getOttoProfile, getTutorConversations, getTutorMessages, OTTO_MEMORY_CHANGED_EVENT, parseServerTime, prepareTutorImage, rateTutorMessage,
-  saveTutorReplyAsNote, setCachedTutorConversations, setCachedTutorMessages, streamTutorMessage, updateTutorConversation, warmAI,
-  type Progress, type StudyMode, type Task, type TutorConversation, type TutorMessage,
+  ApiError, deleteTutorConversation, getCachedOttoProfile, getCachedProfile, getCachedTutorConversations, getCachedTutorMessages,
+  getOttoProfile, getTutorConversations, getTutorMessages, OTTO_MEMORY_CHANGED_EVENT, ottoMake, parseServerTime, prepareTutorImage, rateTutorMessage,
+  setCachedTutorConversations, setCachedTutorMessages, streamTutorMessage, updateTutorConversation, warmAI,
+  type OttoDeck, type OttoMaking as OttoMakingInfo, type Progress, type StudyMode, type Task, type TutorConversation, type TutorMessage,
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { useData } from '../lib/dataSource'
@@ -14,6 +14,9 @@ import { OttoReply, type ThinkingContext } from '../components/otto/OttoReply'
 import { useDrawer, useMediaQuery } from '../lib/useDrawer'
 import { guideFromAttachment, guideHash, guideKind } from '../lib/studyGuides'
 import { useAnnounce } from '../lib/announce'
+import { makePrompt, makingLabel, ottoMadeFrom, QUIZ_COUNTS, type OttoMade } from '../lib/ottoMake'
+import { InlineQuiz } from '../components/otto/InlineQuiz'
+import { OttoDeckCard, OttoMaking, OttoPicker } from '../components/otto/OttoMakeCards'
 import './Tutor.css'
 
 /*
@@ -23,7 +26,7 @@ import './Tutor.css'
  */
 
 type Attachment = { id: string; name: string; preview: string; dataUrl?: string; size?: number; state: 'preparing' | 'ready' | 'failed'; error?: string }
-type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streaming' | 'failed' | 'stopped'; previews?: string[]; progress?: number; error?: string; tier?: string; grounded?: string[]; groundedIn?: { course: string; unit: string }; thinking?: ThinkingContext }
+type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streaming' | 'failed' | 'stopped'; previews?: string[]; progress?: number; error?: string; tier?: string; grounded?: string[]; groundedIn?: { course: string; unit: string }; thinking?: ThinkingContext; making?: OttoMakingInfo }
 
 const NEW = 'new'
 const MAX_IMAGES = 3
@@ -46,7 +49,6 @@ function readLastConversation(): string {
 const FOLLOW_UPS = [
   { id: 'simpler', label: 'Explain simpler', prompt: 'Explain that again more simply, in plain words.' },
   { id: 'example', label: 'Give an example', prompt: 'Give me a concrete example of that.' },
-  { id: 'quiz', label: 'Quiz me on this', prompt: 'Quiz me on that with 3 quick questions. Ask one at a time and wait for my answer before the next.' },
 ]
 
 const MASCOT = '/bindit-mascot-cutout.webp'
@@ -166,7 +168,10 @@ export function Tutor({ session }: { session: AuthSession | null }) {
   const [copied, setCopied] = useState('')
   const [speaking, setSpeaking] = useState('')
   const [listening, setListening] = useState(false)
-  const [cardState, setCardState] = useState<Record<string, 'making' | 'done' | 'failed'>>({})
+  // The Practice test chip's 5 / 8 / 12 choice is open under this reply.
+  const [quizChooser, setQuizChooser] = useState('')
+  // Otto's "which unit?" picker while it saves and makes (by message key).
+  const [picking, setPicking] = useState<Record<string, { busy: boolean; error: string }>>({})
   const [now, setNow] = useState(() => Date.now())
   const [stats, setStats] = useState<Progress | null>(() => data.getCachedProgress(session?.user.id ?? data.getStudentId()))
   const [tasks, setTasks] = useState<Task[] | null>(() => token ? data.getCachedTasks(token) : null)
@@ -481,6 +486,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         updateMessage(liveThread, userKey, (message) => ({ ...message, status: undefined, progress: undefined }))
         updateMessage(liveThread, replyKey, (message) => ({ ...message, tier: meta.tier, grounded: meta.grounded_in, groundedIn: { course: meta.conversation.unit ? meta.conversation.course : useCourse, unit: meta.conversation.unit || useUnit } }))
       },
+      onMaking: (making) => updateMessage(liveThread, replyKey, (message) => ({ ...message, making })),
       onSaved: (stored) => updateMessage(liveThread, userKey, (message) => ({ ...message, ...stored, key: userKey, status: undefined, progress: undefined })),
       onDelta: (text) => {
         answered = true
@@ -650,20 +656,39 @@ export function Tutor({ session }: { session: AuthSession | null }) {
     catch { updateMessage(activeId, message.key, (item) => ({ ...item, rating: message.rating ?? 0 })); setNotice('Your rating could not be saved.') }
   }
 
-  /* "Make flashcards": the reply becomes one note in this unit, then the normal flashcard path makes (or reuses) its cards. */
-  async function makeFlashcards(message: LocalMessage) {
-    if (!token || !message.id || !course || !unit) return
-    setCardState((current) => ({ ...current, [message.key]: 'making' }))
+  /* Otto asked which course and unit to save a deck or quiz to: the reply becomes the result. */
+  async function resolvePick(message: LocalMessage, kind: 'flashcards' | 'quiz', pickCourse: string, pickUnit: string, count: number) {
+    if (!token || !message.id || activeId === NEW) return
+    const threadId = activeId
+    setPicking((current) => ({ ...current, [message.key]: { busy: true, error: '' } }))
     try {
-      const note = await saveTutorReplyAsNote(token, message.id, course, unit)
-      const result = await generateNoteFlashcards(note.id, undefined, token)
-      if (result.status !== 'ready' || !result.cards.length) throw new Error(result.status === 'too_short' ? 'That reply is too short to make flashcards from.' : 'Flashcards couldn’t be made from that reply.')
-      setCardState((current) => ({ ...current, [message.key]: 'done' }))
-      setNotice(`${result.cards.length} ${result.cards.length === 1 ? 'flashcard' : 'flashcards'} saved to ${unit}.`)
+      const made = await ottoMake(token, threadId, { kind, course: pickCourse, unit: pickUnit, count: kind === 'quiz' ? count : undefined, message_id: message.id })
+      updateMessage(threadId, message.key, (item) => ({ ...item, ...made, key: item.key }))
+      setCourse(pickCourse)
+      setUnit(pickUnit)
+      setPicking((current) => { const { [message.key]: _done, ...rest } = current; void _done; return rest })
+      setAnnouncement(made.content)
     } catch (error) {
-      setCardState((current) => ({ ...current, [message.key]: 'failed' }))
-      setNotice(error instanceof Error ? error.message : 'Flashcards couldn’t be made. Try again.')
+      setPicking((current) => ({ ...current, [message.key]: { busy: false, error: error instanceof ApiError || error instanceof Error ? error.message : 'That didn’t work. Try again.' } }))
     }
+  }
+
+  /* "New quiz on this": another quiz from the same material, with new questions, as a new reply. */
+  async function newQuiz(noteId: string, count: number) {
+    if (!token || activeId === NEW) return
+    const threadId = activeId
+    try {
+      const made = await ottoMake(token, threadId, { kind: 'quiz', note_id: noteId, count })
+      pinned.current = true
+      setThreads((current) => ({ ...current, [threadId]: [...(current[threadId] ?? []), toLocal(made)] }))
+    } catch (error) {
+      setNotice(error instanceof Error && error.message ? error.message : 'A new quiz couldn’t be written right now. Try again.')
+    }
+  }
+
+  function openDeck(deck: OttoDeck) {
+    try { data.saveNotebook({ ...data.loadNotebook(), activeCourse: deck.course, activeUnit: deck.unit }) } catch { /* Study opens on its default unit */ }
+    window.location.hash = '#tools?view=cards'
   }
 
   function openUnit(courseName: string, unitName: string) {
@@ -929,8 +954,11 @@ export function Tutor({ session }: { session: AuthSession | null }) {
               const sourceUnit = message.groundedIn?.unit || active?.unit || unit
               // A study guide Otto made for this reply ("guide:<id>:<kind>"), shown as a card that opens it in Study.
               const guides = isReply ? message.attachments.map(guideFromAttachment).filter((item) => item !== null) : []
-              const files = guides.length ? [] : message.attachments
-              const followUps = done && !smallTalk && last && message.model_tier !== 'study_guide'
+              // A deck, a quiz or a "which unit?" picker Otto made for this reply (lib/ottoMake.ts).
+              const made = isReply ? message.attachments.map(ottoMadeFrom).filter((item): item is OttoMade => item !== null) : []
+              const files = guides.length || made.length ? [] : message.attachments
+              const makingNow = message.status === 'streaming' && message.making && !message.content
+              const followUps = done && !smallTalk && last && message.model_tier !== 'study_guide' && message.model_tier !== 'otto_make'
               return (
                 <article key={message.key} className={`tutor-message is-${message.role}${message.status ? ` is-${message.status}` : ''}${last ? ' is-latest' : ''}`} aria-busy={message.status === 'streaming' || undefined}>
                   {isReply ? <img className="tutor-message__avatar" src={MASCOT} alt="" width="28" height="28" decoding="async" loading="lazy" /> : null}
@@ -942,8 +970,20 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                       <div className="tutor-message__files">{files.map((name) => <span key={name}><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>{name}</span>)}</div>
                     ) : null}
                     {isReply
-                      ? <OttoReply content={message.content} streaming={message.status === 'streaming'} partial={message.status === 'stopped'} context={message.thinking} />
+                      ? makingNow && message.making
+                        ? <OttoMaking label={makingLabel(message.making)} />
+                        : <OttoReply content={message.content} streaming={message.status === 'streaming'} partial={message.status === 'stopped'} context={message.thinking} />
                       : <p className="tutor-message__text">{message.content}</p>}
+                    {token && !message.status ? made.map((item) => item.type === 'deck' ? (
+                      <OttoDeckCard key={item.noteId} noteId={item.noteId} accessToken={token} tone={toneOf(sourceCourse)} onOpenStudy={openDeck} />
+                    ) : item.type === 'quiz' ? (
+                      <InlineQuiz key={item.testId} testId={item.testId} accessToken={token} title={active?.title && active.title !== 'New conversation' ? active.title : undefined}
+                        onNewQuiz={(count) => newQuiz(item.noteId, count)} fullTest />
+                    ) : (
+                      <OttoPicker key={`pick-${item.kind}`} kind={item.kind} count={item.count} courses={notebook.courses} initialCourse={course} initialUnit={unit}
+                        busy={Boolean(picking[message.key]?.busy)} error={picking[message.key]?.error ?? ''}
+                        onPick={(pickCourse, pickUnit, count) => void resolvePick(message, item.kind, pickCourse, pickUnit, count)} />
+                    )) : null}
                     {guides.map((guide) => {
                       const kind = guideKind(guide.kind)
                       return (
@@ -996,11 +1036,20 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                         {FOLLOW_UPS.map((item) => (
                           <button key={item.id} type="button" className="tutor-followups__chip" disabled={streaming} onClick={() => send(item.prompt, [])}>{item.label}</button>
                         ))}
-                        {course && unit && message.id ? (
-                          <button type="button" className="tutor-followups__chip" disabled={streaming || cardState[message.key] === 'making' || cardState[message.key] === 'done'} onClick={() => void makeFlashcards(message)}>
-                            <Icon name="cards" />{cardState[message.key] === 'making' ? 'Making flashcards…' : cardState[message.key] === 'done' ? 'Flashcards saved' : 'Make flashcards'}
+                        <button type="button" className="tutor-followups__chip is-deck" disabled={streaming} onClick={() => send(makePrompt('flashcards'), [])}>
+                          <Icon name="cards" />Make flashcards
+                        </button>
+                        {quizChooser === message.key ? (
+                          <span className="tutor-followups__counts" role="group" aria-label="Practice test length">
+                            {QUIZ_COUNTS.map((count) => (
+                              <button key={count} type="button" className="tutor-followups__chip is-quiz" disabled={streaming} onClick={() => { setQuizChooser(''); send(makePrompt('quiz', count), []) }}>{count} questions</button>
+                            ))}
+                          </span>
+                        ) : (
+                          <button type="button" className="tutor-followups__chip is-quiz" disabled={streaming} aria-expanded={false} onClick={() => setQuizChooser(message.key)}>
+                            <Icon name="check" />Practice test
                           </button>
-                        ) : null}
+                        )}
                       </div>
                     ) : null}
                   </div>
