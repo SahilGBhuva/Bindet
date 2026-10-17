@@ -1046,8 +1046,8 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
   const openDay = (day: string) => {
     setFocus(day)
     window.requestAnimationFrame(() => {
-      dayListRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       dayListRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true })
+      dayListRef.current?.scrollIntoView({ block: 'nearest' })
     })
   }
 
@@ -1158,7 +1158,7 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
           </ul>
         ) : <span className="tasks-cal__next-none">Nothing coming up.</span>}
         {undated.length ? (
-          <button type="button" className="ui-link tasks-cal__undated-link" onClick={() => { trayRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); trayRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true }) }}>
+          <button type="button" className="ui-link tasks-cal__undated-link" onClick={() => { trayRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true }); trayRef.current?.scrollIntoView({ block: 'nearest' }) }}>
             {undated.length} with no date
           </button>
         ) : null}

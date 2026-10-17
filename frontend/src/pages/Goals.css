@@ -1207,7 +1207,13 @@
   }
   .tasks-notice { justify-self: stretch; width: auto; margin: var(--space-4) 0 0 8px; }
   .tasks-hero { gap: var(--space-3); padding: var(--space-4); }
-  .tasks-hero__top { flex-wrap: wrap; }
+  /* Icon, title and date on the first row; Refresh and Add task share the second. */
+  .tasks-hero__top { flex-wrap: wrap; row-gap: var(--space-3); }
+  .tasks-hero__text { flex: 1 1 180px; }
+  .tasks-hero__date { white-space: nowrap; }
+  .tasks-hero__actions { flex: 1 1 100%; }
+  .tasks-hero__actions .tasks-add { flex: 1; }
+  .tasks-stat__label { white-space: normal; line-height: 1.25; }
   .tasks-hero__icon { width: 40px; height: 40px; }
   .tasks-title { font-size: var(--text-xl); }
   .tasks-hero__refresh { width: 44px; height: 44px; }
