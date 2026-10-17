@@ -1322,7 +1322,9 @@
   background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 34%, var(--color-surface)) 0%, color-mix(in srgb, var(--tone) 14%, var(--color-surface)) 100%);
 }
 :root[data-theme="dark"] .profile-stat__icon,
-:root[data-theme="dark"] .profile__head-icon { background: var(--tone); color: #fff; }
+/* White on the plain dark-theme tones is under 3:1 for amber, orange, teal and green; three
+   parts tone to one part black brings every hue to 4.7:1 or better. */
+:root[data-theme="dark"] .profile__head-icon { background: color-mix(in srgb, var(--tone) 75%, #000); color: #fff; }
 :root[data-theme="dark"] .profile-stat__label,
 :root[data-theme="dark"] .profile-stat__value { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
 :root[data-theme="dark"] .profile-stat__value small,
@@ -1359,7 +1361,7 @@
 :root[data-theme="dark"] .profile__group-mark,
 :root[data-theme="dark"] .profile__group-open { border-color: color-mix(in srgb, var(--tone) 70%, #000); background: color-mix(in srgb, var(--tone) 70%, #000); color: #fff; }
 :root[data-theme="dark"] .profile__group-card-meter { background: color-mix(in srgb, var(--tone) 26%, var(--color-surface)); }
-:root[data-theme="dark"] .profile__placeholder-icon { background: var(--tone); color: #fff; }
+:root[data-theme="dark"] .profile__placeholder-icon { background: color-mix(in srgb, var(--tone) 75%, #000); color: #fff; }
 :root[data-theme="dark"] .profile__avatar-stack .ui-avatar { border-color: var(--color-surface); }
 
 :root[data-theme="dark"] .profile__suggest-add { border-color: color-mix(in srgb, var(--color-blue) 55%, var(--color-surface)); background: color-mix(in srgb, var(--color-blue) 24%, var(--color-surface)); }

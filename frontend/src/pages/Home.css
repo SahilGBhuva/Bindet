@@ -814,7 +814,9 @@
   border-color: color-mix(in srgb, var(--tone) 46%, var(--color-surface));
   background: linear-gradient(150deg, color-mix(in srgb, var(--tone) 34%, var(--color-surface)) 0%, color-mix(in srgb, var(--tone) 14%, var(--color-surface)) 100%);
 }
-:root[data-theme="dark"] .home-today__icon { background: var(--tone); color: #fff; }
+/* White on the plain dark-theme tones is under 3:1 for amber, orange, teal and green; three
+   parts tone to one part black brings every hue to 4.7:1 or better. */
+:root[data-theme="dark"] .home-today__icon { background: color-mix(in srgb, var(--tone) 75%, #000); color: #fff; }
 :root[data-theme="dark"] .home-today__label,
 :root[data-theme="dark"] .home-today__value { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
 :root[data-theme="dark"] .home-today__value small { color: color-mix(in srgb, var(--tone-text) 40%, #fff); opacity: .85; }

@@ -698,7 +698,9 @@
 }
 
 :root[data-theme="dark"] .instant__step-bar { background: color-mix(in srgb, var(--color-violet) 22%, var(--color-surface-sunken)); }
-:root[data-theme="dark"] .instant-chip { background: var(--tone); color: #ffffff; }
+/* White on the plain dark-theme tones is under 3:1 for amber, orange, teal and green; three
+   parts tone to one part black brings every hue to 4.7:1 or better. */
+:root[data-theme="dark"] .instant-chip { background: color-mix(in srgb, var(--tone) 75%, #000); color: #ffffff; }
 :root[data-theme="dark"] .instant-points__list li { background: color-mix(in srgb, var(--course, var(--color-blue)) 22%, var(--color-surface)); border-color: color-mix(in srgb, var(--course, var(--color-blue)) 40%, var(--color-surface)); }
 :root[data-theme="dark"] .instant-card {
   border-color: color-mix(in srgb, var(--course, var(--color-blue)) 50%, var(--color-surface));
@@ -731,7 +733,7 @@
 :root[data-theme="dark"] .instant-stat__note { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
 :root[data-theme="dark"] .instant-stat__meter { background: color-mix(in srgb, var(--tone) 30%, var(--color-surface)); }
 :root[data-theme="dark"] .instant-way { border-color: color-mix(in srgb, var(--tone) 46%, var(--color-surface)); background: color-mix(in srgb, var(--tone) 20%, var(--color-surface)); }
-:root[data-theme="dark"] .instant-way .ui-icon { background: var(--tone); color: #ffffff; }
+:root[data-theme="dark"] .instant-way .ui-icon { background: color-mix(in srgb, var(--tone) 75%, #000); color: #ffffff; }
 
 @media (prefers-reduced-motion: reduce) {
   .instant-done__card { animation: none; }
