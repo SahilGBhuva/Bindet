@@ -7,6 +7,7 @@ import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
 import { InstallBindit } from '../components/AppPrompts'
 import { PlanBadge } from '../components/PlanBadge'
+import { ClassroomConnections } from '../components/classroom/ClassroomConnections'
 import { planLabel } from '../lib/planLabels'
 import { OttoMemoryPanel } from '../components/otto/OttoMemoryPanel'
 import { OttoPreferences } from '../components/otto/OttoPreferences'
@@ -93,7 +94,8 @@ export function Settings({ session, onSession }: SettingsProps) {
     let timer = 0
     const openHelp = () => {
       const target = /[?&]help\b/.test(window.location.hash) ? 'settings-help'
-        : /[?&]section=plan\b/.test(window.location.hash) ? 'settings-plan' : ''
+        : /[?&]section=plan\b/.test(window.location.hash) ? 'settings-plan'
+        : /[?&]section=classroom\b/.test(window.location.hash) ? 'settings-classroom' : ''
       if (!target) return
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
@@ -423,6 +425,10 @@ export function Settings({ session, onSession }: SettingsProps) {
                 <OttoMemoryPanel token={session.access_token} />
               </div>
             </div>
+          </Section>
+
+          <Section id="settings-classroom" title="Google Classroom" copy="Bring each class’s assignments into Tasks with their due dates, kept in sync. Priorities follow how soon work is due, and longer instructions become notes.">
+            <ClassroomConnections session={session} />
           </Section>
 
           {appearance}

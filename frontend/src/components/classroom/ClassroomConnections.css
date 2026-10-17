@@ -1,0 +1,127 @@
+/* Settings → Google Classroom: how-to card, connect form, connected classes. */
+
+.classroom { display: grid; gap: var(--space-4); min-width: 0; }
+.classroom .ui-button { border-radius: var(--radius-full); }
+.classroom .ui-button--primary,
+.classroom__dialog .ui-button--primary { color: #ffffff; }
+
+/* How-to: a blue-tinted card with an icon chip and numbered steps */
+
+.classroom__how {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-color: color-mix(in srgb, var(--tone) 28%, var(--color-border));
+  background: color-mix(in srgb, var(--tone-tint) 70%, var(--color-surface));
+}
+.classroom__how-head { display: flex; align-items: flex-start; gap: var(--space-3); }
+.classroom__icon { width: 44px; height: 44px; background: var(--color-surface); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 25%, transparent); }
+.classroom__icon svg { width: 22px; height: 22px; }
+.classroom__title { margin: 0; color: var(--color-text); font-size: var(--text-md); font-weight: var(--weight-semibold); line-height: var(--leading-tight); }
+.classroom__copy { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; }
+
+.classroom__steps { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.classroom__steps li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  counter-increment: step;
+}
+.classroom__steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: var(--tone);
+  color: #ffffff;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+.classroom__steps b { font-weight: var(--weight-semibold); }
+
+.classroom__features { display: grid; gap: var(--space-2); margin: 0; padding: var(--space-3) 0 0; border-top: 1px solid color-mix(in srgb, var(--tone) 18%, var(--color-border)); list-style: none; }
+.classroom__features li { color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.5; }
+.classroom__features .ui-badge { margin-right: var(--space-1); vertical-align: 1px; }
+.classroom__secret { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); line-height: 1.5; }
+
+/* Connect form */
+
+.classroom__form { display: grid; gap: var(--space-4); padding: var(--space-5); }
+.classroom__field { display: grid; gap: 6px; min-width: 0; }
+.classroom__input { min-height: 44px; font-size: 16px; }
+.classroom__input-wrap { position: relative; display: block; }
+.classroom__input-wrap .classroom__input { padding-left: 40px; }
+.classroom__input-icon {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-tertiary);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.classroom__input-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.classroom__input-wrap.is-ok .classroom__input-icon { color: var(--color-green-text); }
+.classroom__input-wrap.is-ok .classroom__input { border-color: var(--color-green); }
+.classroom__input[aria-invalid="true"] { border-color: var(--color-danger); }
+.classroom__hint { color: var(--color-text-tertiary); font-size: var(--text-xs); line-height: 1.45; overflow-wrap: anywhere; }
+.classroom__hint.is-error { color: var(--color-danger); }
+.classroom__hint.is-ok { color: var(--color-green-text); font-weight: var(--weight-medium); }
+
+.classroom__course { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-3); }
+.classroom__actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-3); }
+.classroom__actions .settings__status { margin-right: auto; }
+.classroom__connect { min-width: 132px; height: 44px; padding: 0 22px; font-size: var(--text-sm); }
+
+/* Connected classes */
+
+.classroom__list { display: grid; gap: var(--space-3); }
+.classroom__list-title { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; color: var(--color-text); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.classroom__empty { margin: 0; padding: var(--space-4); border: 1px dashed var(--color-border-strong); border-radius: var(--radius-lg); color: var(--color-text-secondary); font-size: var(--text-sm); }
+.classroom__skeleton { height: 112px; border-radius: var(--radius-lg); }
+.classroom__feeds { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+
+.classroom__feed {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+  background: color-mix(in srgb, var(--course, var(--color-accent)) 5%, var(--color-surface));
+  box-shadow: inset 4px 0 0 var(--course, var(--color-accent));
+}
+.classroom__feed-head { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.classroom__feed-head .ui-course-mark { width: 40px; height: 40px; border-radius: var(--radius-md); font-size: var(--text-base); }
+.classroom__feed-text { display: grid; gap: 4px; min-width: 0; }
+.classroom__feed-course { color: var(--color-text); font-size: var(--text-md); font-weight: var(--weight-semibold); overflow-wrap: anywhere; }
+.classroom__feed-url { color: var(--color-text-tertiary); font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.classroom__feed-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); color: var(--color-text-secondary); font-size: var(--text-xs); }
+.classroom__problem { margin: 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--color-warning-subtle); color: var(--color-warning); font-size: var(--text-sm); line-height: 1.45; }
+
+.classroom__toggle { display: flex; align-items: center; gap: var(--space-3); min-height: 32px; color: var(--color-text); font-size: var(--text-sm); cursor: pointer; }
+.classroom__feed-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.classroom__feed-actions .ui-button { height: 36px; padding: 0 16px; font-size: var(--text-sm); }
+
+.classroom__dialog { width: min(520px, 100%); }
+.classroom__dialog-body { padding: var(--space-5) var(--space-6); }
+.classroom__dialog-body p { margin: 0; color: var(--color-text-secondary); line-height: 1.5; }
+.classroom__dialog .ui-button { min-height: 44px; border-radius: var(--radius-full); }
+.classroom__dialog-footer { flex-wrap: wrap; }
+
+@media (max-width: 560px) {
+  .classroom__how,
+  .classroom__form { padding: var(--space-4); }
+  .classroom__connect { width: 100%; }
+  .classroom__actions { justify-content: stretch; }
+  .classroom__feed { padding: var(--space-4); }
+  .classroom__feed-actions .ui-button { flex: 1; min-height: 44px; }
+  .classroom__dialog-body { padding: var(--space-4); }
+  .classroom__dialog-footer { flex-direction: column-reverse; padding: var(--space-4); }
+  .classroom__dialog-footer .ui-button { width: 100%; }
+}
