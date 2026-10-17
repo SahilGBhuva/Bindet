@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, text
 
 import base64
@@ -3177,9 +3177,17 @@ def make_note_flashcards(
 
 
 class NoteFlashcardsRemake(BaseModel):
-    """Remake one note's cards, steered by the student's instructions (untrusted, see ai_tutor)."""
+    """Remake one note's cards, steered by the student's instructions (untrusted, see ai_tutor)
+    or by a level (easy | medium | hard), which picks a fixed server-side preset. Exactly one."""
     model_config = ConfigDict(extra="forbid")
-    instructions: str = Field(min_length=1, max_length=200)
+    instructions: str | None = Field(default=None, min_length=1, max_length=200)
+    level: Literal["easy", "medium", "hard"] | None = None
+
+    @model_validator(mode="after")
+    def _one_kind(self):
+        if (self.instructions is None) == (self.level is None):
+            raise ValueError("Send instructions or a level")
+        return self
 
 
 @app.post("/api/notes/{note_id}/flashcards/remake")
@@ -3188,17 +3196,24 @@ def remake_note_flashcards(
     data: NoteFlashcardsRemake,
     authorization: Annotated[str | None, Header()] = None,
 ):
-    """Replace a note's cards with ones made using the student's instructions.
+    """Replace a note's cards with ones made using the student's instructions or a level.
 
     Idempotent per (note, instructions): asking again with the same instructions returns
     the stored cards without an AI call. Counts against the same daily flashcard limit as
     normal generation, and the cards pass the same validation and grounding check.
+    A level uses its fixed preset (ai_tutor.FLASHCARD_LEVEL_PRESETS) as the instructions;
+    medium is the plain deck, so it shares the plain cards' cache. Remaking replaces the
+    note's cards: review progress is kept only for cards whose front is unchanged
+    (flashcards.replace), and switching back to a level reuses its cached cards.
     """
     owner = ai_user(authorization)["id"]
-    instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
-    if not instructions:
-        raise instructions_error()
-    steering = ai_tutor.instructions_hash(instructions)
+    if data.level is not None:
+        instructions, steering = ai_tutor.flashcard_level_steering(data.level)
+    else:
+        instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
+        if not instructions:
+            raise instructions_error()
+        steering = ai_tutor.instructions_hash(instructions)
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
     flashcards.init_flashcards()
@@ -3207,7 +3222,7 @@ def remake_note_flashcards(
         raise HTTPException(status_code=404, detail="Note not found")
     if state["status"] == "generating" and not state["interrupted"]:
         raise ai_error(409, "generation_in_progress")
-    if state["status"] == "ready" and style == steering:
+    if state["status"] == "ready" and (style or "") == steering:
         return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
     text = ai_tutor.flashcard_source_text(note["text"])
     if ai_tutor.note_too_short(text):

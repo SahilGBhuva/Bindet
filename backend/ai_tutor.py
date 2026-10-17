@@ -784,6 +784,36 @@ def _request_flashcards(*, course: str, unit: str, file_label: str, note_text: s
     return FlashcardBatch(cards=cards, received=received, requested=count)
 
 
+# Flashcard levels. Each is a fixed, server-side preset sent through the same preferences
+# path as a student's own instructions (so it is cached per note and level, and every
+# grounding check still applies). Medium is the plain deck: no preset at all.
+FLASHCARD_LEVELS = ("easy", "medium", "hard")
+FLASHCARD_LEVEL_PRESETS = {
+    "easy": ("Easy cards: one key term to its definition, or one single fact, per card. Keep every back short: "
+             "a word, name, number or one short sentence."),
+    "medium": "",
+    "hard": ("Hard cards: why and how questions, applying ideas, compare and contrast, multi-step and cause to effect. "
+             "Every answer must still come only from these notes."),
+}
+
+
+def flashcard_level_steering(level: str) -> tuple[str, str]:
+    """(instructions, instructions_hash) for a level; ("", "") for medium, the plain deck."""
+    preset = FLASHCARD_LEVEL_PRESETS[level]
+    return preset, instructions_hash(preset)
+
+
+def flashcard_level_of(style_hash: str | None) -> str:
+    """Which level a note's cards were made at, from its flashcard_styles hash: medium for
+    plain cards (no row or ""), "custom" for the student's own instructions."""
+    if not style_hash:
+        return "medium"
+    for level in FLASHCARD_LEVELS:
+        if level != "medium" and instructions_hash(FLASHCARD_LEVEL_PRESETS[level]) == style_hash:
+            return level
+    return "custom"
+
+
 def generate_note_flashcards(*, course: str, unit: str, file_name: str, note_text: str, session_id: str | None = None, instructions: str = "") -> FlashcardBatch:
     """Flashcards for one note, sized to its length. Raises AIBadOutput or AITutorError."""
     text = flashcard_source_text(note_text)
