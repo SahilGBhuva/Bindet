@@ -24,10 +24,44 @@ class LatexTests(unittest.TestCase):
             os.unlink(TEST_DB.name)
 
     def test_prompts_ask_for_latex_only_for_math(self):
-        for prompt in (ai_tutor.QUIZ_PROMPT_GROUNDED, ai_tutor.QUIZ_PROMPT_GENERAL, ai_tutor.FLASHCARD_PROMPT, ai_tutor.TUTOR_SYSTEM_PROMPT):
-            self.assertIn(ai_tutor.MATH_STYLE, prompt)
+        self.assertIn(ai_tutor.MATH_STYLE, ai_tutor.TUTOR_SYSTEM_PROMPT)
         self.assertIn("LaTeX", ai_tutor.GRADE_PROMPT)
         self.assertNotIn("plain text math", ai_tutor.TUTOR_SYSTEM_PROMPT)
+
+    def test_study_item_prompts_require_inline_latex_for_every_piece_of_math(self):
+        import study_guides
+        prompts = {
+            "quiz grounded": ai_tutor.QUIZ_PROMPT_GROUNDED, "quiz general": ai_tutor.QUIZ_PROMPT_GENERAL,
+            "flashcards": ai_tutor.FLASHCARD_PROMPT, "grading": ai_tutor.GRADE_PROMPT, "test grading": ai_tutor.GRADE_TEST_PROMPT,
+            "study guides": study_guides.GUIDE_PROMPT,
+            **{f"practice {level}": ai_tutor.practice_test_prompt(level) for level in ai_tutor.PRACTICE_DIFFICULTIES},
+        }
+        for name, prompt in prompts.items():
+            self.assertIn(ai_tutor.MATH_LATEX_RULE, prompt, name)
+        for example in ("$\\frac{\\pi}{4}$", "$2\\pi$", "$180^\\circ$", "$x^2$", "$\\sqrt{2}$", "$C_6H_{12}O_6$"):
+            self.assertIn(example, ai_tutor.MATH_LATEX_RULE)
+        self.assertIn("Plain words", ai_tutor.MATH_LATEX_RULE)
+        self.assertIn("including inside answers and choices", ai_tutor.MATH_LATEX_RULE)
+
+    def test_changing_a_quiz_prompt_changes_the_question_bank_key(self):
+        key = main.question_cache_key("a", "Math", "Trig", "mixed", 2, TRIG_NOTES)
+        self.assertEqual(key, main.question_cache_key("a", "Math", "Trig", "mixed", 2, TRIG_NOTES))
+        from unittest.mock import patch
+        with patch.object(ai_tutor, "QUIZ_PROMPT_VERSION", "older"):
+            self.assertNotEqual(key, main.question_cache_key("a", "Math", "Trig", "mixed", 2, TRIG_NOTES))
+
+    def test_math_answers_match_in_latex_unicode_or_words(self):
+        same = [
+            ("π/2", "$\\frac{\\pi}{2}$"), ("pi/2", "$\\frac{\\pi}{2}$"), ("$\\frac{\\pi}{2}$", "π/2"), ("\\frac\\pi2", "pi/2"),
+            ("2π", "$2\\pi$"), ("2 pi radians", "$2\\pi$ radians"), ("180°", "$180^\\circ$"), ("180 degrees", "$180^\\circ$"),
+            ("x²", "$x^2$"), ("√2", "$\\sqrt{2}$"), ("sqrt 2", "$\\sqrt{2}$"), ("C6H12O6", "$C_6H_{12}O_6$"), ("C₆H₁₂O₆", "$C_6H_{12}O_6$"),
+        ]
+        for student, reference in same:
+            self.assertTrue(main.deterministic_verdict(student, reference), (student, reference))
+            self.assertEqual(ai_tutor.math_answer_key(student), ai_tutor.math_answer_key(reference), (student, reference))
+        different = [("π/4", "$\\frac{\\pi}{2}$"), ("x2", "$x^2$"), ("10^2", "102"), ("2 3", "23"), ("2*3", "23"), ("$\\sqrt{3}$", "√2")]
+        for student, reference in different:
+            self.assertNotEqual(main.deterministic_verdict(student, reference), True, (student, reference))
 
     def test_latex_cards_pass_validation_and_grounding(self):
         cards = [

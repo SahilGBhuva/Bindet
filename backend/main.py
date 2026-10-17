@@ -24,7 +24,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 from sqlalchemy import func, select, text
 
 import base64
@@ -314,7 +314,7 @@ def question_cache_key(student_id: str, course: str, unit: str, focus: str, diff
     Questions made with a student's instructions are personal too, and keyed by their hash."""
     owner_scope = "shared" if question_scope_is_shared(source_text) and not instructions_hash else student_id
     source_fingerprint = hashlib.blake2s(source_text.encode("utf-8"), digest_size=12).hexdigest() if source_text else "none"
-    parts = [owner_scope, course, unit, focus, str(difficulty), source_fingerprint]
+    parts = [owner_scope, course, unit, focus, str(difficulty), source_fingerprint, "prompt:" + ai_tutor.QUIZ_PROMPT_VERSION]
     if instructions_hash:
         parts.append("instructions:" + instructions_hash)
     return ai_session_id(*parts)
@@ -907,6 +907,7 @@ def deterministic_verdict(student_answer: str, correct_answer: str, topic: str =
     LaTeX on either side is read as plain text first, so "$\\frac{1}{2}$", "\\frac12"
     and "1/2" are the same answer.
     """
+    math_key, original_correct = ai_tutor.math_answer_key(student_answer), correct_answer
     student_answer = ai_tutor.latex_to_plain(student_answer)
     correct_answer = ai_tutor.latex_to_plain(correct_answer)
     if not canonical_answer(student_answer):
@@ -923,6 +924,9 @@ def deterministic_verdict(student_answer: str, correct_answer: str, topic: str =
             return False
         return None
     if canonical_answer(student_answer) == canonical_answer(correct_answer):
+        return True
+    # The same math written another way: "$\\frac{\\pi}{2}$", "π/2" and "pi/2"; "180°" and "180 degrees".
+    if math_key and math_key == ai_tutor.math_answer_key(original_correct):
         return True
     return None
 
@@ -3279,9 +3283,17 @@ def make_note_flashcards(
 
 
 class NoteFlashcardsRemake(BaseModel):
-    """Remake one note's cards, steered by the student's instructions (untrusted, see ai_tutor)."""
+    """Remake one note's cards, steered by the student's instructions (untrusted, see ai_tutor)
+    or by a level (easy | medium | hard), which picks a fixed server-side preset. Exactly one."""
     model_config = ConfigDict(extra="forbid")
-    instructions: str = Field(min_length=1, max_length=200)
+    instructions: str | None = Field(default=None, min_length=1, max_length=200)
+    level: Literal["easy", "medium", "hard"] | None = None
+
+    @model_validator(mode="after")
+    def _one_kind(self):
+        if (self.instructions is None) == (self.level is None):
+            raise ValueError("Send instructions or a level")
+        return self
 
 
 @app.post("/api/notes/{note_id}/flashcards/remake")
@@ -3290,17 +3302,24 @@ def remake_note_flashcards(
     data: NoteFlashcardsRemake,
     authorization: Annotated[str | None, Header()] = None,
 ):
-    """Replace a note's cards with ones made using the student's instructions.
+    """Replace a note's cards with ones made using the student's instructions or a level.
 
     Idempotent per (note, instructions): asking again with the same instructions returns
     the stored cards without an AI call. Counts against the same daily flashcard limit as
     normal generation, and the cards pass the same validation and grounding check.
+    A level uses its fixed preset (ai_tutor.FLASHCARD_LEVEL_PRESETS) as the instructions;
+    medium is the plain deck, so it shares the plain cards' cache. Remaking replaces the
+    note's cards: review progress is kept only for cards whose front is unchanged
+    (flashcards.replace), and switching back to a level reuses its cached cards.
     """
     owner = ai_user(authorization)["id"]
-    instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
-    if not instructions:
-        raise instructions_error()
-    steering = ai_tutor.instructions_hash(instructions)
+    if data.level is not None:
+        instructions, steering = ai_tutor.flashcard_level_steering(data.level)
+    else:
+        instructions = checked_instructions(data.instructions, owner, "generate_flashcards")
+        if not instructions:
+            raise instructions_error()
+        steering = ai_tutor.instructions_hash(instructions)
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
     flashcards.init_flashcards()
@@ -3309,7 +3328,7 @@ def remake_note_flashcards(
         raise HTTPException(status_code=404, detail="Note not found")
     if state["status"] == "generating" and not state["interrupted"]:
         raise ai_error(409, "generation_in_progress")
-    if state["status"] == "ready" and style == steering:
+    if state["status"] == "ready" and (style or "") == steering:
         return _note_flashcards_result(note_id, "ready", False, flashcards.note_cards(owner, note_id))
     text = ai_tutor.flashcard_source_text(note["text"])
     if ai_tutor.note_too_short(text):
@@ -3664,6 +3683,11 @@ class PracticeTestCreate(BaseModel):
     instructions: str | None = Field(default=None, max_length=200)
     # Skip the saved test for these notes and settings and have the AI write new questions.
     new_questions: bool = False
+    # easy | medium | hard: picks one of the fixed, server-side prompt rules (ai_tutor.PRACTICE_LEVEL_RULES).
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    # Exam conditions in the runner (strict timer, no checking until hand-in). Stored with the
+    # test so a reload keeps it; grading and XP are the same either way.
+    test_mode: bool = False
 
 
 class PracticeAnswer(BaseModel):
@@ -3678,12 +3702,14 @@ class PracticeSubmit(BaseModel):
 
 
 def practice_time_limit(data: PracticeTestCreate, count: int) -> int | None:
-    """Seconds allowed: the student's choice, or 1.5 minutes per question; None when untimed."""
-    if data.untimed:
+    """Seconds allowed: the student's choice, or the level's suggested time per question
+    (practice_tests.SECONDS_PER_QUESTION: Easy 2, Medium 1.5, Hard 1.2 minutes); None when
+    untimed. Test mode is always timed: untimed is ignored there."""
+    if data.untimed and not data.test_mode:
         return None
     if data.time_limit_min is not None:
         return data.time_limit_min * 60
-    return round(count * 90)
+    return round(count * practice_tests.SECONDS_PER_QUESTION[data.difficulty])
 
 
 @app.post("/api/practice-tests", status_code=201)
@@ -3706,7 +3732,8 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         raise practice_error(400, "notes_too_short")
     practice_rate_limit(owner, "practice_test_start", PRACTICE_STARTS_PER_DAY, "You’ve started a lot of practice tests today.")
     steering = ai_tutor.instructions_hash(instructions)
-    cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count, instructions_hash=steering)
+    cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count,
+                                      instructions_hash=steering, difficulty=data.difficulty)
     questions: list[dict] = []
     if not data.new_questions:
         # The same notes, settings and preferences already made a test for this student:
@@ -3729,10 +3756,11 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         try:
             ai_tutor.warm_connection()
             # "New questions": steer away from (and drop) prompts of this student's earlier tests here.
-            avoid = practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX) if data.new_questions else None
+            avoid = (practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX, difficulty=data.difficulty)
+                     if data.new_questions else None)
             batch = ai_tutor.generate_practice_test(
                 course=course, unit=unit or "", note_text=text, count=count, instructions=instructions,
-                session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid,
+                session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid, difficulty=data.difficulty,
             )
         except ai_tutor.AIBadOutput as exc:
             log("bad_output", error=exc)
@@ -3746,7 +3774,8 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
             # Tied to every note it was written from: deleting any of them deletes it.
             for note_id in note_ids:
                 ai_cache.add_ref("practice_test_cache", cache_key, owner, note_id)
-    return practice_tests.create_test(owner, course, unit, time_limit_s, practice_tests.shuffled_choices(questions))
+    return practice_tests.create_test(owner, course, unit, time_limit_s, practice_tests.shuffled_choices(questions),
+                                      difficulty=data.difficulty, test_mode=data.test_mode)
 
 
 @app.get("/api/practice-tests")
@@ -3845,7 +3874,7 @@ def submit_practice_test(
         limit = test["time_limit_s"]
         over_time = bool(limit) and submitted_at > started_at + timedelta(seconds=int(limit) + practice_tests.GRACE_SECONDS)
         # finish() caps this by today's practice-test XP left, inside its lock.
-        earned = practice_tests.XP_PER_CORRECT * sum(1 for result in results.values() if result["correct"])
+        earned = practice_tests.xp_for(sum(1 for result in results.values() if result["correct"]), practice_tests.difficulty_of(test))
         public = practice_tests.finish(owner, test_id, token, results, submitted_at=submitted_at, over_time=over_time, xp=earned)
         xp = int(public["xp_earned"])
     except practice_tests.Conflict as error:

@@ -442,6 +442,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
   const practiceSummary = (test: PracticeTest): PracticeTestSummary => ({
     id: test.id, course: test.course, unit: test.unit, status: test.status, created_at: test.created_at, submitted_at: test.submitted_at,
     question_count: test.question_count, score: test.score, time_limit_s: test.time_limit_s, deadline: test.deadline, over_time: test.over_time,
+    difficulty: test.difficulty, test_mode: test.test_mode,
   })
   const hidden = (test: PracticeTest): PracticeTest => (test.status === 'submitted' ? structuredClone(test) : {
     ...structuredClone(test),
@@ -556,6 +557,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     deleteNote: locked('remove notes'),
     moveNotes: locked('rename courses and units'),
     remakeNoteFlashcards: locked('make flashcards with your own instructions'),
+    remakeNoteFlashcardsAtLevel: locked('make flashcards at another level'),
     answerFriendRequest: locked('answer friend requests'),
     blockSocialUser: locked('manage friends'),
     createStudyGroup: locked('create a study group'),
@@ -678,6 +680,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
         id, course: options.course, unit: options.unit, status: 'in_progress', created_at: new Date(DEMO_NOW + turn * 60_000).toISOString(),
         started_at: new Date(DEMO_NOW).toISOString(), submitted_at: null, time_limit_s: null, deadline: null, server_now: new Date(DEMO_NOW).toISOString(),
         question_count: questions.length, score: null, over_time: false, xp_earned: 0,
+        difficulty: options.difficulty ?? 'medium', test_mode: Boolean(options.testMode),
         items: questions.map((question, position) => ({ position, type: question.type, prompt: question.prompt, choices: [...question.choices] })),
       }
       practice.set(id, { test, questions })
@@ -708,10 +711,12 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
         topic.weak = topic.correct / topic.total < 0.7
         topics.set(topic.topic, topic)
       }
-      stats.total_xp += score * 2
+      // Like the server (practice_tests.xp_for): Hard earns 1.5x, rounded down.
+      const xp = Math.floor(score * 2 * (entry.test.difficulty === 'hard' ? 1.5 : 1))
+      stats.total_xp += xp
       profile.total_xp = stats.total_xp
       entry.test = {
-        ...entry.test, status: 'submitted', submitted_at: new Date(DEMO_NOW + 6 * 60_000).toISOString(), score, xp_earned: score * 2,
+        ...entry.test, status: 'submitted', submitted_at: new Date(DEMO_NOW + 6 * 60_000).toISOString(), score, xp_earned: xp,
         items, topics: [...topics.values()], time_used_s: 6 * 60, total_xp: stats.total_xp,
       }
       return wait(hidden(entry.test), 500)

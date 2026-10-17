@@ -1,3 +1,4 @@
+import type { Level } from './levels'
 import { ACCOUNT_DATA_CLEARED_EVENT, loadAuthSession, refreshAuthSession } from './auth'
 import { getStudentId } from './session'
 import { isoDay } from './time'
@@ -32,6 +33,8 @@ export type NoteFlashcardState = {
   card_count: number
   error: string | null
   updated_at: string | null
+  // The level the note's cards were made at; custom: the student's own instructions. Missing: medium.
+  level?: Level | 'custom'
 }
 export type NoteFlashcardsResult = { note_id: string; status: 'ready' | 'too_short'; created: boolean; cards: Flashcard[] }
 export type FlashcardLibrary = { cards: Flashcard[]; notes: NoteFlashcardState[] }
@@ -513,6 +516,17 @@ export function listNotes(course: string, unit: string, accessToken?: string, si
   return request<UploadedNote[]>(`/api/notes?${query}`, { signal }, accessToken)
 }
 
+/* Replaces a note's flashcards with ones made at a level (a fixed preset on the server).
+ * Asking again for the level the cards are already at returns the saved cards. */
+export function remakeNoteFlashcardsAtLevel(noteId: string, level: Level, accessToken?: string, signal?: AbortSignal) {
+  return request<NoteFlashcardsResult>(`/api/notes/${encodeURIComponent(noteId)}/flashcards/remake`, {
+    method: 'POST',
+    body: JSON.stringify({ level }),
+    signal,
+    timeoutMs: AI_TIMEOUTS.flashcards,
+  }, accessToken)
+}
+
 /* Writes and saves flashcards for one note, or returns the ones already saved. */
 export function generateNoteFlashcards(noteId: string, options?: { retry?: boolean }, accessToken?: string, signal?: AbortSignal) {
   const query = options?.retry ? '?retry=1' : ''
@@ -567,8 +581,11 @@ export type PracticeTest = {
   time_used_s?: number | null
   topics?: PracticeTopic[]
   total_xp?: number
+  // Missing on older servers and tests: medium, not test mode.
+  difficulty?: Level
+  test_mode?: boolean
 }
-export type PracticeTestSummary = Pick<PracticeTest, 'id' | 'course' | 'unit' | 'status' | 'created_at' | 'submitted_at' | 'question_count' | 'score' | 'time_limit_s' | 'deadline' | 'over_time'>
+export type PracticeTestSummary = Pick<PracticeTest, 'id' | 'course' | 'unit' | 'status' | 'created_at' | 'submitted_at' | 'question_count' | 'score' | 'time_limit_s' | 'deadline' | 'over_time' | 'difficulty' | 'test_mode'>
 export type PracticeTestOptions = {
   course: string
   // null: the whole course.
@@ -579,6 +596,9 @@ export type PracticeTestOptions = {
   instructions?: string
   // Ask for new questions instead of retaking the saved test for these notes and settings.
   newQuestions?: boolean
+  // Easy / Medium / Hard (default medium) and exam conditions in the runner.
+  difficulty?: Level
+  testMode?: boolean
 }
 
 /* Writes a practice test from the unit's (or course's) notes, or serves the saved one again. */
@@ -593,6 +613,8 @@ export function createPracticeTest(options: PracticeTestOptions, accessToken?: s
       untimed: options.timeLimitMin === null,
       instructions: options.instructions?.trim() || undefined,
       new_questions: Boolean(options.newQuestions),
+      difficulty: options.difficulty ?? undefined,
+      test_mode: options.testMode ? true : undefined,
     }),
     signal,
     timeoutMs: AI_TIMEOUTS.practiceTest,

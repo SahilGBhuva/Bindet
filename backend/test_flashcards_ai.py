@@ -103,7 +103,7 @@ class NoteFlashcardTests(FlashcardTestCase):
         self.assertEqual([card["id"] for card in listing["cards"]], [card["id"] for card in result["cards"]])
         self.assertEqual(listing["notes"], [{
             "note_id": note_id, "file_name": "photo.txt", "status": "ready", "card_count": 4, "error": None,
-            "updated_at": listing["notes"][0]["updated_at"],
+            "updated_at": listing["notes"][0]["updated_at"], "level": "medium",
         }])
         self.assertIsNotNone(listing["notes"][0]["updated_at"])
 

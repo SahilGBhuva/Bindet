@@ -41,6 +41,7 @@ export type DataSource = {
   listFlashcards: typeof api.listFlashcards
   generateNoteFlashcards: typeof api.generateNoteFlashcards
   remakeNoteFlashcards: typeof api.remakeNoteFlashcards
+  remakeNoteFlashcardsAtLevel: typeof api.remakeNoteFlashcardsAtLevel
   generateQuestion: typeof api.generateQuestion
   analyzeAnswer: typeof api.analyzeAnswer
   uploadNote: typeof api.uploadNote
@@ -126,6 +127,7 @@ export const realData: DataSource = {
   listFlashcards: api.listFlashcards,
   generateNoteFlashcards: api.generateNoteFlashcards,
   remakeNoteFlashcards: api.remakeNoteFlashcards,
+  remakeNoteFlashcardsAtLevel: api.remakeNoteFlashcardsAtLevel,
   generateQuestion: api.generateQuestion,
   analyzeAnswer: api.analyzeAnswer,
   uploadNote: api.uploadNote,

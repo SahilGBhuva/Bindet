@@ -294,6 +294,111 @@ class InstructionTests(unittest.TestCase):
         self.assertEqual(flashcards.job_state("alex", note_id)["status"], "none")
 
 
+    # --- Flashcard levels (Easy / Medium / Hard) --------------------------------------------
+
+    def remake_level(self, note_id, level):
+        with self.as_user():
+            return self.client.post(f"/api/notes/{note_id}/flashcards/remake", json={"level": level}, headers={"Authorization": "Bearer t"})
+
+    def listed_level(self):
+        with self.as_user():
+            listed = self.client.get("/api/flashcards?course=Biology&unit=Photosynthesis", headers={"Authorization": "Bearer t"}).json()
+        return listed["notes"][0]["level"]
+
+    def test_level_presets_are_fixed_short_and_pass_the_screen(self):
+        self.assertEqual(ai_tutor.FLASHCARD_LEVELS, ("easy", "medium", "hard"))
+        self.assertEqual(ai_tutor.flashcard_level_steering("medium"), ("", ""))
+        for level in ("easy", "hard"):
+            preset, steering = ai_tutor.flashcard_level_steering(level)
+            self.assertTrue(preset and steering)
+            self.assertEqual(ai_tutor.clean_instructions(preset), preset)  # never cut by the 200-character limit
+            self.assertFalse(ai_tutor.instructions_rejected(preset))
+            self.assertEqual(ai_tutor.flashcard_level_of(steering), level)
+        self.assertIn("definition", ai_tutor.FLASHCARD_LEVEL_PRESETS["easy"])
+        for words in ("why and how", "compare and contrast", "cause to effect", "only from these notes"):
+            self.assertIn(words, ai_tutor.FLASHCARD_LEVEL_PRESETS["hard"])
+        self.assertEqual(ai_tutor.flashcard_level_of(None), "medium")
+        self.assertEqual(ai_tutor.flashcard_level_of(""), "medium")
+        self.assertEqual(ai_tutor.flashcard_level_of(ai_tutor.instructions_hash("make them harder")), "custom")
+
+    def test_a_level_or_instructions_but_never_both_or_neither_or_free_text(self):
+        note_id = self.note_with_cards()
+        with self.as_user():
+            for body in ({}, {"level": "hard", "instructions": "x y"}, {"level": "extreme"}, {"level": "Hard"},
+                         {"level": "hard", "preset": "anything"}):
+                response = self.client.post(f"/api/notes/{note_id}/flashcards/remake", json=body, headers={"Authorization": "Bearer t"})
+                self.assertEqual(response.status_code, 422, body)
+
+    def test_each_level_sends_its_preset_and_is_cached_per_note_and_level(self):
+        note_id = self.note_with_cards()
+        sent = []
+
+        def fake(**kwargs):
+            sent.append(kwargs["user_content"])
+            return {"cards": BLANK_CARDS}
+
+        self.assertEqual(self.listed_level(), "medium")
+        with patch.object(ai_tutor, "_chat_json", side_effect=fake):
+            hard = self.remake_level(note_id, "hard")
+            self.assertEqual(hard.status_code, 200, hard.text)
+            self.assertEqual(self.listed_level(), "hard")
+            self.assertFalse(self.remake_level(note_id, "hard").json()["created"])  # already Hard: no AI call
+            self.assertEqual(self.remake_level(note_id, "easy").status_code, 200)
+            self.assertEqual(self.listed_level(), "easy")
+            # Back to Hard, then Easy: both are served from the cache, no new AI call.
+            self.remake_level(note_id, "hard")
+            self.remake_level(note_id, "easy")
+        self.assertEqual(len(sent), 2)
+        self.assertIn(ai_tutor.FLASHCARD_LEVEL_PRESETS["hard"], sent[0])
+        self.assertIn(ai_tutor.FLASHCARD_LEVEL_PRESETS["easy"], sent[1])
+        self.assertNotIn(ai_tutor.FLASHCARD_LEVEL_PRESETS["easy"], sent[0])
+        self.assertIn(ai_tutor.PREFS_OPEN, sent[0])  # through the usual preferences block
+        keys = {level: ai_cache.flashcard_key(course="Biology", unit="Photosynthesis", file_name="n.txt", source_text=NOTE_TEXT,
+                                             instructions_hash=ai_tutor.flashcard_level_steering(level)[1]) for level in ai_tutor.FLASHCARD_LEVELS}
+        self.assertEqual(len(set(keys.values())), 3)
+        self.assertEqual(keys["medium"], ai_cache.flashcard_key(course="Biology", unit="Photosynthesis", file_name="n.txt", source_text=NOTE_TEXT))
+
+    def test_medium_is_the_plain_deck_with_no_preferences(self):
+        note_id = self.note_with_cards()
+        sent = []
+
+        def fake(**kwargs):
+            sent.append(kwargs["user_content"])
+            return {"cards": BLANK_CARDS if len(sent) == 1 else PLAIN_CARDS}
+
+        with patch.object(ai_tutor, "_chat_json", side_effect=fake):
+            already = self.remake_level(note_id, "medium")  # plain cards are already Medium
+            self.assertFalse(already.json()["created"])
+            self.remake_level(note_id, "hard")
+            back = self.remake_level(note_id, "medium")
+        self.assertEqual(back.status_code, 200, back.text)
+        self.assertEqual(len(sent), 2)
+        self.assertNotIn(ai_tutor.PREFS_OPEN, sent[1])
+        self.assertEqual(self.listed_level(), "medium")
+
+    def test_level_remakes_keep_grounding_and_the_daily_limit(self):
+        note_id = self.note_with_cards()
+        bad = BLANK_CARDS + [{"front": "Who won the 1998 World Cup?", "back": "France beat Brazil three nil", "topic": "Sport"}]
+        with patch.object(main, "FLASHCARD_NOTES_PER_DAY", 1), patch.object(ai_tutor, "_chat_json", return_value={"cards": bad}):
+            self.assertEqual(len(self.remake_level(note_id, "hard").json()["cards"]), 2)
+            self.assertEqual(self.remake_level(note_id, "easy").status_code, 429)
+
+    def test_remaking_keeps_review_progress_only_for_unchanged_cards(self):
+        note_id = self.note_with_cards()
+        old = {card["front"]: card["id"] for card in flashcards.note_cards("alex", note_id)}
+        for card_id in old.values():
+            main.review.grade("alex", card_id, "good")
+        same = PLAIN_CARDS[0]
+        new = {"front": "What does rubisco fix?", "back": "Carbon dioxide, in the first step of the Calvin cycle.", "topic": "Calvin cycle"}
+        with patch.object(ai_tutor, "_chat_json", return_value={"cards": [same, new]}):
+            self.assertEqual(self.remake_level(note_id, "hard").status_code, 200)
+        cards = {card["front"]: card["id"] for card in flashcards.note_cards("alex", note_id)}
+        reviews = flashcards.reviews
+        with main.database.engine().connect() as connection:
+            reviewed = set(connection.execute(main.select(reviews.c.card_id).where(reviews.c.owner_id == "alex")).scalars().all())
+        self.assertEqual(reviewed, {cards[same["front"]]})
+        self.assertNotIn(old[same["front"]], reviewed)  # moved to the new card, not left behind
+
 
 class HardenedScreenTests(unittest.TestCase):
     """AI-F3: look-alike letters, leetspeak, other languages, encoded blobs and answer leaks."""

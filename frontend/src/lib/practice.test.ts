@@ -27,6 +27,19 @@ describe('suggestedMinutes', () => {
     expect(suggestedMinutes(15)).toBe(23)
     expect(suggestedMinutes(100)).toBe(60)
   })
+
+  it('gives Easy more time a question and Hard less, still between 5 and 60', () => {
+    expect([5, 10, 15].map((count) => suggestedMinutes(count, 'easy'))).toEqual([10, 20, 30])
+    expect([5, 10, 15].map((count) => suggestedMinutes(count, 'medium'))).toEqual([8, 15, 23])
+    expect([5, 10, 15].map((count) => suggestedMinutes(count, 'hard'))).toEqual([6, 12, 18])
+    expect(suggestedMinutes(10)).toBe(suggestedMinutes(10, 'medium'))
+    expect(suggestedMinutes(1, 'hard')).toBe(5)
+    expect(suggestedMinutes(40, 'easy')).toBe(60)
+    for (const count of [5, 10, 15]) {
+      expect(suggestedMinutes(count, 'easy')).toBeGreaterThan(suggestedMinutes(count, 'medium'))
+      expect(suggestedMinutes(count, 'medium')).toBeGreaterThan(suggestedMinutes(count, 'hard'))
+    }
+  })
 })
 
 describe('practice drafts', () => {

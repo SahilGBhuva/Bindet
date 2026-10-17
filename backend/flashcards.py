@@ -340,6 +340,9 @@ def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list
     generating, same attempt number); otherwise Superseded is raised and nothing changes,
     so a slow, stale remake can never overwrite a newer one. The course and unit stored on
     the cards are read from the note row under the note's lock (a rename may have moved it).
+
+    Review progress: a new card with the same front (front_key) as an old one keeps that
+    card's spaced-review state; every other old card's review state goes with it.
     """
     init_flashcards()
     now = _now()
@@ -354,7 +357,12 @@ def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list
             row = _job_row(connection, owner_id, note_id, for_update=True)
             if row is None or row["status"] != "generating" or int(row["attempts"] or 0) != attempt:
                 raise Superseded()
-        # New cards start fresh: the old cards' review state goes with them.
+        # New cards start fresh, except one with the same front as an old card: it keeps that
+        # card's review state (copied over below). The rest of the old review state goes.
+        kept_reviews = {row["front_key"]: dict(row) for row in connection.execute(
+            select(cards.c.front_key, reviews).join(reviews, reviews.c.card_id == cards.c.id)
+            .where(cards.c.note_id == note_id, cards.c.owner_id == owner_id, reviews.c.owner_id == owner_id)
+        ).mappings().all()}
         _delete_note_reviews(connection, owner_id, note_id)
         connection.execute(delete(cards).where(cards.c.note_id == note_id, cards.c.owner_id == owner_id))
         _insert_ignoring_duplicates(connection, [
@@ -365,6 +373,14 @@ def replace(owner_id: str, note_id: str, course: str, unit: str, new_cards: list
             }
             for position, card in enumerate(new_cards)
         ])
+        if kept_reviews:
+            carried = []
+            for row in connection.execute(select(cards.c.id, cards.c.front_key).where(
+                    cards.c.note_id == note_id, cards.c.owner_id == owner_id, cards.c.front_key.in_(list(kept_reviews)))).mappings().all():
+                review = {key: value for key, value in kept_reviews[row["front_key"]].items() if key in reviews.c}
+                carried.append({**review, "owner_id": owner_id, "card_id": row["id"]})
+            if carried:
+                connection.execute(reviews.insert(), carried)
         count = connection.execute(select(func.count()).select_from(cards).where(cards.c.note_id == note_id)).scalar_one()
         values = {"status": "ready", "card_count": int(count), "error": None, "updated_at": now}
         if _job_row(connection, owner_id, note_id, for_update=True) is None:
@@ -469,7 +485,11 @@ def list_for_unit(owner_id: str, course: str, unit: str) -> tuple[list[dict], li
         note_ids = [row["id"] for row in note_rows]
         job_rows = {}
         card_rows = []
+        style_rows: dict = {}
         if note_ids:
+            style_rows = dict(connection.execute(
+                select(styles.c.note_id, styles.c.instructions_hash).where(styles.c.owner_id == owner_id, styles.c.note_id.in_(note_ids))
+            ).all())
             job_rows = {row["note_id"]: row for row in connection.execute(
                 select(jobs).where(jobs.c.owner_id == owner_id, jobs.c.note_id.in_(note_ids))
             ).mappings().all()}
@@ -488,6 +508,8 @@ def list_for_unit(owner_id: str, course: str, unit: str) -> tuple[list[dict], li
             "card_count": int(job["card_count"]) if job and status == "ready" else 0,
             "error": error if status == "failed" else None,
             "updated_at": _iso(job["updated_at"]) if job else None,
+            # easy | medium | hard, or custom (the student's own instructions): see ai_tutor.flashcard_level_of.
+            "level": ai_tutor.flashcard_level_of(style_rows.get(row["id"])),
         })
     return [_card(row) for row in ordered_cards], states
 
