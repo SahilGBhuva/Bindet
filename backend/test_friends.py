@@ -76,6 +76,21 @@ class FriendsTests(unittest.TestCase):
             database.send_friend_request("sam-id", self.alex["friend_code"])
         self.assertEqual(database.pending_friend_requests("sam-id"), [])
 
+    def test_declined_request_does_not_block_either_student(self):
+        request = database.send_friend_request("alex-id", self.sam["friend_code"])
+        database.respond_to_friend_request(request["request_id"], "sam-id", False)
+        # A declined request hides nobody from search or suggestions.
+        self.assertEqual([row["student_id"] for row in database.search_people("alex-id", "sam")], ["sam-id"])
+        self.assertEqual([row["student_id"] for row in database.search_people("sam-id", "alex")], ["alex-id"])
+        # Either student can ask again, and the new request is a normal pending one.
+        again = database.send_friend_request("sam-id", self.alex["friend_code"])
+        self.assertEqual(again["status"], "pending")
+        self.assertEqual([row["request_id"] for row in database.pending_friend_requests("alex-id")], [again["request_id"]])
+        database.respond_to_friend_request(again["request_id"], "alex-id", False)
+        resent = database.send_friend_request("alex-id", self.sam["friend_code"])
+        database.respond_to_friend_request(resent["request_id"], "sam-id", True)
+        self.assertEqual([row["student_id"] for row in database.list_friends("alex-id")], ["sam-id"])
+
     def test_friend_quest_tracks_combined_xp(self):
         self.become_friends()
         quest = database.create_friend_quest("alex-id", "sam-id", 100)

@@ -1655,12 +1655,17 @@ def send_friend_request(requester_id: str, friend_code: str) -> dict:
         existing = connection.execute(select(friendships).where(or_(
             and_(friendships.c.requester_id == requester_id, friendships.c.recipient_id == recipient_id),
             and_(friendships.c.requester_id == recipient_id, friendships.c.recipient_id == requester_id),
-        ))).mappings().first()
+        ))).mappings().all()
+        # Say which: already friends, a request of yours still waiting, or theirs waiting for you.
+        if any(row["status"] == "accepted" for row in existing):
+            raise ValueError("already_friends")
+        pending = next((row for row in existing if row["status"] == "pending"), None)
+        if pending is not None:
+            raise ValueError("request_pending" if pending["requester_id"] == requester_id else "request_waiting_for_you")
         if existing:
-            # Say which: already friends, a request of yours still waiting, or theirs waiting for you.
-            if existing["status"] == "accepted":
-                raise ValueError("already_friends")
-            raise ValueError("request_pending" if existing["requester_id"] == requester_id else "request_waiting_for_you")
+            # Only declined requests are left. A "no" is not forever: either student may
+            # ask again, so the old row goes and a fresh pending request replaces it.
+            connection.execute(delete(friendships).where(friendships.c.id.in_([row["id"] for row in existing])))
         result = connection.execute(friendships.insert().values(
             requester_id=requester_id, recipient_id=recipient_id,
             status="pending", created_at=datetime.now(timezone.utc),
@@ -2293,7 +2298,11 @@ def friend_leaderboard(student_id: str) -> list[dict]:
 
 def _excluded_social_ids(connection, student_id: str) -> set[str]:
     excluded = {student_id}
-    for row in connection.execute(select(friendships).where(or_(friendships.c.requester_id == student_id, friendships.c.recipient_id == student_id))).mappings():
+    # Friends and open requests are hidden; a declined request is not, so either student can ask again.
+    for row in connection.execute(select(friendships).where(
+        friendships.c.status.in_(("pending", "accepted")),
+        or_(friendships.c.requester_id == student_id, friendships.c.recipient_id == student_id),
+    )).mappings():
         excluded.add(row["recipient_id"] if row["requester_id"] == student_id else row["requester_id"])
     for row in connection.execute(select(social_blocks).where(or_(social_blocks.c.blocker_id == student_id, social_blocks.c.blocked_id == student_id))).mappings():
         excluded.add(row["blocked_id"] if row["blocker_id"] == student_id else row["blocker_id"])
