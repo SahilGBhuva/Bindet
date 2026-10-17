@@ -37,6 +37,10 @@ class TutorTests(unittest.TestCase):
     def setUp(self):
         database.reset_db()
         tutor.reset_tutor()
+        # Notes live outside reset_db; other modules in the same session leave theirs behind.
+        note_store.init_notes()
+        with database.engine().begin() as connection:
+            connection.execute(delete(note_store.notes))
 
     @classmethod
     def tearDownClass(cls):
