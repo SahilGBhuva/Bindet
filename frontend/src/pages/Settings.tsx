@@ -13,6 +13,9 @@ import { OttoMemoryPanel } from '../components/otto/OttoMemoryPanel'
 import { OttoPreferences } from '../components/otto/OttoPreferences'
 import { useInstallOffer } from '../lib/pwa'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
+import { loadInstantPrefs, saveInstantPrefs, type InstantMode, type InstantPrefs } from '../lib/instantStudy'
+import { loadSoundOn, saveSoundOn } from '../lib/rewards'
+import { playSound } from '../lib/sounds'
 import { FeedbackForm, HelpGuides } from './More'
 import './Settings.css'
 
@@ -21,6 +24,24 @@ const GOALS = [
   { id: 20, label: 'Regular' },
   { id: 30, label: 'Serious' },
   { id: 50, label: 'Intense' },
+]
+
+/* Settings → Instant Study: what one tap on Home's Instant Study button studies. */
+const INSTANT_MODES: { id: InstantMode; label: string; hint: string; tone: string; icon: ReactNode }[] = [
+  {
+    id: 'smart',
+    label: 'Smart pick',
+    hint: 'Cards that are due first, then your weakest unit, then your newest notes.',
+    tone: 'violet',
+    icon: <path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />,
+  },
+  {
+    id: 'latest',
+    label: 'My latest notes',
+    hint: 'Always the unit you added notes to most recently, so it starts right away.',
+    tone: 'teal',
+    icon: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  },
 ]
 
 const THEMES: { id: ThemePreference; label: string }[] = [
@@ -79,6 +100,9 @@ export function Settings({ session, onSession }: SettingsProps) {
   const [privacyStatus, setPrivacyStatus] = useState('')
   const [copied, setCopied] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  // Device preferences (kept in this browser, cleared on sign-out like other study data).
+  const [soundOn, setSoundOn] = useState(loadSoundOn)
+  const [instantPrefs, setInstantPrefs] = useState(loadInstantPrefs)
   const [canDelete, setCanDelete] = useState<boolean | null>(null)
   useAnnounce(message)
   useAnnounce(profileStatus)
@@ -162,6 +186,20 @@ export function Settings({ session, onSession }: SettingsProps) {
 
   function chooseTheme(next: ThemePreference) {
     saveThemePreference(next)
+  }
+
+  function toggleSound() {
+    const next = !soundOn
+    setSoundOn(next)
+    saveSoundOn(next)
+    // A short preview, so the student hears what they turned on.
+    if (next) playSound('correct')
+  }
+
+  function changeInstant(change: Partial<InstantPrefs>) {
+    const next = { ...instantPrefs, ...change }
+    setInstantPrefs(next)
+    saveInstantPrefs(next)
   }
 
   async function submitAuth(event: FormEvent) {
@@ -272,7 +310,7 @@ export function Settings({ session, onSession }: SettingsProps) {
 
   const appearance = (
     <>
-    <Section id="settings-appearance" title="Appearance" copy="Choose how bindet looks on this device. System follows your device setting.">
+    <Section id="settings-appearance" title="Appearance and sound" copy="Choose how bindet looks and sounds on this device. System follows your device setting.">
       <div className="ui-panel">
         <div className="settings__row">
           <div className="settings__row-text">
@@ -285,6 +323,13 @@ export function Settings({ session, onSession }: SettingsProps) {
             ))}
           </div>
         </div>
+        <label className="settings__row settings__toggle">
+          <span className="settings__row-text">
+            <span className="settings__label">Sound effects</span>
+            <span className="settings__hint">Short chimes for right answers, combos, level-ups and your daily goal. Never for a wrong answer.</span>
+          </span>
+          <input className="ui-checkbox" type="checkbox" checked={soundOn} onChange={toggleSound} />
+        </label>
       </div>
     </Section>
     {installOffer ? (
@@ -413,6 +458,40 @@ export function Settings({ session, onSession }: SettingsProps) {
                 {!profile && profileReady ? <p className="settings__hint">Save your profile first to set a goal.</p> : null}
                 {goalStatus ? <p className="settings__status">{goalStatus}</p> : null}
               </div>
+            </div>
+          </Section>
+
+          <Section id="settings-instant" title="Instant Study" copy="What Home’s Instant Study button starts. Saved on this device.">
+            <div className="ui-panel">
+              <div className="settings__row settings__row--stack">
+                <span className="settings__label" id="settings-instant-label">When I press Instant Study</span>
+                <div className="settings__choices" role="radiogroup" aria-labelledby="settings-instant-label">
+                  {INSTANT_MODES.map((item) => (
+                    <label key={item.id} className={`settings__choice ui-tone--${item.tone}`}>
+                      <input
+                        className="settings__choice-input"
+                        type="radio"
+                        name="settings-instant-mode"
+                        value={item.id}
+                        checked={instantPrefs.mode === item.id}
+                        onChange={() => changeInstant({ mode: item.id })}
+                      />
+                      <span className="settings__choice-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{item.icon}</svg></span>
+                      <span className="settings__choice-text">
+                        <b>{item.label}{item.id === 'smart' ? <small className="settings__choice-tag">Default</small> : null}</b>
+                        <small>{item.hint}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <label className="settings__row settings__toggle">
+                <span className="settings__row-text">
+                  <span className="settings__label">Skip key points</span>
+                  <span className="settings__hint">Go straight to the flashcards, then the quick quiz.</span>
+                </span>
+                <input className="ui-checkbox" type="checkbox" checked={instantPrefs.skipKeyPoints} onChange={() => changeInstant({ skipKeyPoints: !instantPrefs.skipKeyPoints })} />
+              </label>
             </div>
           </Section>
 

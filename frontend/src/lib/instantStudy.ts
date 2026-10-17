@@ -9,6 +9,10 @@ import type { NoteDeposit, UnitAttempt } from './types'
  *  3. otherwise the unit whose notes were added most recently.
  * Units studied earlier in this sitting are skipped so "Another round" moves on; when every
  * unit has had its turn, the same order picks again (more cards from the same unit).
+ *
+ * Settings → Instant Study can change this: "My latest notes" always picks rule 3 (no wait
+ * for the review summary), and "Skip key points" starts at the flashcards. Both are kept on
+ * this device (loadInstantPrefs) and cleared on sign-out like other study data.
  */
 
 export type InstantReason = 'due' | 'weak' | 'recent'
@@ -33,6 +37,52 @@ export type InstantInput = {
   topics?: TopicStat[]
   /* unitKey()s already studied in this sitting. */
   exclude?: string[]
+  /* 'smart' (default): due, then weak, then newest. 'latest': always the newest notes. */
+  mode?: InstantMode
+}
+
+export type InstantMode = 'smart' | 'latest'
+export type InstantPrefs = { mode: InstantMode; skipKeyPoints: boolean }
+export const DEFAULT_INSTANT_PREFS: InstantPrefs = { mode: 'smart', skipKeyPoints: false }
+export const INSTANT_PREFS_KEY = 'bindit:instant-study'
+
+type PrefStore = Pick<Storage, 'getItem' | 'setItem'>
+
+function defaultStore(): PrefStore | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+// Set only when storage refused a save, so the choice still applies until the page is closed.
+let unsaved: InstantPrefs | null = null
+
+/* The saved choice, or the defaults when nothing (or something unreadable) is saved. */
+export function loadInstantPrefs(store: PrefStore | null = defaultStore()): InstantPrefs {
+  if (unsaved) return { ...unsaved }
+  try {
+    const parsed: unknown = JSON.parse(store?.getItem(INSTANT_PREFS_KEY) ?? 'null')
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_INSTANT_PREFS }
+    const value = parsed as Partial<Record<keyof InstantPrefs, unknown>>
+    return {
+      mode: value.mode === 'latest' ? 'latest' : 'smart',
+      skipKeyPoints: value.skipKeyPoints === true,
+    }
+  } catch {
+    return { ...DEFAULT_INSTANT_PREFS }
+  }
+}
+
+export function saveInstantPrefs(prefs: InstantPrefs, store: PrefStore | null = defaultStore()) {
+  try {
+    if (!store) throw new Error('no storage')
+    store.setItem(INSTANT_PREFS_KEY, JSON.stringify({ mode: prefs.mode, skipKeyPoints: prefs.skipKeyPoints }))
+    unsaved = null
+  } catch {
+    unsaved = { ...prefs }
+  }
 }
 
 /* Answers needed before a unit's accuracy counts, and the accuracy below which it is "weak". */
@@ -101,6 +151,8 @@ export function pickInstantUnit(input: InstantInput): InstantPick | null {
   const open = all.filter((item) => !skipped.has(unitKey(item.course, item.unit)))
   const pool = open.length ? open : all
   const newest = (a: Candidate, b: Candidate) => b.added - a.added || a.course.localeCompare(b.course) || a.unit.localeCompare(b.unit)
+  // "My latest notes": the unit with the most recently added notes, whatever is due or weak.
+  if (input.mode === 'latest') return finish(pool.toSorted(newest)[0], 'recent')
 
   const due = pool.filter((item) => item.due > 0).toSorted((a, b) => b.due - a.due || newest(a, b))[0]
   if (due) return finish(due, 'due')
