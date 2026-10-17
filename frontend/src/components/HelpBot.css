@@ -58,130 +58,174 @@
   .app-shell:has(> .helpbot__fab) > .sheet { padding-right: max(0px, 48px - clamp(20px, 4vw, 48px)); }
 }
 
+/*
+ * The panel. Desktop and tablets: a floating card anchored to the bottom-right corner. Its
+ * width is a percentage of the viewport box (which, unlike 100vw, excludes a classic
+ * scrollbar), so it can never reach past either edge. Phones: a full-width bottom sheet.
+ *
+ * The question box is 16px on purpose: iOS Safari zooms the page in when a field under 16px
+ * gets focus, and a zoomed-in page pans to the caret, so the left side of this fixed panel
+ * (the first letter of every line, the input's edge) slid off-screen.
+ */
 .helpbot__panel {
   position: fixed;
   right: 20px;
-  bottom: 72px;
+  bottom: 64px;
   z-index: 35;
   display: flex;
   flex-direction: column;
-  width: min(380px, calc(100vw - 32px));
-  max-height: min(600px, calc(100vh - 104px));
-  max-height: min(600px, calc(100dvh - 104px));
-  border: 1px solid var(--color-border);
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 40px));
+  max-height: min(720px, calc(100vh - 88px));
+  max-height: min(720px, calc(100dvh - 88px));
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
   color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.5;
   box-shadow: var(--shadow-popover);
   outline: none;
   overflow: hidden;
+  /* Clip, not hide: a clipped box can never be scrolled sideways by focus() or scrollIntoView. */
+  overflow: clip;
   animation: ui-pop var(--duration-base) var(--ease-out);
 }
-.helpbot__panel--loading { gap: var(--space-3); padding: var(--space-5); }
-.helpbot__panel--loading .ui-skeleton { height: 18px; border-radius: var(--radius-sm); }
-.helpbot__panel--loading .ui-skeleton:last-child { height: 120px; }
+.helpbot__panel--loading { gap: var(--space-3); min-height: 240px; padding: var(--space-5); }
+.helpbot__panel--loading .ui-skeleton { height: 20px; border-radius: var(--radius-sm); }
+.helpbot__panel--loading .ui-skeleton:last-child { height: 140px; }
 
 .helpbot__head {
   display: flex;
+  flex: none;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-4) var(--space-3) var(--space-5);
+  padding: var(--space-5) var(--space-3) var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--color-border);
 }
-.helpbot__title { margin: 0; font-family: var(--font-serif); font-size: var(--text-xl); font-weight: var(--weight-regular); line-height: var(--leading-tight); }
-.helpbot__intro { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.helpbot__heading { min-width: 0; }
+.helpbot__title { margin: 0; color: var(--color-text); font-family: var(--font-sans); font-size: 20px; font-weight: var(--weight-bold); line-height: 1.3; letter-spacing: -.01em; }
+.helpbot__intro { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: 16px; line-height: 1.5; }
 .helpbot__close {
   display: grid;
   flex: none;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  margin: -2px -4px 0 0;
+  width: 40px;
+  height: 40px;
+  margin: -6px 0 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
 }
 .helpbot__close:hover { background: var(--color-surface-hover); color: var(--color-text); }
 .helpbot__close:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.helpbot__close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.helpbot__close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 
 .helpbot__body {
   position: relative;
-  display: grid;
-  gap: var(--space-4);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
   min-height: 0;
-  padding: var(--space-4) var(--space-5);
+  padding: var(--space-5);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
+.helpbot__body > * { min-width: 0; }
 
-.helpbot__log { display: grid; gap: var(--space-4); margin: 0; padding: 0; list-style: none; }
-.helpbot__turn { display: grid; gap: var(--space-2); min-width: 0; }
+.helpbot__log { display: flex; flex-direction: column; gap: var(--space-6); margin: 0; padding: 0; list-style: none; }
+.helpbot__turn { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .helpbot__question {
-  justify-self: end;
-  max-width: 88%;
+  align-self: flex-end;
+  max-width: 85%;
   margin: 0;
-  padding: 7px 11px;
-  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  border-radius: 16px 16px 6px 16px;
   background: var(--color-brand-tint);
   color: var(--color-text);
-  font-size: var(--text-sm);
+  font-size: 16px;
+  font-weight: var(--weight-medium);
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.helpbot__answer { display: grid; gap: var(--space-2); min-width: 0; }
-.helpbot__answer-text { margin: 0; color: var(--color-text); font-size: var(--text-base); line-height: var(--leading-normal); overflow-wrap: anywhere; }
+.helpbot__answer { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.helpbot__answer-text { margin: 0; color: var(--color-text); font-size: 16px; line-height: 1.55; overflow-wrap: anywhere; }
 .helpbot__links { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; }
 .helpbot__link {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 45%, transparent);
+  border-radius: var(--radius-full);
+  background: var(--color-brand-tint);
+  /* A step toward the body ink so the label clears 7:1 on the tint in both themes. */
   color: var(--color-brand-text);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  color: color-mix(in srgb, var(--color-brand-text) 78%, var(--color-text));
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
   text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
 }
-.helpbot__link:hover { background: var(--color-surface-hover); }
-.helpbot__link:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.helpbot__link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.helpbot__badge { color: var(--color-text-tertiary); font-size: var(--text-xs); }
+.helpbot__link:hover { border-color: var(--color-brand); background: color-mix(in srgb, var(--color-brand) 16%, var(--color-surface-raised)); }
+.helpbot__link:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.helpbot__link svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.helpbot__badge { color: var(--color-text-secondary); font-size: 14px; line-height: 1.4; }
 
-.helpbot__thinking { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-text-secondary); font-size: var(--text-sm); }
+.helpbot__thinking { display: flex; align-items: center; gap: var(--space-2); margin: 0; color: var(--color-text-secondary); font-size: 16px; }
 
-.helpbot__suggest { display: grid; gap: var(--space-2); }
-.helpbot__label { margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
-.helpbot__chips { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.helpbot__suggest { display: flex; flex-direction: column; gap: var(--space-3); }
+/* After a conversation, the suggestions read as their own section. */
+.helpbot__log + .helpbot__suggest,
+.helpbot__thinking + .helpbot__suggest { padding-top: var(--space-5); border-top: 1px solid var(--color-border); }
+.helpbot__label { margin: 0; color: var(--color-text); font-size: 15px; font-weight: var(--weight-semibold); line-height: 1.4; }
+.helpbot__chips { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .helpbot__chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  box-sizing: border-box;
   width: 100%;
-  min-height: 36px;
-  padding: 7px 11px;
-  border: 1px solid var(--color-border);
+  min-height: 48px;
+  padding: 11px 14px 11px 16px;
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
+  background: transparent;
   color: var(--color-text);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: 16px;
+  line-height: 1.4;
   text-align: left;
   cursor: pointer;
   transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
 }
-.helpbot__chip:hover:not(:disabled) { border-color: var(--color-border-strong); background: var(--color-surface-hover); }
-.helpbot__chip:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
-.helpbot__chip:disabled { opacity: .5; cursor: not-allowed; }
+.helpbot__chip svg { flex: none; width: 16px; height: 16px; fill: none; stroke: var(--color-text-secondary); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.helpbot__chip:hover:not(:disabled) { border-color: var(--color-brand); background: var(--color-brand-tint); }
+.helpbot__chip:hover:not(:disabled) svg { stroke: var(--color-brand-text); }
+.helpbot__chip:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-color: var(--color-brand); }
+.helpbot__chip:disabled { opacity: .55; cursor: not-allowed; }
 
-.helpbot__form { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-5) var(--space-4); border-top: 1px solid var(--color-border); }
+.helpbot__form { display: flex; flex: none; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-5) var(--space-5); border-top: 1px solid var(--color-border); background: var(--color-surface-raised); }
 .helpbot__row { display: flex; gap: var(--space-2); min-width: 0; }
-.helpbot__input { flex: 1; min-width: 0; }
-.helpbot__send { flex: none; }
-.helpbot__usage { display: flex; justify-content: space-between; gap: var(--space-2); margin: 0; color: var(--color-text-tertiary); font-size: var(--text-xs); }
+/* 16px or larger: iOS zooms the whole page in on a smaller field (see the panel note above). */
+.helpbot__input.ui-input { flex: 1; min-width: 0; height: 48px; padding: 0 14px; font-size: 16px; }
+.helpbot__input.ui-input::placeholder { color: var(--color-text-secondary); opacity: 1; }
+.helpbot__send.ui-button { flex: none; min-width: 72px; height: 48px; padding: 0 20px; border-radius: var(--radius-full); font-size: 16px; font-weight: var(--weight-semibold); }
+/* Empty question: it reads as unavailable rather than as a faded version of the main action. */
+.helpbot__send.ui-button:disabled:not(.is-busy) { border-color: var(--color-border); background: var(--color-surface-sunken); color: var(--color-text-secondary); box-shadow: none; opacity: 1; }
+.helpbot__usage { display: flex; justify-content: space-between; gap: var(--space-2); margin: 0; color: var(--color-text-secondary); font-size: 14px; line-height: 1.45; }
 .helpbot__count { flex: none; font-variant-numeric: tabular-nums; }
-.helpbot__error { margin: 0; color: var(--color-danger); font-size: var(--text-sm); }
+.helpbot__error { margin: 0; color: var(--color-danger); font-size: 15px; line-height: 1.45; }
 
 /* Phones: a small icon-only button above the tab bar (clear of the home bar and notch); the panel
    is a sheet just above it (or the keyboard). Pages get room at the bottom to scroll clear of it. */
@@ -200,19 +244,38 @@
   .app-shell:has(> .helpbot__fab) > .sheet { padding-bottom: calc(var(--phone-tabbar) + 60px); }
   /* The on-screen keyboard is open for some other field: keep the corner clear. */
   :root.is-typing .helpbot__fab { display: none; }
+  /* Tablets and wide phones: the same floating card, above the tab bar (or the keyboard). */
   .helpbot__panel {
-    right: calc(12px + env(safe-area-inset-right));
+    right: calc(16px + env(safe-area-inset-right));
     bottom: calc(var(--phone-tabbar) + 8px + var(--keyboard-inset, 0px));
-    left: calc(12px + env(safe-area-inset-left));
-    width: auto;
-    max-height: calc(100dvh - var(--phone-topbar) - var(--phone-tabbar) - var(--keyboard-inset, 0px) - 20px);
+    width: min(420px, calc(100% - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    max-height: calc(100vh - 140px);
+    max-height: calc(100dvh - var(--phone-topbar) - var(--phone-tabbar) - var(--keyboard-inset, 0px) - 16px);
   }
-  .helpbot__head { padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); }
-  .helpbot__body { padding: var(--space-3) var(--space-4); }
-  .helpbot__form { padding: var(--space-3) var(--space-4); }
-  .helpbot__close { width: 44px; height: 44px; margin: -6px -6px 0 0; }
-  .helpbot__chip { min-height: 44px; }
+  .helpbot__close { width: 44px; height: 44px; margin: -8px -2px 0 0; }
 }
+
+/* Phones: a full-width bottom sheet over the tab bar, lifted above the on-screen keyboard,
+   padded clear of the home bar and the notch in landscape. The wide shadow dims the page. */
+@media (max-width: 600px) {
+  .helpbot__panel {
+    right: 0;
+    bottom: var(--keyboard-inset, 0px);
+    left: 0;
+    width: 100%;
+    max-height: calc(100vh - 56px);
+    max-height: calc(100dvh - var(--phone-topbar) - var(--keyboard-inset, 0px));
+    border-width: 1px 0 0;
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, .18), 0 0 0 100vmax rgba(10, 10, 14, .38);
+    animation-name: helpbot-sheet;
+  }
+  .helpbot__head { padding: var(--space-4) calc(var(--space-2) + env(safe-area-inset-right)) var(--space-4) calc(var(--space-5) + env(safe-area-inset-left)); }
+  .helpbot__body { padding: var(--space-5) calc(var(--space-5) + env(safe-area-inset-right)) var(--space-5) calc(var(--space-5) + env(safe-area-inset-left)); }
+  .helpbot__form { padding: var(--space-3) calc(var(--space-5) + env(safe-area-inset-right)) calc(var(--space-4) + env(safe-area-inset-bottom)) calc(var(--space-5) + env(safe-area-inset-left)); }
+  :root.is-typing .helpbot__form { padding-bottom: var(--space-3); }
+}
+@keyframes helpbot-sheet { from { transform: translateY(24px); opacity: 0; } }
 
 /* Narrow phones: no corner button at all; Help lives in the Menu sheet. */
 @media (max-width: 399px) {
@@ -221,5 +284,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .helpbot__fab { transition: none; }
+  .helpbot__fab, .helpbot__chip, .helpbot__link { transition: none; }
+  .helpbot__panel { animation: none; }
 }
