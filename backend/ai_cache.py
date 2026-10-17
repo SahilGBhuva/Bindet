@@ -512,6 +512,22 @@ def guide_key(*, owner_id: str, kind: str, course: str, unit: str, source_text: 
     return make_key("guide", guide_version(), owner_id, kind, course, unit, source_text, instructions_hash)
 
 
+def key_points_version() -> str:
+    """Instant Study's key points share the guide prompt, schema and table, under their own version."""
+    import study_guides
+    return "keypoints-v1:" + fingerprint(
+        study_guides.GUIDE_PROMPT, study_guides.GUIDE_SCHEMA, study_guides.KEY_POINTS_ASK, study_guides.KEY_POINTS_MAX,
+        study_guides.KEY_POINTS_BULLET_MAX, ai_tutor.OPENROUTER_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
+        study_guides.KEY_POINTS_TOKENS, ai_tutor.OPERATIONS["generate_guide"]["temperature"],
+    )
+
+
+def key_points_key(*, owner_id: str, course: str, unit: str, source_text: str) -> str:
+    """Per owner, course, unit and exact note text: changed notes get new key points; the same notes never cost AI twice.
+    Stored with cached_guide/store_guide (study_guide_cache), so the owner filter, note refs and purges all apply."""
+    return make_key("guide", key_points_version(), owner_id, "key_points", course, unit, source_text)
+
+
 def cached_guide(key: str, owner_id: str) -> list[dict] | None:
     row = lookup("study_guide_cache", key, owner_id=owner_id)
     content = row["content"] if row is not None else None

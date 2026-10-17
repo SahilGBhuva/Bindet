@@ -4051,6 +4051,87 @@ def otto_guide_reply(owner: str, intent: "study_guides.GuideIntent", course: str
             attachment)
 
 
+# --- Instant Study ----------------------------------------------------------------------
+#
+# Home's one-tap session: key points, then the unit's flashcards (the review routes above),
+# then a few quiz questions (/api/generate-question and /api/analyze-answer, so XP, caps and
+# the no-repeat bank are unchanged). Only the key points are new: four to six bullets written
+# from the unit's notes in ONE small model call (study_guides "key_points"), cached per owner
+# and exact note text in ai_cache, so a repeat session over the same notes costs no AI.
+# Errors carry {"code", "message"} (the guide codes).
+
+INSTANT_KEY_POINTS_PER_DAY = 20         # key points the AI writes per student per day (cache misses)
+INSTANT_KEY_POINT_REQUESTS_PER_DAY = 300
+QUESTION_REVEALS_PER_HOUR = 300
+
+
+class KeyPointsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course: str = Field(min_length=1, max_length=120)
+    unit: str = Field(min_length=1, max_length=160)
+
+
+@app.post("/api/instant-study/key-points")
+def instant_key_points(data: KeyPointsRequest, authorization: Annotated[str | None, Header()] = None):
+    """Four to six key points from a unit's notes: cached (no AI) or written once."""
+    owner = ai_user(authorization)["id"]
+    course, unit = data.course.strip(), data.unit.strip()
+    if not course or not unit:
+        raise HTTPException(status_code=400, detail="Choose a course and unit")
+    started = time.perf_counter()
+    log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_guide", outcome=outcome, student_id=owner, tier="text", started=started, **fields)  # noqa: E731
+    guide_rate_limit(owner, "instant_key_points_request", INSTANT_KEY_POINT_REQUESTS_PER_DAY, "You’ve started a lot of sessions today.")
+    text, note_ids = guide_source(owner, course, unit, "key_points")
+    cache_key = ai_cache.key_points_key(owner_id=owner, course=course, unit=unit, source_text=text)
+    cached = ai_cache.cached_guide(cache_key, owner)
+    sections = study_guides.checked_content(cached, text, "key_points") if cached is not None else None
+    if ai_cache.enabled():
+        log("cache_hit" if sections else "cache_miss")
+    if sections:
+        return {"course": course, "unit": unit, "points": study_guides.key_points(sections), "source": "cached"}
+    try:
+        guide_rate_limit(owner, "instant_key_points", INSTANT_KEY_POINTS_PER_DAY, "You’ve had a lot of key points written today.")
+    except HTTPException:
+        log("rate_limited")
+        raise
+    if not account_ai_share_available(owner):
+        raise guide_error(429, "ai_daily_limit", AI_ACCOUNT_SHARE_USED, retry_after=3600)
+    if not global_ai_available(None):  # the account's share was counted just above
+        raise guide_error(503, "ai_daily_limit", AI_PAUSED, retry_after=3600)
+    try:
+        ai_tutor.warm_connection()
+        batch = study_guides.generate(kind="key_points", course=course, unit=unit, note_text=text,
+                                      session_id=ai_session_id(owner, course, unit, "key_points"))
+    except ai_tutor.AIBadOutput as exc:
+        log("bad_output", error=exc)
+        raise guide_error(503, "ai_bad_output", retry_after=30) from exc
+    except ai_tutor.AITutorError as exc:
+        log("ai_error", error=exc)
+        raise guide_error(503, "ai_unavailable", retry_after=30) from exc
+    log("ok", cards_in=batch.received, cards_kept=batch.kept)
+    if ai_cache.store_guide(cache_key, owner, batch.sections):
+        # Tied to every note it was written from: deleting any of them deletes the cached copy.
+        for note_id in note_ids:
+            ai_cache.add_ref("study_guide_cache", cache_key, owner, note_id)
+    return {"course": course, "unit": unit, "points": study_guides.key_points(batch.sections), "source": "generated"}
+
+
+@app.post("/api/questions/{question_id}/reveal")
+def reveal_question_answer(
+    question_id: Annotated[str, PathParam(min_length=1, max_length=64)],
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Show the answer to one of the student's questions. Closes the question first, so a
+    revealed answer can never be sent back for XP. No AI."""
+    owner = auth.authenticated_user(authorization)["id"]
+    limit_action(owner, "question_reveal", QUESTION_REVEALS_PER_HOUR)
+    question = questions.get_question(owner, question_id)
+    if question is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+    questions.complete_question(owner, question_id)  # None when it was already completed: fine
+    return {"question_id": question_id, "correct_answer": question["correct_answer"]}
+
+
 # --- Practice lab -----------------------------------------------------------------------
 #
 # Quick rounds, personal bests and challenges, all on the student's saved flashcards
