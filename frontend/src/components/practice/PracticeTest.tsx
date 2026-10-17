@@ -12,6 +12,7 @@ import { lowerMeridiem } from '../../lib/time'
 import { LevelChip, LevelPicker } from '../LevelPicker'
 import { MathText } from '../math/Math'
 import { PracticeTestPdfButton } from '../print/PdfButtons'
+import { emitRewards, rewardsFromResponse } from '../../lib/rewards'
 import './PracticeTest.css'
 
 /*
@@ -258,6 +259,8 @@ export function PracticeTest({ course, unit, accessToken, openId, focusOn, focus
       let graded: PracticeTestData
       try {
         graded = await data.submitPracticeTest(test.id, sent, accessToken)
+        // Only the submit that graded the test earned its XP (a 409 below shows the old result).
+        emitRewards(rewardsFromResponse(graded))
       } catch (caught) {
         // Submitted already (another tab, or a retry after a lost reply): show that result.
         if (caught instanceof ApiError && caught.status === 409 && caught.code === 'already_submitted') {

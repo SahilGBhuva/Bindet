@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 're
 import { ApiError, checkPracticeAnswer, getPracticeTest, isAbortError, RequestTimeoutError, submitPracticeTest } from '../../lib/api'
 import type { PracticeCheck, PracticeItem, PracticeTest } from '../../lib/api'
 import { useAnnounce } from '../../lib/announce'
+import { createCombo, emitRewards, rewardsFromResponse } from '../../lib/rewards'
 import { choiceForKey, practiceTestHash } from '../../lib/ottoMake'
 import { MathText } from '../math/Math'
 import './OttoMake.css'
@@ -66,6 +67,8 @@ export function InlineQuiz({ testId, accessToken, title, onNewQuiz, fullTest = f
   const root = useRef<HTMLElement>(null)
   const nextButton = useRef<HTMLButtonElement>(null)
   const finishingRef = useRef(false)
+  // Right answers in a row in this quiz (visual only: lib/rewards.ts).
+  const [combo] = useState(createCombo)
 
   const items = test?.items ?? []
   const item = items[current] ?? null
@@ -83,6 +86,7 @@ export function InlineQuiz({ testId, accessToken, title, onNewQuiz, fullTest = f
     setStepError('')
     try {
       const graded = await submitPracticeTest(loaded.id, [], accessToken)
+      emitRewards(rewardsFromResponse(graded))
       setTest(graded)
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === 'already_submitted') {
@@ -125,6 +129,7 @@ export function InlineQuiz({ testId, accessToken, title, onNewQuiz, fullTest = f
     try {
       const checked = await checkPracticeAnswer(test.id, item.position, clean, accessToken)
       setChecks((current) => ({ ...current, [checked.position]: checked }))
+      combo.report(checked.correct)
       window.setTimeout(() => nextButton.current?.focus(), 0)
     } catch (caught) {
       setStepError(failure(caught, 'That answer couldn’t be checked. Try again.'))

@@ -5,6 +5,7 @@ import { useData } from '../../lib/dataSource'
 import { SESSION_CARDS, SESSION_QUESTIONS, instantHint, instantReason, unitKey, type InstantPick } from '../../lib/instantStudy'
 import { noteDeposit, uploadFailure, COURSE_NAME_MAX } from '../../lib/noteUpload'
 import { GRADE_LABELS, GRADES, announceReviewChange, formatInterval, gradePreview, pendingGrades, spokenInterval } from '../../lib/review'
+import { createCombo, emitRewards, rewardsFromResponse, type Combo } from '../../lib/rewards'
 import { notebookWithCourse, notebookWithNextUnit } from '../../lib/session'
 import { courseInitial } from '../../lib/tones'
 import type { Course, Notebook } from '../../lib/types'
@@ -81,13 +82,17 @@ type SessionProps = {
   notebook: Notebook
   goal: number
   streak: number
+  /* Settings → Instant Study → Skip key points: straight to the flashcards. */
+  skipKeyPoints?: boolean
   /* The next unit for Another round, given the units already studied in this sitting. */
   choose: (exclude: string[]) => Promise<InstantPick | null>
   onNotebook: (next: Notebook) => void
   onClose: () => void
 }
 
-export function InstantStudy({ start, accessToken, studentId, notebook, goal, streak, choose, onNotebook, onClose }: SessionProps) {
+export function InstantStudy({ start, accessToken, studentId, notebook, goal, streak, skipKeyPoints = false, choose, onNotebook, onClose }: SessionProps) {
+  // Right answers in a row across this sitting's quizzes (visual only: lib/rewards.ts).
+  const [combo] = useState(createCombo)
   const dialog = useRef<HTMLDialogElement>(null)
   const [round, setRound] = useState<{ pick: InstantPick | null; n: number; streak: number }>({ pick: start, n: 1, streak })
   const studied = useRef<string[]>(start ? [unitKey(start.course, start.unit)] : [])
@@ -135,6 +140,8 @@ export function InstantStudy({ start, accessToken, studentId, notebook, goal, st
           goal={goal}
           streakBefore={round.streak}
           roundNumber={round.n}
+          skipKeyPoints={skipKeyPoints}
+          combo={combo}
           onAnother={another}
           onClose={onClose}
         />
@@ -181,7 +188,7 @@ function quizSkipped(error: unknown) {
   return 'Quiz questions couldn’t load right now, so this round ends with your cards.'
 }
 
-function Round({ pick, course, accessToken, studentId, notebook, goal, streakBefore, roundNumber, onAnother, onClose }: {
+function Round({ pick, course, accessToken, studentId, notebook, goal, streakBefore, roundNumber, skipKeyPoints, combo, onAnother, onClose }: {
   pick: InstantPick
   course: Course | undefined
   accessToken?: string
@@ -190,6 +197,8 @@ function Round({ pick, course, accessToken, studentId, notebook, goal, streakBef
   goal: number
   streakBefore: number
   roundNumber: number
+  skipKeyPoints: boolean
+  combo: Combo
   onAnother: (streakNow: number) => Promise<void>
   onClose: () => void
 }) {
@@ -223,6 +232,12 @@ function Round({ pick, course, accessToken, studentId, notebook, goal, streakBef
 
   // Key points, with a head start: ready in time, they come first; otherwise the cards do.
   useEffect(() => {
+    // The student chose to skip key points (Settings): no request, cards first.
+    if (skipKeyPoints) {
+      setPoints({ status: 'skipped', points: [], note: '' })
+      setOrder(['cards', 'quiz'])
+      return
+    }
     const controller = new AbortController()
     let decided = false
     const decide = (first: Step[]) => {
@@ -247,7 +262,7 @@ function Round({ pick, course, accessToken, studentId, notebook, goal, streakBef
         decide(['cards', 'quiz'])
       })
     return () => { controller.abort(); window.clearTimeout(timer) }
-  }, [data, accessToken, courseName, unit])
+  }, [data, accessToken, courseName, unit, skipKeyPoints])
 
   // Flashcards: due first, then new. A unit with notes but no cards gets them made first.
   useEffect(() => {
@@ -433,6 +448,8 @@ function Round({ pick, course, accessToken, studentId, notebook, goal, streakBef
     try {
       const result = await data.analyzeAnswer(item.question, answer, studentId, accessToken)
       data.recordUnitAttempt({ course: courseName, unit, correct: result.correct })
+      combo.report(result.correct)
+      emitRewards(rewardsFromResponse(result))
       if (mounted.current) updateItem({ busy: false, result })
     } catch (error) {
       if (!mounted.current) return

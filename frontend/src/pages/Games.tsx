@@ -13,6 +13,7 @@ import { loadNotebook, withCourseTones } from '../lib/session'
 import { courseInitial, toneClass, toneForName } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
 import { useAnnounce } from '../lib/announce'
+import { createCombo, emitRewards, rewardsFromResponse } from '../lib/rewards'
 import './Games.css'
 
 /*
@@ -515,6 +516,8 @@ function RoundPlayer({ game, onFinish }: { game: Game; onFinish: (results: boole
   const doneRef = useRef(false)
   const pickTimer = useRef(0)
   const cardRef = useRef<HTMLDivElement>(null)
+  // The "3 in a row!" chip (visual only: points and XP are the server's, lib/rewards.ts).
+  const [combo] = useState(createCombo)
   const total = game.length * 1000
 
   const end = useCallback(() => {
@@ -539,12 +542,13 @@ function RoundPlayer({ game, onFinish }: { game: Game; onFinish: (results: boole
     if (doneRef.current) return
     const next = [...resultsRef.current, right]
     resultsRef.current = next
+    combo.report(right)
     setResults(next)
     setRevealed(false)
     setPicked(null)
     if (next.length >= game.deck.length) end()
     else setIndex(next.length)
-  }, [game.deck.length, end])
+  }, [game.deck.length, end, combo])
 
   const pick = useCallback((choice: number) => {
     if (picked !== null || doneRef.current) return
@@ -690,6 +694,8 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
 
   // Sent once per finished round (and again only on Try again), even if the effect runs twice.
   const pending = useRef<{ attempt: number; promise: Promise<Saved> } | null>(null)
+  // The XP chip shows once per saved round, even if the effect below runs again.
+  const celebrated = useRef(false)
   useEffect(() => {
     if (nothing) return
     let live = true
@@ -706,6 +712,10 @@ function RoundSummary({ token, selfId, finished, onAgain, onBack, onNotice }: {
       if (!live) return
       setSaveError('')
       setXp(outcome.data.xp_earned)
+      if (!celebrated.current) {
+        celebrated.current = true
+        emitRewards(rewardsFromResponse(outcome.data))
+      }
       if (outcome.kind === 'challenge') setChallenge(outcome.data.challenge)
       else setSaved(outcome.data)
     }).catch((caught) => { if (live) setSaveError(errorText(caught, 'This round couldn’t be saved.')) })
