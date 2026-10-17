@@ -107,6 +107,24 @@ class BinditFlashcardTests(unittest.TestCase):
             self.assertEqual(len(main.get_notes('Precalculus', 'Logs', 'Bearer t')), 1)
         self.assertEqual(note_store.get_note('student-2', stranger['id'])['course'], 'Precalc')
 
+    def test_renaming_keeps_the_seen_question_history(self):
+        q = main.questions
+        self.add_note('Precalc', 'Logs', 'Logarithms undo exponentials and turn products into sums.')
+        self.add_note('Precalc', 'Trig', 'sin squared plus cos squared equals one.')
+        q.mark_seen('student-1', q.question_scope('Precalc', 'Logs'), 'What is log base 2 of 8?')
+        q.mark_seen('student-1', q.question_scope('Precalc', 'Trig'), 'What is sin^2 + cos^2?')
+        q.mark_seen('student-2', q.question_scope('Precalc', 'Logs'), 'Their question')
+        with self._as():
+            main.move_notes(main.NotesMove(course='Precalc', unit='Logs', new_course='Precalc', new_unit='Logarithms'), 'Bearer t')
+        self.assertEqual(q.seen_in_scope('student-1', q.question_scope('Precalc', 'Logarithms')), ['What is log base 2 of 8?'])
+        self.assertEqual(q.seen_in_scope('student-1', q.question_scope('Precalc', 'Logs')), [])
+        self.assertEqual(q.seen_in_scope('student-2', q.question_scope('Precalc', 'Logs')), ['Their question'])
+        # A course rename carries every unit's history across.
+        with self._as():
+            main.move_notes(main.NotesMove(course='Precalc', new_course='Precalculus'), 'Bearer t')
+        self.assertEqual(q.seen_in_scope('student-1', q.question_scope('Precalculus', 'Logarithms')), ['What is log base 2 of 8?'])
+        self.assertEqual(q.seen_in_scope('student-1', q.question_scope('Precalculus', 'Trig')), ['What is sin^2 + cos^2?'])
+
     def test_move_rejects_a_new_unit_without_the_old_one(self):
         with self._as(), self.assertRaises(main.HTTPException) as context:
             main.move_notes(main.NotesMove(course='Precalc', new_course='Precalc', new_unit='Logs'), 'Bearer t')

@@ -173,6 +173,34 @@ def seen_in_scope(student_id: str, scope: str, limit: int = SEEN_PER_SCOPE) -> l
         ).scalars().all())
 
 
+def move_seen_scopes(student_id: str, moves: list[tuple[str, str]]) -> int:
+    """Follow a course or unit rename: move the student's seen-question history from each
+    old scope to its new one, so questions served under the old name don't come back.
+
+    A question already recorded in the new scope (renaming into an existing unit) keeps its
+    newer row. Returns how many rows moved.
+    """
+    moves = [(old, new) for old, new in moves if old and new and old != new]
+    if not moves:
+        return 0
+    init_questions()
+    moved = 0
+    with database.engine().begin() as connection:
+        database._advisory_lock(connection, f"seen:{student_id}")
+        for old, new in moves:
+            already = select(seen_questions.c.fingerprint).where(
+                seen_questions.c.student_id == student_id, seen_questions.c.scope == new,
+            ).scalar_subquery()
+            connection.execute(delete(seen_questions).where(
+                seen_questions.c.student_id == student_id, seen_questions.c.scope == old,
+                seen_questions.c.fingerprint.in_(already),
+            ))
+            moved += connection.execute(update(seen_questions).where(
+                seen_questions.c.student_id == student_id, seen_questions.c.scope == old,
+            ).values(scope=new)).rowcount or 0
+    return int(moved)
+
+
 def mark_seen(student_id: str, scope: str, question: str) -> None:
     """Record that the student was served this question in this scope (newest first).
 

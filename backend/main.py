@@ -1530,11 +1530,37 @@ def move_notes(data: NotesMove, authorization: Annotated[str | None, Header()] =
     new_unit = data.new_unit.strip() if data.new_unit is not None else None
     if not course or not new_course or (unit is not None and not unit) or (new_unit is not None and (unit is None or not new_unit)):
         raise HTTPException(status_code=400, detail="Name the course (and unit) to rename")
+    # Read before anything moves: the units this course had, so a course rename can carry
+    # each unit's seen-question history across.
+    renamed_units = [unit] if unit is not None else _units_in_course(user["id"], course)
     moved = flashcards.move_notes(user["id"], course, unit, new_course, new_unit)
     # Practice test history and study guides follow their course or unit too.
     practice_tests.move_scope(user["id"], course, unit, new_course, new_unit)
     study_guides.move_scope(user["id"], course, unit, new_course, new_unit)
+    # Seen-question history is keyed by a hash of the names; without this, a rename would
+    # bring back every question the student already had in that unit.
+    questions.move_seen_scopes(user["id"], [
+        (questions.question_scope(course, old_unit), questions.question_scope(new_course, new_unit if unit is not None and new_unit is not None else old_unit))
+        for old_unit in renamed_units
+    ])
     return {"moved": moved}
+
+
+def _units_in_course(student_id: str, course: str) -> list[str]:
+    """Every unit name this student uses in a course (notes, practice tests, study guides),
+    plus "" for course-wide quizzes."""
+    note_store.init_notes()
+    practice_tests.init_practice()
+    study_guides.init_guides()
+    units = {""}
+    with database.engine().connect() as connection:
+        for table, owner in ((note_store.notes, note_store.notes.c.student_id),
+                             (practice_tests.tests, practice_tests.tests.c.owner_id),
+                             (study_guides.guides, study_guides.guides.c.owner_id)):
+            units.update(connection.execute(
+                select(table.c.unit).distinct().where(owner == student_id, table.c.course == course)
+            ).scalars().all())
+    return sorted(unit or "" for unit in units)
 
 
 @app.get("/api/notes", response_model=list[NoteResponse])
