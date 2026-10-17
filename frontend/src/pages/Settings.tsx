@@ -6,6 +6,8 @@ import { useAnnounce } from '../lib/announce'
 import { useData } from '../lib/dataSource'
 import { useDrawer } from '../lib/useDrawer'
 import { InstallBindit } from '../components/AppPrompts'
+import { PlanBadge } from '../components/PlanBadge'
+import { planLabel } from '../lib/planLabels'
 import { OttoMemoryPanel } from '../components/otto/OttoMemoryPanel'
 import { OttoPreferences } from '../components/otto/OttoPreferences'
 import { useInstallOffer } from '../lib/pwa'
@@ -348,7 +350,10 @@ export function Settings({ session, onSession }: SettingsProps) {
             <form className="ui-panel" onSubmit={saveProfile} aria-busy={!profileReady}>
               <div className="settings__row">
                 <div className="settings__row-text">
-                  <label className="settings__label" htmlFor="settings-display-name">Display name</label>
+                  <span className="settings__name-line">
+                    <label className="settings__label" htmlFor="settings-display-name">Display name</label>
+                    <PlanBadge plan={profile?.plan} />
+                  </span>
                   <span className="settings__hint">Shown to friends and in group chats.</span>
                 </div>
                 <input id="settings-display-name" className="ui-input settings__control" value={displayName} onChange={(event) => setDisplayName(event.target.value)} required maxLength={40} autoComplete="nickname" autoCapitalize="words" enterKeyHint="done" disabled={!profileReady} />
@@ -491,6 +496,33 @@ export function Settings({ session, onSession }: SettingsProps) {
                   <a className="ui-link" href="/terms">Terms of Service</a>
                 </div>
               </div>
+            </div>
+          </Section>
+
+          <Section id="settings-plan" title="bindet Pro" copy="Your plan and what Pro adds.">
+            <div className="ui-panel">
+              <div className="settings__row">
+                <div className="settings__row-text">
+                  <span className="settings__label">Your plan</span>
+                  {profile?.plan === 'unlimited' ? <span className="settings__hint">Unlimited: no daily limits on AI features.</span> : null}
+                  {profile?.plan === 'pro' ? <span className="settings__hint">You have 3× the AI limits of the Free plan.</span> : null}
+                </div>
+                <span className="settings__plan-value">
+                  <span className="settings__value">{planLabel(profile?.plan)}</span>
+                  <PlanBadge plan={profile?.plan} />
+                </span>
+              </div>
+              {!profile?.plan || profile.plan === 'free' ? (
+                <div className="settings__row settings__row--stack">
+                  <span className="settings__label">What Pro adds</span>
+                  <ul className="settings__plan-list">
+                    <li><b>3× the AI limits:</b> Otto messages each hour and day, note uploads and photo reading, flashcards, quiz questions, answer checking, practice tests and study guides.</li>
+                    <li><b>3× more of Otto’s smarter model</b> for hard questions each day.</li>
+                    <li><b>A bigger share of bindet’s daily AI time</b> on busy days.</li>
+                  </ul>
+                  <p className="settings__hint">Coming soon: $7.99/month. Everything in Free stays free.</p>
+                </div>
+              ) : null}
             </div>
           </Section>
 
