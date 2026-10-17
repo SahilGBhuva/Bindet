@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { katexLoaded, loadKatex } from './katexLoader'
+import type { Katex } from './katexLoader'
 import { splitMath, unsafeTex } from './mathText'
 import './Math.css'
 
@@ -19,23 +21,7 @@ import './Math.css'
  * expression to its box, so nothing can cover the text or buttons around it.
  */
 
-type Katex = typeof import('katex')['default']
-
-let katexLoad: Promise<Katex> | null = null
-let katexReady: Katex | null = null
 const rendered = new Map<string, string | null>()
-
-function loadKatex(): Promise<Katex> {
-  if (!katexLoad) {
-    katexLoad = Promise.all([import('katex'), import('katex/dist/katex.min.css')]).then(([module]) => {
-      katexReady = module.default
-      return module.default
-    })
-    // Forget a failed load (offline) so a later render can try again.
-    katexLoad.catch(() => { katexLoad = null })
-  }
-  return katexLoad
-}
 
 const MAX_CACHE = 500
 
@@ -67,7 +53,7 @@ function toHtml(katex: Katex, tex: string, display: boolean): string | null {
 }
 
 export function MathExpression({ tex, display, source }: { tex: string; display: boolean; source: string }) {
-  const [katex, setKatex] = useState<Katex | null>(katexReady)
+  const [katex, setKatex] = useState<Katex | null>(katexLoaded)
   useEffect(() => {
     if (katex) return
     let live = true
