@@ -7,9 +7,10 @@ import {
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
 import { loadNotebook, withCourseTones } from '../lib/session'
-import { addMonths, dueCountdown, groupByDay, isWeekend, monthGrid, monthStart, moveDay, sameMonth, weekDays, weekStart } from '../lib/calendar'
+import { addMonths, daysBetween, dueCountdown, groupByDay, isWeekend, monthGrid, monthStart, moveDay, sameMonth, weekDays, weekStart } from '../lib/calendar'
 import { addDays, formatClockTime, isoDay, lowerMeridiem, parseDay } from '../lib/time'
-import { courseInitial, toneForName } from '../lib/tones'
+import { courseInitial, toneForName, type Tone } from '../lib/tones'
+import { parseQuickAdd } from '../lib/quickAdd'
 import { useDrawer } from '../lib/useDrawer'
 import { useAnnounce } from '../lib/announce'
 import './Goals.css'
@@ -26,7 +27,7 @@ import './Goals.css'
 
 type Tab = 'mine' | 'group' | 'calendar'
 type View = 'list' | 'board'
-type Draft = { due_date?: string; status?: TaskStatus; group_id?: string | null }
+type Draft = { due_date?: string; status?: TaskStatus; group_id?: string | null; title?: string; course?: string }
 type Toast = { text: string; undo?: () => void; error?: boolean }
 type Counts = Partial<Pick<Task, 'checklist_total' | 'checklist_done' | 'comment_count' | 'attachment_count'>>
 
@@ -35,11 +36,11 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'group', label: 'Group Tasks', icon: 'people' },
   { id: 'calendar', label: 'Calendar', icon: 'rect' },
 ]
-const STATUSES: { id: TaskStatus; label: string }[] = [
-  { id: 'todo', label: 'To do' },
-  { id: 'in_progress', label: 'In progress' },
-  { id: 'review', label: 'Final check' },
-  { id: 'done', label: 'Done' },
+const STATUSES: { id: TaskStatus; label: string; tone: Tone; icon: IconName }[] = [
+  { id: 'todo', label: 'To do', tone: 'blue', icon: 'dot-circle' },
+  { id: 'in_progress', label: 'In progress', tone: 'amber', icon: 'clock' },
+  { id: 'review', label: 'Final check', tone: 'violet', icon: 'search' },
+  { id: 'done', label: 'Done', tone: 'green', icon: 'check' },
 ]
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 const PRIORITY_LABEL: Record<TaskPriority, string> = { low: 'Low priority', medium: 'Medium priority', high: 'High priority', urgent: 'Urgent' }
@@ -85,6 +86,15 @@ function cardSummary(task: Task, today: string) {
 
 function isOverdue(task: Task, today: string) {
   return task.status !== 'done' && !!task.due_date && task.due_date < today
+}
+
+/* The colored due badge on cards: red overdue, orange today, amber in the next three days, plain later. */
+function dueBadge(task: Task, today: string): { label: string; tone: 'danger' | 'orange' | 'amber' | 'plain' } | null {
+  if (!task.due_date || task.status === 'done') return null
+  if (task.due_date < today) return { label: 'Overdue', tone: 'danger' }
+  if (task.due_date === today) return { label: task.due_time ? `Today ${timeLabel(task.due_time)}` : 'Today', tone: 'orange' }
+  if (task.due_date <= addDays(today, 3)) return { label: task.due_date === addDays(today, 1) ? 'Tomorrow' : weekdayLong.format(parseDay(task.due_date)).slice(0, 3), tone: 'amber' }
+  return { label: shortDate.format(parseDay(task.due_date)), tone: 'plain' }
 }
 
 function sortTasks(list: Task[]) {
@@ -159,7 +169,7 @@ function clearTaskLink() {
 /* ---------- icons ---------- */
 
 type IconName = 'triangle' | 'people' | 'rect' | 'edit' | 'pencil' | 'list' | 'board' | 'close-box' | 'close'
-  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh' | 'calendar'
+  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh' | 'calendar' | 'flag' | 'search' | 'tasks'
 const ICONS: Record<IconName, ReactNode> = {
   triangle: <path d="M12 5 20 19H4z" />,
   people: <><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M16 5.3a3 3 0 0 1 0 5.4M18 14.4c1.6.7 2.7 2.3 3 4.6" /></>,
@@ -178,6 +188,9 @@ const ICONS: Record<IconName, ReactNode> = {
   'chevron-left': <path d="m14.5 6-6 6 6 6" />,
   'chevron-right': <path d="m9.5 6 6 6-6 6" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  flag: <><path d="M6 21V4.5" /><path d="M6 5h11l-2.2 4L17 13H6" /></>,
+  search: <><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></>,
+  tasks: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>,
   calendar: <><rect x="4" y="5.5" width="16" height="14" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></>,
   refresh: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
@@ -189,6 +202,69 @@ function Icon({ name }: { name: IconName }) {
 
 function Avatar({ name }: { name: string }) {
   return <span className={`ui-avatar tasks-avatar ui-tone--${toneForName(name)}`} title={name} aria-hidden="true">{initials(name)}</span>
+}
+
+/* ---------- one-line quick add ---------- */
+
+const chipDate = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+
+/* "Bio lab report due Friday" → a task for Biology due Friday. The parts it understood show as
+   chips that can be removed (the words then stay in the title); Enter saves; More options opens
+   the full form filled in. */
+function QuickAddBar({ today, courses, colorFor, onSave, onMore }: {
+  today: string; courses: string[]; colorFor: (task: Task) => string
+  onSave: (input: TaskInput & { title: string }) => void; onMore: (draft: Draft) => void
+}) {
+  const [text, setText] = useState('')
+  const [ignoreDate, setIgnoreDate] = useState(false)
+  const [ignoreCourse, setIgnoreCourse] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const parsed = parseQuickAdd(text, { today, courses, ignoreDate, ignoreCourse })
+  const typed = text.trim().length > 0
+  const reset = () => { setText(''); setIgnoreDate(false); setIgnoreCourse(false) }
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!typed) return
+    onSave({ title: parsed.title, due_date: parsed.due_date, course: parsed.course ?? '' })
+    reset()
+  }
+  const days = parsed.due_date ? daysBetween(today, parsed.due_date) : null
+  const dateTone = days === null ? '' : days < 0 ? 'is-late' : days === 0 ? 'ui-tone--orange' : days <= 3 ? 'ui-tone--amber' : 'ui-tone--blue'
+  return (
+    <form className="tasks-quick" onSubmit={submit}>
+      <div className="tasks-quick__field">
+        <span className="tasks-quick__icon" aria-hidden="true"><Icon name="plus" /></span>
+        <input ref={inputRef} className="tasks-quick__input" value={text} maxLength={200} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
+          placeholder="Add an assignment… e.g. Bio lab report due Friday" aria-label="Add an assignment" aria-describedby="tasks-quick-preview"
+          onChange={(event) => { setText(event.target.value); if (!event.target.value.trim()) { setIgnoreDate(false); setIgnoreCourse(false) } }}
+          onKeyDown={(event) => { if (event.key === 'Escape' && text) { event.preventDefault(); event.stopPropagation(); reset() } }} />
+        <button type="submit" className="ui-button ui-button--sm tasks-quick__save" disabled={!typed}>Add</button>
+      </div>
+      <div className="tasks-quick__preview" id="tasks-quick-preview">
+        {typed ? (
+          <>
+            <span className="tasks-quick__title"><span className="sr-only">Will add </span>“{parsed.title}”</span>
+            {parsed.course ? (
+              <span className="tasks-quick__chip is-course" style={{ '--course': colorFor({ course: parsed.course } as Task) } as CSSProperties}>
+                <span className="ui-course-mark ui-course-mark--sm" aria-hidden="true">{courseInitial(parsed.course)}</span>
+                <span><span className="sr-only">Course: </span>{parsed.course}</span>
+                <button type="button" aria-label={`Remove course ${parsed.course}`} title="Remove course" onClick={() => { setIgnoreCourse(true); inputRef.current?.focus() }}><Icon name="close" /></button>
+              </span>
+            ) : null}
+            {parsed.due_date ? (
+              <span className={`tasks-quick__chip is-date ${dateTone}`}>
+                <Icon name="calendar" />
+                <span><span className="sr-only">Due </span>{chipDate.format(parseDay(parsed.due_date))} · {dueCountdown(parsed.due_date, today)}</span>
+                <button type="button" aria-label="Remove due date" title="Remove due date" onClick={() => { setIgnoreDate(true); inputRef.current?.focus() }}><Icon name="close" /></button>
+              </span>
+            ) : <span className="tasks-quick__none">No due date</span>}
+          </>
+        ) : <span className="tasks-quick__tip">Add a date like “tomorrow”, “Fri” or “Oct 24”, and a course like “Bio”.</span>}
+        <button type="button" className="ui-link tasks-quick__more"
+          onClick={() => { onMore(typed ? { title: parsed.title, due_date: parsed.due_date ?? undefined, course: parsed.course ?? undefined } : {}); reset() }}>More options</button>
+      </div>
+    </form>
+  )
 }
 
 /* ---------- page ---------- */
@@ -499,8 +575,35 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const todayDate = parseDay(today)
   const defaultGroup = tab === 'group' ? groups[0]?.id ?? null : null
 
+  /* Calendar colors: each course keeps its notebook color; courses only seen on tasks get the
+     notebook's own stable pick, avoiding colors already taken. Then the group's tone, then ink. */
+  const calendarCourses = useMemo(() => {
+    const names = new Map<string, string>()
+    for (const name of [...courses, ...tasks.map((task) => task.course)]) if (name.trim() && !names.has(name.trim().toLowerCase())) names.set(name.trim().toLowerCase(), name.trim())
+    return [...names.values()].sort((a, b) => a.localeCompare(b))
+  }, [courses, tasks])
+  const courseTones = useMemo(() => {
+    const known = new Set(notebookCourses.map((item) => item.name.toLowerCase()))
+    const toned = withCourseTones([...notebookCourses, ...calendarCourses.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, units: [] }))])
+    return new Map(toned.map((item) => [item.name.toLowerCase(), item.tone ?? '']))
+  }, [notebookCourses, calendarCourses])
+  const colorFor = useCallback((task: Task) => {
+    if (task.course) return courseTones.get(task.course.trim().toLowerCase()) || 'var(--color-text-tertiary)'
+    if (task.group_name) return `var(--color-${toneForName(task.group_name)})`
+    return 'var(--color-text-tertiary)'
+  }, [courseTones])
+
+  /* The header's at-a-glance numbers, over the student's own tasks (personal and assigned). */
+  const weekAgo = addDays(today, -6)
+  const stats: { label: string; value: number; tone: Tone | 'danger'; icon: IconName }[] = [
+    { label: 'Due today', value: mine.filter((task) => task.status !== 'done' && task.due_date === today).length, tone: 'orange', icon: 'clock' },
+    { label: 'Overdue', value: mine.filter((task) => isOverdue(task, today)).length, tone: 'danger', icon: 'flag' },
+    { label: 'Next 7 days', value: mine.filter((task) => task.status !== 'done' && !!task.due_date && task.due_date > today && task.due_date <= addDays(today, 7)).length, tone: 'blue', icon: 'calendar' },
+    { label: 'Done this week', value: mine.filter((task) => task.status === 'done' && !!task.completed_at && isoDay(new Date(parseServerTime(task.completed_at))) >= weekAgo).length, tone: 'green', icon: 'check' },
+  ]
+
   const panel = draft
-    ? <TaskComposer draft={draft} groups={groups} me={me} onCancel={closePanel} onCreate={(input) => void create(input)} />
+    ? <TaskComposer draft={draft} groups={groups} me={me} courses={calendarCourses} onCancel={closePanel} onCreate={(input) => void create(input)} />
     : selected
       ? <TaskPanel
           key={selected.id}
@@ -522,35 +625,38 @@ export function Goals({ session }: { session: AuthSession | null }) {
       : null
   const drawerOpen = asDrawer && !!panel
 
-  /* Calendar colors: each course keeps its notebook color; courses only seen on tasks get the
-     notebook's own stable pick, avoiding colors already taken. Then the group's tone, then ink. */
-  const calendarCourses = useMemo(() => {
-    const names = new Map<string, string>()
-    for (const name of [...courses, ...tasks.map((task) => task.course)]) if (name.trim() && !names.has(name.trim().toLowerCase())) names.set(name.trim().toLowerCase(), name.trim())
-    return [...names.values()].sort((a, b) => a.localeCompare(b))
-  }, [courses, tasks])
-  const courseTones = useMemo(() => {
-    const known = new Set(notebookCourses.map((item) => item.name.toLowerCase()))
-    const toned = withCourseTones([...notebookCourses, ...calendarCourses.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, units: [] }))])
-    return new Map(toned.map((item) => [item.name.toLowerCase(), item.tone ?? '']))
-  }, [notebookCourses, calendarCourses])
-  const colorFor = useCallback((task: Task) => {
-    if (task.course) return courseTones.get(task.course.trim().toLowerCase()) || 'var(--color-text-tertiary)'
-    if (task.group_name) return `var(--color-${toneForName(task.group_name)})`
-    return 'var(--color-text-tertiary)'
-  }, [courseTones])
   // The calendar takes the full width; a task opens over it in a drawer.
   const calendarFull = tab === 'calendar' && !phone
 
-  const card: CardProps = { today, selectedId: activeId, onSelect: select, onPrefetch: loadDetail }
+  const card: CardProps = { today, selectedId: activeId, onSelect: select, onPrefetch: loadDetail, colorFor }
 
   return (
     <div className="ui-page tasks-page">
       <div className={`tasks-sheet${calendarFull ? ' is-full' : ''}`}>
-        <header className="tasks-head">
-          <h1 className="tasks-title">Tasks</h1>
-          <button type="button" className="tasks-icon-button" onClick={() => setReload((count) => count + 1)} aria-label="Refresh tasks" title="Refresh tasks"><Icon name="refresh" /></button>
-          <button type="button" className="ui-button ui-button--sm ui-button--primary tasks-add" onClick={() => compose({ group_id: defaultGroup })}><Icon name="plus" />Add task</button>
+        <header className="tasks-hero">
+          <div className="tasks-hero__top">
+            <span className="tasks-hero__icon" aria-hidden="true"><Icon name="tasks" /></span>
+            <div className="tasks-hero__text">
+              <h1 className="tasks-title">Tasks</h1>
+              <p className="tasks-hero__date"><span className="sr-only">Today is </span>{longDate.format(todayDate)}</p>
+            </div>
+            <div className="tasks-hero__actions">
+              <button type="button" className="tasks-icon-button tasks-hero__refresh" onClick={() => setReload((count) => count + 1)} aria-label="Refresh tasks" title="Refresh tasks"><Icon name="refresh" /></button>
+              <button type="button" className="ui-button tasks-add" onClick={() => compose({ group_id: defaultGroup })}><Icon name="plus" />Add task</button>
+            </div>
+          </div>
+          <ul className="tasks-stats" aria-label="Your tasks at a glance">
+            {stats.map((item) => (
+              <li key={item.label} className={`tasks-stat ${item.tone === 'danger' ? 'is-danger' : `ui-tone--${item.tone}`}`}>
+                <span className="tasks-stat__icon" aria-hidden="true"><Icon name={item.icon} /></span>
+                <span className="tasks-stat__label">{item.label}</span>
+                <strong className="tasks-stat__value">{item.value}</strong>
+              </li>
+            ))}
+          </ul>
+          <QuickAddBar today={today} courses={calendarCourses} colorFor={colorFor}
+            onSave={(input) => void create({ ...input, group_id: tab === 'group' ? defaultGroup : null }, false)}
+            onMore={(input) => compose({ ...input, group_id: tab === 'group' ? defaultGroup : null })} />
         </header>
 
         {visibleNotice ? (
@@ -562,11 +668,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
         ) : null}
 
         <div className="tasks-main">
-          <p className="tasks-date">
-            <span className="tasks-date__tile" aria-hidden="true">{todayDate.getDate()}</span>
-            <span className="sr-only">Today is </span>{longDate.format(todayDate)}
-          </p>
-
           <div className="tasks-tabbar">
             <div
               className="tasks-tabs"
@@ -671,19 +772,28 @@ function TasksSkeleton() {
 
 /* ---------- boxes and cards ---------- */
 
-type CardProps = { today: string; selectedId: string | null; onSelect: (id: string) => void; onPrefetch: (id: string) => void }
+type CardProps = { today: string; selectedId: string | null; onSelect: (id: string) => void; onPrefetch: (id: string) => void; colorFor: (task: Task) => string }
 
 /* A rounded bar with just the title; the open task gets the sketch's diagonal hatch. */
 function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { dragging: boolean; onStart: (event: DragEvent) => void; onEnd: () => void } }) {
-  const { today, selectedId, onSelect, onPrefetch } = card
+  const { today, selectedId, onSelect, onPrefetch, colorFor } = card
   const pending = task.id.startsWith('temp-')
   const isSelected = task.id === selectedId
+  const due = dueBadge(task, today)
+  const flag = task.priority === 'urgent' || task.priority === 'high'
   return (
     <li data-task-id={task.id} className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
-      draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
+      style={{ '--course': colorFor(task) } as CSSProperties} draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
         <span className="task-card__title">{task.title}</span>
+        {due || flag || task.course ? (
+          <span className="task-card__meta" aria-hidden="true">
+            {due ? <span className={`task-badge is-${due.tone}`}>{due.label}</span> : null}
+            {flag ? <span className={`task-flag is-${task.priority}`} title={PRIORITY_LABEL[task.priority]}><Icon name="flag" /></span> : null}
+            {task.course ? <span className="task-card__course">{task.course}</span> : null}
+          </span>
+        ) : null}
         <span className="sr-only">, {cardSummary(task, today)}</span>
       </button>
     </li>
@@ -695,10 +805,10 @@ function TaskBox({ kind, id, tasks, card, onCompose, composeLabel = 'New task' }
 }) {
   const open = tasks.filter((task) => task.status !== 'done').length
   return (
-    <section className={`tasks-box is-${kind}`} aria-labelledby={id}>
+    <section className={`tasks-box is-${kind} ui-tone--${kind === 'todo' ? 'blue' : 'teal'}`} aria-labelledby={id}>
       <header className="tasks-box__head">
         <h2 id={id}>
-          <Icon name={kind === 'todo' ? 'triangle' : 'rect'} />
+          <span className="tasks-box__chip" aria-hidden="true"><Icon name={kind === 'todo' ? 'triangle' : 'people'} /></span>
           {kind === 'todo' ? 'To do' : 'Assigned'}
           {kind === 'todo' ? <span className="tasks-box__count" aria-label={`${open} open`}>{open}</span> : null}
         </h2>
@@ -761,12 +871,12 @@ function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Tas
         // card dragged into Done doesn't look like it vanished.
         const hidden = status.id === 'done' ? hiddenDone : 0
         return (
-          <section key={status.id} className={`tasks-box tasks-board__column${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
+          <section key={status.id} className={`tasks-box tasks-board__column ui-tone--${status.tone}${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
             onDragOver={(event) => { if (dragging) { event.preventDefault(); setOver(status.id) } }}
             onDragLeave={() => setOver((current) => current === status.id ? null : current)}
             onDrop={(event) => drop(event, status.id)}>
             <header className="tasks-box__head">
-              <h2 id={`tasks-board-${status.id}`}>{status.label}<span className="tasks-box__count">{items.length + hidden}</span></h2>
+              <h2 id={`tasks-board-${status.id}`}><span className="tasks-box__chip" aria-hidden="true"><Icon name={status.icon} /></span>{status.label}<span className="tasks-box__count">{items.length + hidden}</span></h2>
             </header>
             {items.length ? (
               <ul className="task-cards">
@@ -1166,11 +1276,12 @@ function KindToggle({ value, onChange }: { value: Task['kind']; onChange: (kind:
   )
 }
 
-function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
-  draft: Draft; groups: StudyGroup[]; me: string
+function TaskComposer({ draft, groups, me, courses, onCancel, onCreate }: {
+  draft: Draft; groups: StudyGroup[]; me: string; courses: string[]
   onCancel: () => void; onCreate: (input: TaskInput & { title: string }) => void
 }) {
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(draft.title ?? '')
+  const [course, setCourse] = useState(draft.course ?? '')
   const [kind, setKind] = useState<Task['kind']>('task')
   const [dueDate, setDueDate] = useState(draft.due_date ?? '')
   const [dueTime, setDueTime] = useState('')
@@ -1183,7 +1294,7 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
     event.preventDefault()
     if (!title.trim()) return
     onCreate({
-      title: title.trim(), kind, priority, location: location.trim(), status: draft.status ?? 'todo',
+      title: title.trim(), kind, priority, location: location.trim(), status: draft.status ?? 'todo', course: course.trim(),
       due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null,
       group_id: groupId || null, assignee_ids: groupId && assignees.length ? assignees : [me],
     })
@@ -1199,6 +1310,10 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
         <div className="task-form">
           <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
           <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={dueTime} disabled={!dueDate} onChange={(event) => setDueTime(event.target.value)} /></label>
+          <label className="ui-field is-wide"><span>Course</span>
+            <input className="ui-input" value={course} onChange={(event) => setCourse(event.target.value)} placeholder="Optional" maxLength={120} autoComplete="off" list="task-compose-courses" enterKeyHint="done" />
+            <datalist id="task-compose-courses">{courses.map((name) => <option key={name} value={name} />)}</datalist>
+          </label>
           <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Optional" maxLength={200} autoComplete="off" enterKeyHint="done" /></label>
           <label className="ui-field"><span>Priority</span>
             <select className="ui-select" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
@@ -1497,7 +1612,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
           </div>
         </div>
 
-        <span className={`task-chip${task.priority === 'urgent' ? ' is-urgent' : ''}`}><Icon name="dot-circle" />{PRIORITY_LABEL[task.priority]}</span>
+        <span className={`task-chip task-priority is-${task.priority}`}><Icon name="flag" />{PRIORITY_LABEL[task.priority]}</span>
 
         {expanded ? (
           <div className="task-more-fields" id={`task-more-${task.id}`}>
