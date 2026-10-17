@@ -179,6 +179,55 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(rate_limit.plan_of("pro-1", now=1000.0 + rate_limit.PLAN_CACHE_SECONDS + 1), "free")
         self.assertLessEqual(rate_limit.PLAN_CACHE_SECONDS, 300)
 
+    # --- notifications ------------------------------------------------------------
+
+    def plan_notices(self, student_id: str) -> list[str]:
+        return [item["message"] for item in database.notifications_for(student_id) if item["kind"] == "plan_granted"]
+
+    def test_plan_notice_is_sent_once(self):
+        database.onboard_account("pro-1", "prouser", "Pro", None)
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        self.sign_in(PRO)
+        self.assertEqual(self.plan_notices("pro-1"), [plans.PLAN_NOTICES["pro"]])
+        for _ in range(3):
+            rate_limit.forget_plans()  # every later sign-in check re-reads the plan
+            self.sign_in(PRO)
+        self.assertEqual(self.plan_notices("pro-1"), [plans.PLAN_NOTICES["pro"]])
+        self.assertEqual(plans.PLAN_NOTICES["pro"], "You’ve been given bindet Pro: 3× more AI help every day.")
+
+    def test_grant_before_sign_up_notifies_once_the_account_exists(self):
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        self.sign_in(PRO)  # signed up, profile not set up yet: nothing to attach it to
+        self.assertEqual(self.plan_notices("pro-1"), [])
+        database.onboard_account("pro-1", "prouser", "Pro", None)
+        rate_limit.forget_plans()
+        self.sign_in(PRO)
+        self.assertEqual(self.plan_notices("pro-1"), [plans.PLAN_NOTICES["pro"]])
+
+    def test_env_owner_is_told_about_unlimited_once(self):
+        database.onboard_account("owner-1", "owneruser", "Owner", None)
+        self.sign_in(OWNER)
+        rate_limit.forget_plans()
+        self.sign_in(OWNER)
+        self.assertEqual(self.plan_notices("owner-1"), [plans.PLAN_NOTICES["unlimited"]])
+
+    def test_each_plan_level_once_and_revoking_is_silent(self):
+        database.onboard_account("pro-1", "prouser", "Pro", None)
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        self.sign_in(PRO)
+        self.call("POST", "/api/admin/plans", OWNER, json={"email": "pro.student@example.com", "plan": "unlimited"})
+        self.sign_in(PRO)
+        self.call("DELETE", "/api/admin/plans/pro.student@example.com", OWNER)
+        self.sign_in(PRO)
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        self.sign_in(PRO)
+        self.assertEqual(sorted(self.plan_notices("pro-1")), sorted([plans.PLAN_NOTICES["pro"], plans.PLAN_NOTICES["unlimited"]]))
+
+    def test_free_accounts_get_no_plan_notice(self):
+        database.onboard_account("free-1", "freeuser", "Free", None)
+        self.sign_in(FREE)
+        self.assertEqual(self.plan_notices("free-1"), [])
+
     # --- limits -------------------------------------------------------------------
 
     def test_pro_gets_three_times_the_ai_limits_and_free_does_not(self):

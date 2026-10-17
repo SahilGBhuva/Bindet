@@ -15,6 +15,12 @@ A plan only counts for an account whose email is confirmed (email_confirmed_at),
 an unconfirmed or anonymous one. auth resolves it on each sign-in check and caches it in
 rate_limit for PLAN_CACHE_SECONDS, so a revoke takes effect within a few minutes on
 every server instance (immediately on the one that handled it).
+
+The first time an account is seen with a plan (including owner accounts, shown as
+Unlimited), it gets one plan_granted notification per plan level. Grants are keyed by
+email and the backend can't look an email up, so the notice is sent at the account's
+next sign-in check after the grant (within PLAN_CACHE_SECONDS while it is using bindet).
+Revoking sends nothing.
 """
 from __future__ import annotations
 
@@ -84,7 +90,8 @@ def plan_for_user(user: dict | None) -> str:
 
 def refresh(user: dict) -> None:
     """Called by auth for every verified account: re-read the plan once the cached one is stale.
-    A database error counts as Free (until the next refresh) and never fails sign-in."""
+    A database error counts as Free (until the next refresh) and never fails sign-in.
+    The first time an account is seen with a plan, it gets a notification (notify_plan)."""
     student_id = str(user.get("id") or "")
     if not student_id or rate_limit.plan_is_fresh(student_id):
         return
@@ -93,6 +100,44 @@ def refresh(user: dict) -> None:
     except Exception:  # noqa: BLE001 - a plan lookup must never block signing in
         plan = "free"
     rate_limit.mark_plan(student_id, plan)
+    try:
+        notify_plan(student_id, shown_plan(student_id))
+    except Exception:  # noqa: BLE001 - a missed notice is retried at the next refresh
+        pass
+
+
+# Told once per account and plan level, in the app's notifications (Home and Friends).
+PLAN_NOTICE_KIND = "plan_granted"
+PLAN_NOTICES = {
+    "pro": "You’ve been given bindet Pro: 3× more AI help every day.",
+    "unlimited": "You’ve been given bindet Unlimited: no daily limits on AI features.",
+}
+
+
+def notify_plan(student_id: str, plan: str) -> bool:
+    """Send the "you've been given a plan" notification unless this account already has it
+    for this plan level. The notification itself is the record, so a revoke and re-grant,
+    later sign-ins and other server instances never send it twice. Needs a profile (the
+    notification references it); without one it waits for a later refresh. True if sent."""
+    message = PLAN_NOTICES.get(plan)
+    if not student_id or not message:
+        return False
+    database.init_db()
+    notices = database.social_notifications
+    with database.engine().begin() as connection:
+        database._advisory_lock(connection, f"plan_notice:{student_id}")
+        if connection.execute(select(database.profiles.c.student_id).where(
+                database.profiles.c.student_id == student_id)).first() is None:
+            return False
+        if connection.execute(select(notices.c.id).where(
+                notices.c.recipient_id == student_id, notices.c.kind == PLAN_NOTICE_KIND,
+                notices.c.message == message).limit(1)).first() is not None:
+            return False
+        connection.execute(notices.insert().values(
+            recipient_id=student_id, actor_id=None, kind=PLAN_NOTICE_KIND, message=message,
+            is_read=False, created_at=datetime.now(timezone.utc),
+        ))
+    return True
 
 
 def shown_plan(student_id: str) -> str:
