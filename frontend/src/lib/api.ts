@@ -650,6 +650,23 @@ export function gradeReviewCard(cardId: string, grade: ReviewGrade, accessToken?
   }, accessToken)
 }
 
+/* Instant Study's key points: four to six bullets from a unit's notes (cached on the server per note text). */
+export type KeyPoints = { course: string; unit: string; points: string[]; source: 'cached' | 'generated' }
+
+export function getKeyPoints(course: string, unit: string, accessToken?: string, signal?: AbortSignal) {
+  return request<KeyPoints>('/api/instant-study/key-points', {
+    method: 'POST',
+    body: JSON.stringify({ course, unit }),
+    signal,
+    timeoutMs: AI_TIMEOUTS.question,
+  }, accessToken)
+}
+
+/* The answer to a quiz question. The server closes the question first, so it can't earn XP afterwards. */
+export function revealAnswer(questionId: string, accessToken?: string) {
+  return request<{ question_id: string; correct_answer: string }>(`/api/questions/${encodeURIComponent(questionId)}/reveal`, { method: 'POST' }, accessToken)
+}
+
 export function analyzeAnswer(question: GeneratedQuestion, studentAnswer: string, studentId: string, accessToken?: string) {
   return request<AnswerResult>('/api/analyze-answer', {
     method: 'POST',
