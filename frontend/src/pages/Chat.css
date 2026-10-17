@@ -335,10 +335,10 @@
 }
 .chat__icon-button:hover { background: color-mix(in srgb, var(--tone, var(--color-blue)) 10%, var(--color-surface)); }
 .chat__icon-button:active { transform: scale(.94); }
-.chat__icon-button svg { width: 20px; height: 20px; }
+.chat__icon-button svg { flex: none; width: 20px; height: 20px; }
 /* Back: the arrow with the unread count beside it, like a phone's Messages app. */
 .chat__back { display: inline-flex; gap: 0; align-items: center; justify-content: center; width: auto; min-width: 44px; padding: 0 6px 0 2px; border-color: transparent; background: transparent; }
-.chat__back svg { width: 24px; height: 24px; stroke-width: 2.2; }
+.chat__back svg { flex: none; width: 26px; height: 26px; stroke-width: 2.2; }
 .chat__back .chat__unread { min-width: 20px; height: 20px; padding: 0 6px; font-size: 11px; }
 
 /* The thread sits on a faint wash of the room's color with a quiet dot grid. */
