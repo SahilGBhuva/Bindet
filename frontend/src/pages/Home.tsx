@@ -13,6 +13,7 @@ import { toneClass, toneForName } from '../lib/tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
+import { SnapNotes } from '../components/SnapNotes'
 import './Home.css'
 
 /*
@@ -557,6 +558,9 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
             )}
           </section>
         </header>
+
+        {/* Phones only (Home.css): one tap from Home to the camera. */}
+        <SnapNotes accessToken={token} notebook={notebook} onNotebook={(next) => setNotebook({ ...next, courses: withCourseTones(next.courses) })} />
 
         {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="home-setup" /> : null}
         {data.sandboxed ? null : firstRun}

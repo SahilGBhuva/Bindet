@@ -95,6 +95,8 @@ type Decision =
 const ACTION_NAMES: [string, string][] = [
   ['.tools__dropzone-button, .tools__upload *', 'Upload notes'],
   ['.tools__paste *', 'Add typed notes'],
+  // Home's Snap notes (phones): the camera, its course picker and Change all open sign-up.
+  ['.home-snap, .home-snap *', 'Snap notes'],
   ['.tools__course-menu *', 'Course options'],
   ['.tools__note-cards *', 'Make flashcards'],
   ['.tools__deck-status *', 'Make flashcards'],
