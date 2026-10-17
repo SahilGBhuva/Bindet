@@ -219,13 +219,19 @@ def note_text(title: str, chat: str, notes: str) -> str:
     return "\n\n".join(parts).strip()
 
 
+_QUESTION_LEAD = re.compile(r"^(?:what\s+(?:is|are|was|were)|what's|whats|who\s+(?:is|was)|explain|define|how\s+(?:does|do|did)|tell\s+me\s+about)\s+(?:an?\s+|the\s+)?", re.I)
+
+
 def topic_title(conversation_title: str, target: str, unit: str) -> str:
     """What the deck or quiz is about, for the note name and Otto's reply."""
     title = " ".join((conversation_title or "").split())
     if target:
         return target[:80]
     if title and title != ai_tutor.DEFAULT_TITLE and not detect_intent(title):
-        return title[:80]
+        # A question-style title ("What is apoptosis?") names its topic ("apoptosis").
+        topic = re.sub(r"\s+(?:work|works|happen|happens|mean|means)$", "", _QUESTION_LEAD.sub("", title).strip(" ?!."), flags=re.I)
+        topic = topic[:1].upper() + topic[1:] if topic else title
+        return topic[:80]
     return unit[:80] or "our chat"
 
 

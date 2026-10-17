@@ -4311,7 +4311,8 @@ def otto_make_reply(owner: str, plan: dict, new_questions: bool = False) -> tupl
                     f"They’re saved in {unit} as “{note['file_name']}”.", [otto_make.deck_attachment(note["id"])])
         test = make_practice_test(owner, course, unit, plan["count"], None, "", new_questions, (note["text"], [note["id"]]))
         count = test["question_count"]
-        fresh = "Here’s a new" if new_questions else "Here’s a"
+        article = "an" if str(count).startswith(("8", "11")) or count == 18 else "a"
+        fresh = "Here’s a new" if new_questions else f"Here’s {article}"
         return (f"{fresh} {count}-question quiz on {topic} from {sources}. Answer right here — you’ll see after each question "
                 "whether you got it.", [otto_make.quiz_attachment(test["id"], note["id"])])
     except HTTPException as error:

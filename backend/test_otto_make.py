@@ -159,6 +159,13 @@ class IntentTests(unittest.TestCase):
         self.assertIsNotNone(study_guides.detect_intent("make me a study guide for cells"))
         self.assertIsNone(study_guides.detect_intent("quiz me on cells"))
 
+    def test_topic_comes_from_the_target_or_a_question_style_title(self):
+        self.assertEqual(otto_make.topic_title("What is apoptosis?", "", "Cell death"), "Apoptosis")
+        self.assertEqual(otto_make.topic_title("How does mitosis work?", "", "Cells"), "Mitosis")
+        self.assertEqual(otto_make.topic_title("Mitosis phases", "", "Cells"), "Mitosis phases")
+        self.assertEqual(otto_make.topic_title("Mitosis phases", "meiosis", "Cells"), "meiosis")
+        self.assertEqual(otto_make.topic_title("New conversation", "", "Cells"), "Cells")
+
     def test_quiz_length_is_clamped(self):
         self.assertEqual([otto_make.quiz_count(value) for value in (None, 3, 8, 12, 40)], [8, 5, 8, 12, 15])
 
@@ -351,7 +358,7 @@ class QuizTests(MakeTestCase):
         self.assertEqual((test["question_count"], test["time_limit_s"], test["unit"]), (8, None, "Cell division"))
         self.assertNotIn("answer", test["items"][0])  # nothing is given away before it is checked
         self.assertEqual(test["items"][0]["hint"], "This one is about Mitosis phases.")
-        self.assertIn("8-question quiz on Mitosis phases", message["content"])
+        self.assertIn("Here’s an 8-question quiz on Mitosis phases", message["content"])
         self.assertEqual(self.otto_notes()[0]["id"], note_id)
         self.assertIn("anaphase the sister chromatids", self.model.tests()[0]["messages"][1]["content"])
 

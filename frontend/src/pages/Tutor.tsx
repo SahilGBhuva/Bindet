@@ -1006,7 +1006,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
                         <button type="button" className="ui-link" onClick={() => send(message.content, [], message.key)}>Retry</button>
                       </div>
                     ) : null}
-                    {isReply && !message.status && message.grounded?.length ? (
+                    {isReply && !message.status && !made.length && message.grounded?.length ? (
                       <div className="tutor-message__sources">
                         <span className="tutor-message__sources-label"><Icon name="book" />From your notes</span>
                         {message.grounded.slice(0, 4).map((name) => sourceCourse && sourceUnit ? (
