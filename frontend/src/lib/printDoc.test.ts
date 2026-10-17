@@ -83,6 +83,10 @@ describe('printFileTitle', () => {
     expect(printFileTitle('Unit 3: Cells / Energy?', 'Flashcards')).toBe('Unit 3 Cells Energy – Flashcards')
   })
 
+  it('moves a leading "Kind:" to the end', () => {
+    expect(printFileTitle('Study guide: Photosynthesis', 'Study guide')).toBe('Photosynthesis – Study guide')
+  })
+
   it('does not repeat the kind, and falls back when the title is empty', () => {
     expect(printFileTitle('Flashcards', 'flashcards')).toBe('Flashcards')
     expect(printFileTitle('   ', 'Answer key')).toBe('Answer key')

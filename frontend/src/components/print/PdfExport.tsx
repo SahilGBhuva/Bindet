@@ -83,7 +83,13 @@ const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => r
 function fitForPaper(root: HTMLElement) {
   for (const math of root.querySelectorAll<HTMLElement>('.math:not(.math--pending):not(.math--source)')) {
     math.style.fontSize = ''
-    const scale = fitScale(math.clientWidth, math.scrollWidth, 0.4)
+    // The room is the line the expression sits on: its own box for display math, else the nearest block around it.
+    let block: HTMLElement | null = math.classList.contains('math--display') ? math : math.parentElement
+    while (block && block !== root && getComputedStyle(block).display.startsWith('inline')) block = block.parentElement
+    const room = block ? block.clientWidth - parseFloat(getComputedStyle(block).paddingLeft) - parseFloat(getComputedStyle(block).paddingRight) : 0
+    const natural = math.scrollWidth
+    // A few pixels over is KaTeX's own spacing, not a long equation.
+    const scale = natural > room + 2 ? fitScale(room, natural, 0.4) : 1
     if (scale < 1) math.style.fontSize = `${scale}em`
   }
   for (const text of root.querySelectorAll<HTMLElement>('.pdoc-card__text')) {

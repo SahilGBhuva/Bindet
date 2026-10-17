@@ -143,12 +143,10 @@
 
 /* On screen: white sheets with a shadow, at a readable size on phones (scaled, never reflowed). */
 @media screen {
-  .pdoc-frame,
-  .pdoc-page { background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18), 0 8px 24px rgba(0, 0, 0, .08); }
-  .pdoc-frame { padding: 12mm; }
-  .pdoc-page { padding: 12mm; }
+  .pdoc { box-sizing: border-box; width: 210mm; }
+  .pdoc:not(.pdoc--paged),
+  .pdoc-page { padding: 12mm; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .18), 0 8px 24px rgba(0, 0, 0, .08); }
   .pdoc-page + .pdoc-page { margin-top: 8mm; }
-  .pdoc { width: calc(186mm + 24mm); }
 }
 
 /* Narrow screens see the sheet scaled down to fit (PdfExport sets --pdoc-zoom), never reflowed. */
@@ -156,7 +154,7 @@
   .pdoc { zoom: var(--pdoc-zoom, 1); }
 }
 
-.pdoc-frame { width: 100%; border-collapse: collapse; }
+.pdoc-frame { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .pdoc-frame > thead > tr > td,
 .pdoc-frame > tfoot > tr > td,
 .pdoc-frame__body { padding: 0; vertical-align: top; }
@@ -244,7 +242,7 @@
 .pdoc-grid {
   display: grid;
   grid-template-columns: repeat(2, 90mm);
-  grid-auto-rows: 57mm;
+  grid-auto-rows: 54mm;
   justify-content: center;
 }
 
@@ -331,6 +329,9 @@
 
 @media print {
   html.is-printing body > *:not(.print-root) { display: none !important; }
+  /* The root's color-scheme paints the page margins: keep them white under the dark theme too. */
+  :root.is-printing,
+  :root.is-printing[data-theme] { color-scheme: light !important; background: #fff !important; }
   html.is-printing,
   html.is-printing body {
     height: auto !important;
@@ -338,12 +339,10 @@
     overflow: visible !important;
     background: #fff !important;
     color: #000 !important;
-    color-scheme: light;
   }
   html.is-printing .print-root { position: static; display: block; background: #fff; }
   html.is-printing .print-root__bar { display: none; }
   html.is-printing .print-root__stage { overflow: visible; padding: 0; }
-  .pdoc { width: auto; zoom: 1; }
-  .pdoc-frame,
-  .pdoc-page { padding: 0; margin: 0; box-shadow: none; background: none; }
+  .pdoc,
+  .pdoc-page { width: auto; padding: 0; margin: 0; box-shadow: none; background: none; zoom: 1; }
 }

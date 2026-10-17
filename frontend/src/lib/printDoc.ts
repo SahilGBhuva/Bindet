@@ -56,8 +56,11 @@ const isControl = (char: string) => char.charCodeAt(0) < 32 || char.charCodeAt(0
  */
 export function printFileTitle(title: string, kind: string) {
   const clean = (value: string) => [...value].map((char) => (isControl(char) ? ' ' : char)).join('').replace(UNSAFE_FILE_CHARS, ' ').replace(/\s+/g, ' ').trim()
-  const name = clean(title).slice(0, 90).trim()
   const label = clean(kind)
+  // "Study guide: Photosynthesis" (the default title) becomes "Photosynthesis – Study guide".
+  let raw = title.trim()
+  if (label && raw.toLowerCase().startsWith(`${label.toLowerCase()}:`)) raw = raw.slice(label.length + 1)
+  const name = clean(raw).slice(0, 90).trim()
   if (!name) return label || 'bindet'
   if (!label || name.toLowerCase() === label.toLowerCase()) return name
   return `${name} – ${label}`

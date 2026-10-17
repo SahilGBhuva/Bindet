@@ -2423,12 +2423,15 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                 <div className={`tools__cards${focusOn ? ' is-focus' : ''}`} style={focusStyle} role="tabpanel" aria-label="Flashcards" onKeyDown={onCardsKey}>
                   {unsavedPaste}
                   {cards.length || cardMode === 'review' ? (
+                    <div className="tools__card-head">
                     <div className="ui-segmented tools__card-modes" role="group" aria-label="Flashcard mode">
                       <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'browse'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'browse' }))}>Browse</button>
                       <button className="ui-segmented__item" type="button" aria-pressed={cardMode === 'review'} onClick={() => setCardModes((current) => ({ ...current, [unitKey]: 'review' }))}>
                         Review
                         {unitReview?.due ? <span className="ui-count">{unitReview.due}</span> : null}
                       </button>
+                    </div>
+                    {cards.length ? <FlashcardsPdfButton cards={cards} course={activeCourse} unit={activeUnit} className="tools__cards-pdf" /> : null}
                     </div>
                   ) : null}
                   {cardMode === 'review' ? (
@@ -2441,12 +2444,7 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
                       next={{ label: `Quiz yourself on ${activeUnit}`, onClick: () => setPanelFn('quiz') }}
                     />
                   ) : null}
-                  {cardMode === 'browse' && card ? (
-                    <div className="tools__focus-bar tools__card-tools">
-                      <FlashcardsPdfButton cards={cards} course={activeCourse} unit={activeUnit} className="tools__cards-pdf" />
-                      {focusControls}
-                    </div>
-                  ) : null}
+                  {cardMode === 'browse' && card ? <div className="tools__focus-bar">{focusControls}</div> : null}
                   {cardMode === 'review' ? null : card ? (
                     <>
                       <button
