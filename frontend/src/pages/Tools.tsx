@@ -20,6 +20,7 @@ import { courseInitial } from '../lib/tones'
 import { MathText } from '../components/math/Math'
 import { announceReviewChange } from '../lib/review'
 import { useReviewSummary } from '../lib/useReviewSummary'
+import { createCombo, emitRewards, rewardsFromResponse } from '../lib/rewards'
 import { useNotePhoto } from '../lib/useNotePhoto'
 import { ReviewSession } from './ReviewSession'
 import { PracticeTest } from '../components/practice/PracticeTest'
@@ -394,6 +395,9 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
   const [quizQuestion, setQuizQuestion] = useState<QuizQuestion | null>(null)
   const [quizAnswer, setQuizAnswer] = useState('')
   const [quizResult, setQuizResult] = useState<AnswerResult | null>(null)
+  // Right answers in a row on this unit's quiz (visual only: lib/rewards.ts).
+  const [quizCombo] = useState(createCombo)
+  const comboUnit = useRef('')
   const [quizBusy, setQuizBusy] = useState(false)
   const [quizChecking, setQuizChecking] = useState(false)
   const [quizError, setQuizError] = useState('')
@@ -1418,6 +1422,12 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
     try {
       const result = await data.analyzeAnswer(quizQuestion, answer, studentId.current, accessToken)
       setQuizResult(result)
+      if (comboUnit.current !== unitKey) {
+        quizCombo.reset()
+        comboUnit.current = unitKey
+      }
+      quizCombo.report(result.correct)
+      emitRewards(rewardsFromResponse(result))
       data.recordUnitAttempt({
         course: activeCourse,
         unit: activeUnit || quizQuestion.topic,

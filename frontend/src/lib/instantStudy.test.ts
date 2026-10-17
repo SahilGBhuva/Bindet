@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NoteScope, ReviewSummary } from './api'
-import { instantHint, instantReason, pickInstantUnit, sessionMinutes, unitKey, type InstantInput } from './instantStudy'
+import { DEFAULT_INSTANT_PREFS, INSTANT_PREFS_KEY, instantHint, instantReason, loadInstantPrefs, pickInstantUnit, saveInstantPrefs, sessionMinutes, unitKey, type InstantInput } from './instantStudy'
 import type { NoteDeposit, UnitAttempt } from './types'
 
 const scope = (course: string, unit: string, note_count: number, last_added: string | null): NoteScope => ({ course, unit, note_count, last_added })
@@ -96,5 +96,60 @@ describe('hint text', () => {
   it('keeps sessions short', () => {
     expect(sessionMinutes({ due: 0, fresh: 0 })).toBe(5)
     expect(sessionMinutes({ due: 40, fresh: 40 })).toBe(5)
+  })
+})
+
+describe('Instant Study settings', () => {
+  const busy = () => base({
+    review: review([{ course: 'US History', unit: 'WWI causes', due: 6, new: 0 }]),
+    attempts: attempts('AP Biology', 'Photosynthesis', 0, 5),
+  })
+
+  it('Smart pick (the default) keeps today’s order: due, then weak, then newest', () => {
+    expect(pickInstantUnit(busy())).toMatchObject({ unit: 'WWI causes', reason: 'due' })
+    expect(pickInstantUnit({ ...busy(), mode: 'smart' })).toMatchObject({ unit: 'WWI causes', reason: 'due' })
+  })
+
+  it('My latest notes always picks the unit with the newest notes, even with cards due or a weak unit', () => {
+    expect(pickInstantUnit({ ...busy(), mode: 'latest' })).toMatchObject({ course: 'Chemistry', unit: 'Stoichiometry', reason: 'recent' })
+    const deposits: NoteDeposit[] = [{ id: 'n9', course: 'Art', unit: 'Color', fileName: 'a.txt', createdAt: '2026-10-15T08:00:00Z' }]
+    expect(pickInstantUnit({ ...busy(), deposits, mode: 'latest' })).toMatchObject({ course: 'Art', unit: 'Color' })
+  })
+
+  it('My latest notes works without the review summary and still moves on for another round', () => {
+    const latest = { ...base(), review: null, mode: 'latest' as const }
+    expect(pickInstantUnit(latest)).toMatchObject({ unit: 'Stoichiometry' })
+    expect(pickInstantUnit({ ...latest, exclude: [unitKey('Chemistry', 'Stoichiometry')] })).toMatchObject({ unit: 'WWI causes' })
+    expect(pickInstantUnit({ ...latest, scopes: [] })).toBeNull()
+  })
+
+  function memory(initial: Record<string, string> = {}) {
+    const data = new Map(Object.entries(initial))
+    return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value) }, data }
+  }
+
+  it('loads the defaults when nothing or something unreadable is saved', () => {
+    expect(loadInstantPrefs(memory())).toEqual(DEFAULT_INSTANT_PREFS)
+    expect(loadInstantPrefs(memory({ [INSTANT_PREFS_KEY]: '{oops' }))).toEqual(DEFAULT_INSTANT_PREFS)
+    expect(loadInstantPrefs(memory({ [INSTANT_PREFS_KEY]: '{"mode":"loud","skipKeyPoints":"yes"}' }))).toEqual(DEFAULT_INSTANT_PREFS)
+    expect(loadInstantPrefs(null)).toEqual(DEFAULT_INSTANT_PREFS)
+  })
+
+  it('saves and reads back both settings', () => {
+    const store = memory()
+    saveInstantPrefs({ mode: 'latest', skipKeyPoints: true }, store)
+    expect(loadInstantPrefs(store)).toEqual({ mode: 'latest', skipKeyPoints: true })
+    saveInstantPrefs({ mode: 'smart', skipKeyPoints: true }, store)
+    expect(loadInstantPrefs(store)).toEqual({ mode: 'smart', skipKeyPoints: true })
+  })
+
+  it('keeps the choice for this page when storage refuses it', () => {
+    const blocked = { getItem: () => null, setItem: () => { throw new Error('blocked') } }
+    saveInstantPrefs({ mode: 'latest', skipKeyPoints: false }, blocked)
+    expect(loadInstantPrefs(blocked)).toEqual({ mode: 'latest', skipKeyPoints: false })
+    // Once a save works again, the stored value is used.
+    const store = memory()
+    saveInstantPrefs({ mode: 'smart', skipKeyPoints: false }, store)
+    expect(loadInstantPrefs(store)).toEqual({ mode: 'smart', skipKeyPoints: false })
   })
 })

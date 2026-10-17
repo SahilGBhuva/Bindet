@@ -15,7 +15,9 @@ import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import { SnapNotes } from '../components/SnapNotes'
 import { InstantStudy, InstantStudyButton } from '../components/instant/InstantStudy'
-import { pickInstantUnit, type InstantPick } from '../lib/instantStudy'
+import { DEFAULT_INSTANT_PREFS, loadInstantPrefs, pickInstantUnit, type InstantPick } from '../lib/instantStudy'
+import { browserStore, claimGoalBurst, emitGoalReached, goalPercent as percentOfGoal } from '../lib/rewards'
+import { GoalRing } from '../components/rewards/GoalRing'
 import { notificationHref, notificationLabel } from '../lib/planLabels'
 import './Home.css'
 
@@ -271,6 +273,10 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   const [instant, setInstant] = useState<{ start: InstantPick | null } | null>(null)
   // Bumped when a session closes, so Home reads the new totals and notes.
   const [studied, setStudied] = useState(0)
+  // Settings → Instant Study (this device; the landing demo always uses the defaults).
+  const [instantPrefs] = useState(() => (data.sandboxed ? DEFAULT_INSTANT_PREFS : loadInstantPrefs()))
+  // The once-a-day "Goal done!" burst on the Daily goal card.
+  const [goalBurst, setGoalBurst] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -378,11 +384,12 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
       return []
     }
   }
-  const instantPick = pickInstantUnit({ scopes, deposits: notebook.deposits, review: reviewSummary, attempts: unitAttempts(), topics: stats?.topics })
+  const instantPick = pickInstantUnit({ scopes, deposits: notebook.deposits, review: reviewSummary, attempts: unitAttempts(), topics: stats?.topics, mode: instantPrefs.mode })
 
   async function chooseNext(exclude: string[]) {
-    const review = await data.getReviewSummary(token).catch(() => reviewSummary)
-    return pickInstantUnit({ scopes, deposits: data.loadNotebook().deposits, review, attempts: unitAttempts(), topics: stats?.topics, exclude })
+    // "My latest notes" doesn't need the review summary, so the next round starts at once.
+    const review = instantPrefs.mode === 'latest' ? reviewSummary : await data.getReviewSummary(token).catch(() => reviewSummary)
+    return pickInstantUnit({ scopes, deposits: data.loadNotebook().deposits, review, attempts: unitAttempts(), topics: stats?.topics, exclude, mode: instantPrefs.mode })
   }
 
   function closeInstant() {
@@ -499,7 +506,27 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   // Today's numbers for the colored stat cards (the same server totals the Progress page shows).
   const goal = profile?.daily_goal ?? 20
   const todayXp = stats?.recent_xp?.find((day) => day.day === localDate(now))?.xp ?? 0
-  const goalPercent = Math.min(100, Math.round((todayXp / Math.max(goal, 1)) * 100))
+  const goalPercent = percentOfGoal(todayXp, goal)
+  const goalMet = stats !== null && todayXp >= goal
+  const today = localDate(now)
+
+  // Reaching the goal plays the burst (and the goal sound, if on) once per day on this device.
+  // A beat after the ring has filled, so the two read as one moment.
+  useEffect(() => {
+    if (!goalMet || data.sandboxed) return
+    const timer = window.setTimeout(() => {
+      if (!claimGoalBurst(today, browserStore())) return
+      setGoalBurst(true)
+      emitGoalReached()
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [goalMet, today, data.sandboxed])
+
+  useEffect(() => {
+    if (!goalBurst) return
+    const timer = window.setTimeout(() => setGoalBurst(false), 2800)
+    return () => window.clearTimeout(timer)
+  }, [goalBurst])
   const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
   const accuracy = stats && stats.attempts > 0 ? Math.round(stats.accuracy) : null
   const friendCount = social?.friends.length ?? 0
@@ -596,6 +623,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
             notebook={notebook}
             goal={goal}
             streak={streak}
+            skipKeyPoints={instantPrefs.skipKeyPoints}
             choose={chooseNext}
             onNotebook={(next) => setNotebook({ ...next, courses: withCourseTones(next.courses) })}
             onClose={closeInstant}
@@ -609,12 +637,12 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
         {data.sandboxed ? null : firstRun}
 
         <ul className="home-today" aria-label="Today at a glance">
-          <li className="home-today__card ui-tone--blue">
+          <li className="home-today__card home-today__card--goal ui-tone--blue">
             <a href="#settings" className="home-today__link">
               <span className="home-today__icon"><Icon name="target" /></span>
               <span className="home-today__label">{todayXp >= goal ? 'Daily goal met' : 'Daily goal'}</span>
               <span className="home-today__value">{todayXp}<small> / {goal} XP{todayXp >= goal ? ' ✓' : ''}</small></span>
-              <span className="home-today__meter" aria-hidden="true"><span style={{ width: `${goalPercent}%` }} /></span>
+              <span className="home-today__ring"><GoalRing percent={goalPercent} burst={goalBurst} /></span>
             </a>
           </li>
           <li className="home-today__card ui-tone--orange">

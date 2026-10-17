@@ -1,0 +1,104 @@
+/* The daily goal ring on Home's Daily goal card (GoalRing.tsx). Uses the card's --tone. */
+
+.goal-ring {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+}
+
+.goal-ring svg { display: block; overflow: visible; }
+.goal-ring__track { fill: none; stroke: color-mix(in srgb, var(--tone, var(--color-blue)) 18%, var(--color-surface)); }
+
+.goal-ring__fill {
+  fill: none;
+  stroke: var(--tone, var(--color-blue));
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1100ms var(--ease-out);
+}
+
+.goal-ring__label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--tone-text, var(--color-blue-text));
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-ring.is-done .goal-ring__label { font-size: 17px; }
+.goal-ring.is-bursting svg { animation: goal-ring-pop 700ms var(--ease-out) both; }
+
+@keyframes goal-ring-pop {
+  40% { transform: scale(1.16); }
+  100% { transform: none; }
+}
+
+/* The one-time burst: sparks around the ring and a small toast above it. */
+.goal-ring__burst { position: absolute; inset: 0; pointer-events: none; }
+
+.goal-ring__spark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--tone, var(--color-blue));
+  opacity: 0;
+  transform: rotate(var(--angle)) translateY(0);
+  animation: goal-ring-spark 900ms 120ms var(--ease-out) both;
+}
+
+.goal-ring__spark:nth-child(even) { background: var(--color-violet); }
+.goal-ring__spark:nth-child(3n) { background: var(--color-amber); }
+
+@keyframes goal-ring-spark {
+  0% { opacity: 1; transform: rotate(var(--angle)) translateY(-14px) scale(.6); }
+  100% { opacity: 0; transform: rotate(var(--angle)) translateY(-40px) scale(1); }
+}
+
+.goal-ring__toast {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: -6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-blue);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--color-blue) 30%, transparent);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+  animation: goal-ring-toast 2600ms var(--ease-out) both;
+}
+
+@keyframes goal-ring-toast {
+  0% { opacity: 0; transform: translateY(8px) scale(.9); }
+  12% { opacity: 1; transform: translateY(0) scale(1.05); }
+  20% { transform: none; }
+  82% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+
+:root[data-theme="dark"] .goal-ring__track { stroke: color-mix(in srgb, var(--tone, var(--color-blue)) 30%, var(--color-surface)); }
+:root[data-theme="dark"] .goal-ring__label { color: color-mix(in srgb, var(--tone-text, var(--color-blue-text)) 70%, #fff); }
+:root[data-theme="dark"] .goal-ring__toast { background: color-mix(in srgb, var(--color-blue) 80%, #000); }
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-ring__fill { transition: none; }
+  .goal-ring.is-bursting svg,
+  .goal-ring__spark { animation: none !important; opacity: 0; }
+  /* The toast still shows (a plain fade-free appearance), then goes. */
+  .goal-ring__toast { animation: goal-ring-toast-still 2600ms linear both !important; }
+}
+
+@keyframes goal-ring-toast-still {
+  0%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}

@@ -4,6 +4,7 @@ import { OfflineNotice } from './components/AppPrompts'
 import { CommandPalette } from './components/CommandPalette'
 import { GetStarted } from './components/onboarding/GetStarted'
 import { HelpBot } from './components/HelpBot'
+import { RewardLayer } from './components/rewards/RewardLayer'
 import { useAuth } from './lib/AuthContext'
 import { getStudyGroups, recordDailyLogin } from './lib/api'
 import { useAnnounce } from './lib/announce'
@@ -242,6 +243,8 @@ function AppShell() {
       </main>
       {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       <CommandPalette open={commandOpen} onClose={closeCommand} />
+      {/* XP chips, combos and the level-up celebration for every page (lib/rewards.ts). */}
+      <RewardLayer />
       {session && !adminRoute ? <HelpBot screen={navScreen} session={session} /> : null}
     </div>
   )
