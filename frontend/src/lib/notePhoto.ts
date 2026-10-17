@@ -90,10 +90,17 @@ const photoDay = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'nume
 
 /*
  * Each page is its own note, numbered within its unit and day: "Photo notes – Oct 7, page 2".
- * `notes` are the unit's notes so far (on any device), so the next page follows the last one.
+ * `notes` are the unit's notes so far (on any device), so the next page follows the highest
+ * one: after deleting page 2 of 3, the next photo is page 4, never a second page 3.
  */
 export function photoNoteName(now: number, notes: readonly { fileName: string }[]) {
   const base = `Photo notes – ${photoDay.format(new Date(now))}`
-  const page = notes.filter((note) => note.fileName.startsWith(base)).length + 1
-  return `${base}, page ${page}`
+  const prefix = `${base}, page `
+  let highest = 0
+  for (const { fileName } of notes) {
+    if (!fileName.startsWith(prefix)) continue
+    const page = /^(\d+)/.exec(fileName.slice(prefix.length))
+    if (page) highest = Math.max(highest, Number(page[1]))
+  }
+  return `${prefix}${highest + 1}`
 }
