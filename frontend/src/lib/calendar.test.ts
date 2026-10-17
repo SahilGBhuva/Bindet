@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMonths, groupByDay, isWeekend, monthGrid, monthStart, moveDay, sameMonth, weekDays, weekStart } from './calendar'
+import { addMonths, daysBetween, dueCountdown, groupByDay, isWeekend, monthGrid, monthStart, moveDay, sameMonth, weekDays, weekStart } from './calendar'
 
 describe('calendar date math', () => {
   it('finds the start of the month and week', () => {
@@ -70,5 +70,16 @@ describe('calendar date math', () => {
     expect(byDay.get('2026-10-16')?.map((item) => item.id)).toEqual(['a', 'c'])
     expect(byDay.get('2026-10-20')?.map((item) => item.id)).toEqual(['d'])
     expect(byDay.size).toBe(2)
+  })
+
+  it('counts days and words countdowns', () => {
+    expect(daysBetween('2026-10-16', '2026-10-18')).toBe(2)
+    expect(daysBetween('2026-10-16', '2026-10-09')).toBe(-7)
+    expect(daysBetween('2026-03-07', '2026-03-09')).toBe(2) // across the US spring-forward weekend
+    expect(dueCountdown('2026-10-16', '2026-10-16')).toBe('today')
+    expect(dueCountdown('2026-10-17', '2026-10-16')).toBe('tomorrow')
+    expect(dueCountdown('2026-10-21', '2026-10-16')).toBe('in 5 days')
+    expect(dueCountdown('2026-10-15', '2026-10-16')).toBe('yesterday')
+    expect(dueCountdown('2026-10-13', '2026-10-16')).toBe('3 days ago')
   })
 })

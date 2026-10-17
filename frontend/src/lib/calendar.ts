@@ -78,3 +78,17 @@ export function groupByDay<T extends { due_date: string | null }>(items: T[]) {
   }
   return byDay
 }
+
+/* Whole days from `from` to `to` (negative when `to` is earlier). Safe across daylight-saving changes. */
+export function daysBetween(from: string, to: string) {
+  return Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / 86_400_000)
+}
+
+/* "today", "tomorrow", "in 3 days", "yesterday", "2 days ago". */
+export function dueCountdown(due: string, today: string) {
+  const days = daysBetween(today, due)
+  if (days === 0) return 'today'
+  if (days === 1) return 'tomorrow'
+  if (days === -1) return 'yesterday'
+  return days > 0 ? `in ${days} days` : `${-days} days ago`
+}
