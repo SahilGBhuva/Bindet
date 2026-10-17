@@ -92,16 +92,23 @@ class GroqClientTests(unittest.TestCase):
             ai_tutor._post({"model": ai_tutor.AI_MODEL})
         self.assertEqual(client.send.call_count, 1)
 
-    def test_vision_has_no_fallback(self):
+    def test_requests_with_images_never_fall_back(self):
         client = self.client(reply(429))
+        image = {"role": "user", "content": [{"type": "text", "text": "read"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AA"}}]}
         with self.assertRaises(ai_tutor.AIRateLimited):
-            ai_tutor._post({"model": ai_tutor.AI_VISION_MODEL})
+            ai_tutor._post({"model": ai_tutor.AI_VISION_MODEL, "messages": [image]})
         self.assertEqual(client.send.call_count, 1)
+
+    def test_every_default_model_is_on_groqs_free_plan(self):
+        free = {"openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"}
+        for model in (ai_tutor.AI_MODEL, ai_tutor.AI_LONG_MODEL, ai_tutor.AI_CHAT_MODEL, ai_tutor.AI_STRONG_MODEL,
+                      ai_tutor.AI_VISION_MODEL, ai_tutor.AI_SMALL_MODEL):
+            self.assertIn(model, free)
 
     def test_a_removed_model_moves_to_the_fallback(self):
         client = self.client(reply(404), reply(200))
         ai_tutor._post({"model": ai_tutor.AI_CHAT_MODEL})
-        self.assertEqual(self.sent(client, 1)["model"], ai_tutor.AI_MODEL)
+        self.assertEqual(self.sent(client, 1)["model"], ai_tutor._fallbacks()[ai_tutor.AI_CHAT_MODEL])
 
     def test_other_errors_fail_without_retrying(self):
         client = self.client(reply(400), reply(200))
@@ -139,3 +146,26 @@ class OcrTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LatexRepairTests(unittest.TestCase):
+    def test_backslashes_a_model_lost_in_json_are_restored(self):
+        data = ai_tutor._extract_json('{"q":"What is the arc of a $90^circ$ angle?","a":"$\\frac{7pi}{2}$","t":"Find $\\theta$"}')
+        self.assertEqual(data["q"], "What is the arc of a $90^\\circ$ angle?")
+        self.assertEqual(data["a"], "$\\frac{7\\pi}{2}$")
+        self.assertEqual(data["t"], "Find $\\theta$")
+
+    def test_correct_latex_and_plain_text_are_unchanged(self):
+        for text in ("$\\frac{\\pi}{4}$", "no math: theta and pi stay words", "It costs $5 and $6", "line\nthe $x$",
+                     "List:\ttomorrow\ttext here", "$\\tan\\theta = 1$"):
+            self.assertEqual(ai_tutor.restore_latex(text), text)
+
+    def test_bare_commands_inside_math_get_their_backslash(self):
+        self.assertEqual(ai_tutor.restore_latex("$sqrt{3}$ and $2pi$"), "$\\sqrt{3}$ and $2\\pi$")
+
+
+class GradingRuleTests(unittest.TestCase):
+    def test_graders_never_judge_notation(self):
+        self.assertIn(ai_tutor.STUDENT_MATH_RULE, ai_tutor.GRADE_PROMPT)
+        self.assertIn(ai_tutor.STUDENT_MATH_RULE, ai_tutor.GRADE_TEST_PROMPT)
+        self.assertIn("pi/2", ai_tutor.STUDENT_MATH_RULE)

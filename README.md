@@ -23,7 +23,7 @@ Built by Sahil Bhuva, Bryan Chen, Xingchen Song and Aryaman for the 2026 Congres
 Browser (React + TypeScript, Vite)
    │  /api/*  with the student's sign-in token
    ▼
-FastAPI backend (Python) ── Groq ── open models: gpt-oss 20B/120B (JSON study tools), Llama 3.3 70B (Otto), Qwen 3.8 27B (photos, scanned PDFs), Llama 3.1 8B (titles, help bot)
+FastAPI backend (Python) ── Groq ── open models: Qwen 3.8 27B (quizzes, grading, flashcards, photos, scanned PDFs), gpt-oss 120B (practice tests, study guides, Otto's hard questions), gpt-oss 20B (Otto chat, titles, help bot)
    │
    ▼
 Supabase: Postgres database, Auth, Storage, Realtime (group chat)
