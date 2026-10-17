@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint, case, delete, func, or_, select, text, update,
 )
 
+import classroom_store
 import database
 
 STATUSES = ("todo", "in_progress", "review", "done")
@@ -137,6 +138,8 @@ def init_tasks() -> None:
     # Served only through the API; with RLS on and no policy PostgREST denies access.
     # Created and locked in one transaction (see database.create_locked_tables).
     database.create_locked_tables(database.engine(), task_metadata, TASK_TABLES, TASK_TABLES)
+    # Google Classroom import links (read below for each task's source and edit locks).
+    classroom_store.init_classroom_tables()
 
 
 def _now() -> datetime:
@@ -385,6 +388,7 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
         task_assignees.c.task_id.in_(ids),
     ).order_by(task_assignees.c.assigned_at, task_assignees.c.id)).all():
         assignees[task_id].append((assignee, name))
+    sources = classroom_store.sources_for(connection, ids)
     results = []
     for row in rows:
         role = roles.get(row["group_id"]) if row["group_id"] else None
@@ -406,6 +410,9 @@ def _summaries(connection, rows: list[dict], student_id: str, roles: dict[str, s
             "can_edit": _can_edit(row, student_id, role, {person for person, _name in task_assigned}),
             "can_manage": _can_manage(row, student_id, role),
             "can_delete": _can_delete(row, student_id, role),
+            # "classroom" for tasks imported from a Google Classroom calendar (classroom.py), else None.
+            "source": sources.get(row["id"], {}).get("source"),
+            "source_cancelled": sources.get(row["id"], {}).get("cancelled", False),
         })
     return results
 
@@ -621,6 +628,10 @@ def update_task(student_id: str, task_id: str, data: dict, before_assigning_othe
                 _log(connection, task, student_id, "assignees", "; ".join(parts))
                 if group_id:
                     _notify(connection, added, student_id, "task_assigned", f"{actor} assigned you “{title}”.", group_id)
+        # A hand edit of an imported Classroom task wins over later syncs.
+        classroom_store.record_student_edit(connection, task_id, {
+            field for field in ("title", "due_date", "due_time", "priority") if field in values and values[field] != task[field]
+        })
         if values:
             connection.execute(update(tasks).where(tasks.c.id == task_id).values(**values, updated_at=now))
         elif "assignee_ids" in data:
@@ -1148,5 +1159,5 @@ def reset_tasks() -> None:
     """Test helper: clear every task table."""
     init_tasks()
     with database.engine().begin() as connection:
-        for table in (*CHILD_TABLES, group_milestones, tasks):
+        for table in (*CHILD_TABLES, group_milestones, tasks, classroom_store.items, classroom_store.feeds):
             connection.execute(delete(table))

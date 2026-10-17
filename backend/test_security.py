@@ -101,7 +101,12 @@ class OneTransactionTableCreationTests(unittest.TestCase):
 
     def test_task_tables(self):
         import tasks
-        self.check(tasks.init_tasks.__wrapped__, tasks.task_metadata, database, extra_patches=[(database, "init_db")])
+        self.check(tasks.init_tasks.__wrapped__, tasks.task_metadata, database,
+                   extra_patches=[(database, "init_db"), (tasks.classroom_store, "init_classroom_tables")])
+
+    def test_classroom_tables(self):
+        import classroom_store
+        self.check(classroom_store.init_classroom_tables.__wrapped__, classroom_store.classroom_metadata, database)
 
     def test_tutor_tables(self):
         import tutor

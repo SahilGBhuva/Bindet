@@ -23,6 +23,8 @@ safe for foreign keys:
 - Practice lab: rounds and personal bests, and every challenge the student sent or
   received (the friend's copy of a received challenge goes too), and feedback they sent.
 - First-run setup state (account_onboarding).
+- Connected Google Classroom calendars (their secret addresses) and import links
+  (classroom_feeds, classroom_items).
 - The plan grant for the account's confirmed email (account_plans); grants the account
   made for other people stay, without its id.
 - On Postgres, the browser-written group chat rows: messages the student sent, their
@@ -40,6 +42,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, or_, select, text, update
 
 import ai_cache
+import classroom
 import database
 import feedback
 import flashcards
@@ -76,6 +79,7 @@ def init_all() -> None:
     help_bot.init_help_bot()
     otto.init_otto()
     plans.init_plans()
+    classroom.init_classroom()
 
 
 def _now() -> datetime:
@@ -260,6 +264,7 @@ def delete_account_data(student_id: str, email: str | None = None) -> dict:
         chat_tables = _chat_tables_present(connection)
         groups = _settle_groups(connection, student_id)
         handed = _settle_tasks(connection, student_id)
+        classroom.delete_for_account_in(connection, student_id)
         cache_rows = _delete_study_material(connection, student_id)
         _delete_social(connection, student_id)
         practice.delete_for_account_in(connection, student_id)
