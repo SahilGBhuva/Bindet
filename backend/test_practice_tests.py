@@ -670,6 +670,14 @@ class DifficultyTests(PracticeTestCase):
         self.assertEqual(self.create(time_limit_min=9, test_mode=True).json()["time_limit_s"], 9 * 60)
         self.assertTrue(practice_tests.get_test("alex", exam["id"])["test_mode"])
 
+    def test_answers_in_test_mode_are_not_checked_one_at_a_time(self):
+        exam = self.create(test_mode=True, new_questions=True).json()
+        answer = self.correct_answers(exam)[0]
+        response = self.call("POST", f"/api/practice-tests/{exam['id']}/check", json={"position": 0, "answer": answer})
+        self.assertEqual((response.status_code, response.json()["detail"]["code"]), (409, "test_mode"))
+        _, rows = practice_tests.graded_items("alex", exam["id"])
+        self.assertIsNone(rows[0]["correct"])  # nothing was graded or locked
+
     def test_hard_earns_one_and_a_half_times_the_xp(self):
         self.assertEqual([practice_tests.xp_for(5, level) for level in ("easy", "medium", "hard", None)], [10, 10, 15, 10])
         self.assertEqual(practice_tests.xp_for(3, "hard"), 9)
