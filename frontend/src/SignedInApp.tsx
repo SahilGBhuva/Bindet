@@ -11,7 +11,7 @@ import { cachedSetup, getOnboarding, rememberSetupDone, saveOnboarding } from '.
 import { BrandMark } from './lib/SiteSidebar'
 import { rememberPage, SCREEN_ALIASES, SCREENS, type Screen } from './lib/screens'
 import { getStudentId } from './lib/session'
-import { NavIcon, SiteSidebar } from './lib/SiteSidebar'
+import { SiteSidebar } from './lib/SiteSidebar'
 import { Home } from './pages/Home'
 import './App.css'
 
@@ -50,7 +50,7 @@ const Onboarding = lazy(loadOnboarding)
 /* The routes students open most often after Home, fetched while the browser is idle. */
 const PREFETCH: (keyof typeof loaders)[] = ['goals', 'stats', 'tools', 'tutor', 'chat']
 
-/* Pointing at or focusing a page icon starts loading that page, so the click rarely waits. */
+/* Pointing at or focusing a page link in the sidebar starts loading that page, so the click rarely waits. */
 function warm(screen: Screen) {
   if (screen in loaders) void loaders[screen as keyof typeof loaders]().catch(() => undefined)
 }
@@ -77,17 +77,6 @@ function whenIdle(callback: () => void, timeout = 1500) {
   const handle = window.setTimeout(callback, 400)
   return () => window.clearTimeout(handle)
 }
-
-/* The sketch's row of tiny page icons, top-left of the main area. */
-const PAGE_ICONS: { id: Screen; label: string }[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'goals', label: 'Tasks' },
-  { id: 'stats', label: 'Project statistics' },
-  { id: 'tools', label: 'Study' },
-  { id: 'tutor', label: 'Otto, your tutor' },
-  { id: 'chat', label: 'Messages' },
-  { id: 'profile', label: 'Friends & groups' },
-]
 
 const RAIL_KEY = 'bindit:sidebar:collapsed'
 
@@ -164,7 +153,6 @@ function AppShell() {
   const [commandOpen, setCommandOpen] = useState(false)
   const { session, setSession } = useAuth()
   const [railChoice, setRailChoice] = useState(readRailChoice)
-  const [unread, setUnread] = useState(0)
   // Until the student chooses, Project statistics opens with the rail merged (as drawn); other pages open it.
   const railCollapsed = railChoice ?? navScreen === 'stats'
   const setRailCollapsed = useCallback((value: boolean) => {
@@ -224,30 +212,10 @@ function AppShell() {
   return (
     <div className={`app-shell${railCollapsed ? ' is-rail-collapsed' : ''}`}>
       <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
-      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onUnreadChange={setUnread} commandOpen={commandOpen} />
-      <header className="app-bar">
-        <nav className="app-bar__pages" aria-label="Pages">
-          {PAGE_ICONS.map((item) => {
-            const current = navScreen === item.id
-            return (
-              <a key={item.id} className={`app-bar__page${current ? ' is-active' : ''}`} href={`#${item.id}`} aria-current={current ? 'page' : undefined} aria-label={item.id === 'chat' && unread ? `${item.label}, ${unread} unread` : item.label} title={item.label} onPointerEnter={() => warm(item.id)} onFocus={() => warm(item.id)}>
-                <NavIcon kind={item.id} />
-                {item.id === 'chat' && unread ? <i className="app-bar__dot" aria-hidden="true" /> : null}
-              </a>
-            )
-          })}
-        </nav>
-        <div className="app-bar__panels">
-          <button type="button" className="app-bar__merge" aria-expanded={!railCollapsed} onClick={() => setRailCollapsed(!railCollapsed)} title={railCollapsed ? 'Show the full sidebar' : 'Shrink the sidebar to a strip of icons'}>{railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}</button>
-          {/* A pressed toggle: with the sidebar already full, it shrinks it (it used to do nothing then). */}
-          <button type="button" className="app-bar__expand" aria-label="Full sidebar" aria-pressed={!railCollapsed} title={railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => setRailCollapsed(!railCollapsed)}>
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8h11M5 5.5 2.5 8 5 10.5M11 5.5 13.5 8 11 10.5" /></svg>
-          </button>
-        </div>
-      </header>
+      <SiteSidebar active={navScreen} session={session} onOpenCommand={openCommand} collapsed={railCollapsed} onCollapsedChange={setRailCollapsed} onPrefetch={warm} commandOpen={commandOpen} />
       <main className={`sheet is-${adminRoute ? 'admin' : screen}`} id="main-content" tabIndex={-1} key={adminRoute ? 'admin' : screen}>
         {screen !== 'tools' && !adminRoute ? <OfflineNotice /> : null}
-        {/* One page failing shows a Reload card in its place; the sidebar and top bar keep working. */}
+        {/* One page failing shows a Reload card in its place; the sidebar keeps working. */}
         <ErrorBoundary label="This page">
         <Suspense fallback={<PageSkeleton sketch={!adminRoute && (screen === 'goals' || screen === 'stats')} />}>
           {adminRoute ? <Admin session={session} /> : null}
