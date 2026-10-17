@@ -200,7 +200,7 @@ def clean_answer(raw: str) -> str:
 
 # --- Shared cache ---------------------------------------------------------------------
 
-PROMPT_VERSION = ai_cache.fingerprint(SYSTEM_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.OPERATIONS[OP])
+PROMPT_VERSION = ai_cache.fingerprint(SYSTEM_PROMPT, ai_tutor.model_for_operation(OP), ai_tutor.OPERATIONS[OP])
 _last_prune = float("-inf")
 _prune_lock = threading.Lock()
 
@@ -299,17 +299,15 @@ def ask_model(question: str) -> str:
     """One single-turn call through the operation registry. Returns the model's raw text."""
     config = ai_tutor.operation(OP)
     payload = {
-        "model": ai_tutor.OPENROUTER_MODEL,
+        "model": ai_tutor.model_for_operation(OP),
         "temperature": config["temperature"],
         "max_tokens": config["max_tokens"],
-        "reasoning": {"effort": "minimal"},
-        "provider": {"sort": "latency", "allow_fallbacks": True},
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": question_block(question)}],
     }
     try:
         reply = ai_tutor._send(OP, payload)["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ai_tutor.AITutorError("OpenRouter returned an unexpected response") from exc
+        raise ai_tutor.AITutorError("Groq returned an unexpected response") from exc
     if not isinstance(reply, str):
         raise ai_tutor.AIBadOutput("AI returned no text")
     return reply

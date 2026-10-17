@@ -124,7 +124,7 @@ def kind_spec(kind: str) -> dict[str, Any]:
 
 # --- Output limits -------------------------------------------------------------------------
 
-GUIDE_NOTE_CHARS = 16_000          # note text sent per guide
+GUIDE_NOTE_CHARS = 7_000          # note text sent per guide
 MAX_SECTIONS = 10
 HEADING_MAX = 100
 BULLET_MAX = 400

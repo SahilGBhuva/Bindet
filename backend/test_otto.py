@@ -35,7 +35,7 @@ def parse_events(response) -> list[tuple[str, dict]]:
 
 
 class FakeModel:
-    """Stands in for OpenRouter's non-streaming endpoint (ai_tutor._post) for Otto's two operations."""
+    """Stands in for Groq's non-streaming endpoint (ai_tutor._post) for Otto's two operations."""
 
     def __init__(self, title="Photosynthesis light reactions", ops=None, fail=False):
         self.title = title
@@ -114,7 +114,7 @@ class TitleTests(OttoTestCase):
         # A cheap call: the fast model, a tiny output cap, the fixed prompt, and the
         # conversation as delimited untrusted data.
         call = model.title_calls()[0]
-        self.assertEqual(call["model"], ai_tutor.OPENROUTER_MODEL)
+        self.assertEqual(call["model"], ai_tutor.AI_SMALL_MODEL)
         self.assertLessEqual(call["max_tokens"], 32)
         self.assertEqual(call["messages"][0]["content"], ai_tutor.TITLE_PROMPT)
         self.assertIn(ai_tutor.CHAT_OPEN, call["messages"][1]["content"])

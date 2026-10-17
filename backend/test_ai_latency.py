@@ -15,31 +15,17 @@ import note_store
 
 
 class AILatencyTests(unittest.TestCase):
-    def test_latency_routing_and_sticky_session_reach_openrouter(self):
-        response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": '{"question":"Q?","correct_answer":"A","topic":"T"}'
-                    }
-                }
-            ]
-        }
+    def test_quiz_calls_send_groq_fields_and_no_session_id(self):
+        response = {"choices": [{"message": {"content": '{"question":"Q?","correct_answer":"A","topic":"T"}'}}]}
         with patch.object(ai_tutor, "_post", return_value=response) as post:
-            ai_tutor.generate_question(
-                course="Biology",
-                unit="Cells",
-                source_labels=[],
-                focus="mixed",
-                difficulty=2,
-                personalization={},
-                session_id="bindit-stable-session",
-            )
-
+            ai_tutor.generate_question(course="Biology", unit="Cells", source_labels=[], focus="mixed", difficulty=2,
+                                       personalization={}, session_id="bindit-stable-session")
         payload = post.call_args.args[0]
-        self.assertEqual(payload["provider"]["sort"], "latency")
-        self.assertTrue(payload["provider"]["allow_fallbacks"])
-        self.assertEqual(payload["session_id"], "bindit-stable-session")
+        self.assertEqual(payload["model"], ai_tutor.AI_MODEL)
+        self.assertEqual(payload["response_format"]["type"], "json_schema")
+        self.assertTrue(payload["response_format"]["json_schema"]["strict"])
+        for openrouter_only in ("provider", "reasoning", "session_id", "plugins"):
+            self.assertNotIn(openrouter_only, payload)
 
     def test_session_identifier_is_stable_and_does_not_expose_student_id(self):
         first = main.ai_session_id("student@example.com", "Biology", "Cells", "quiz")
@@ -54,10 +40,10 @@ class AILatencyTests(unittest.TestCase):
 
     def test_connection_warm_up_is_keyless_throttled_and_optional(self):
         client = MagicMock()
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}), patch.object(ai_tutor, "_client", return_value=client):
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}), patch.object(ai_tutor, "_client", return_value=client):
             self.assertFalse(ai_tutor.warm_connection(wait=True))
         client.head.assert_not_called()
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client), \
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client), \
                 patch.object(ai_tutor, "_last_warm", 0.0):
             self.assertTrue(ai_tutor.warm_connection(wait=True))
             self.assertFalse(ai_tutor.warm_connection(wait=True))
@@ -68,19 +54,20 @@ class AILatencyTests(unittest.TestCase):
     def test_warm_up_failures_are_ignored(self):
         client = MagicMock()
         client.head.side_effect = httpx.ConnectError("offline")
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client), \
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client), \
                 patch.object(ai_tutor, "_last_warm", 0.0):
             self.assertTrue(ai_tutor.warm_connection(wait=True))
 
     def test_requests_keep_fast_connect_and_pool_budgets(self):
-        response = MagicMock()
+        response = MagicMock(status_code=200)
         response.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
         client = MagicMock()
-        client.post.return_value = response
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client):
+        client.send.return_value = response
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(ai_tutor, "_client", return_value=client):
             ai_tutor._post({"model": "m"}, timeout=8.0)
-        timeout = client.post.call_args.kwargs["timeout"]
+        timeout = client.build_request.call_args.kwargs["timeout"]
         self.assertEqual((timeout.read, timeout.connect, timeout.pool), (8.0, 3.0, 1.0))
+        self.assertEqual(client.build_request.call_args.args[1], "https://api.groq.com/openai/v1/chat/completions")
 
     def test_note_context_reads_only_the_excerpt_it_can_use(self):
         note_store.init_notes()

@@ -168,7 +168,7 @@ class FlashcardCacheTests(CacheTestCase):
         key = ai_cache.flashcard_key(course="B", unit="P", file_name="f", source_text="t")
         with patch.object(ai_tutor, "FLASHCARD_PROMPT", ai_tutor.FLASHCARD_PROMPT + " Be brief."):
             self.assertNotEqual(ai_cache.flashcard_key(course="B", unit="P", file_name="f", source_text="t"), key)
-        with patch.object(ai_tutor, "OPENROUTER_MODEL", "other/model"):
+        with patch.object(ai_tutor, "AI_MODEL", "other/model"):
             self.assertNotEqual(ai_cache.flashcard_key(course="B", unit="P", file_name="f", source_text="t"), key)
 
     def test_expired_entries_are_ignored_and_pruned(self):
@@ -255,7 +255,7 @@ class ExtractionCacheTests(CacheTestCase):
         self.assertEqual(vision.call_count, 2)
 
     def test_ocr_failures_are_not_cached(self):
-        for error in ("OpenRouter request failed", "No readable notes were found in that image"):
+        for error in ("Groq request failed", "No readable notes were found in that image"):
             with patch.object(ai_tutor, "extract_image_notes", side_effect=ai_tutor.AITutorError(error)), self.assertRaises(HTTPException):
                 self.upload("alex")
         with patch.object(ai_tutor, "extract_image_notes", return_value="   "), self.assertRaises(HTTPException):
@@ -479,12 +479,12 @@ class TutorCacheTests(CacheTestCase):
 
     def test_a_downgraded_reply_is_keyed_by_the_model_that_answered(self):
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
-        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 0):
+        with patch.object(ai_tutor, "AI_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 0):
             _, calls = self.send("alex", content=hard)
-            self.assertEqual(calls[0]["model"], ai_tutor.OPENROUTER_MODEL)  # strong quota used up
+            self.assertEqual(calls[0]["model"], ai_tutor.AI_CHAT_MODEL)  # strong quota used up
             _, calls = self.send("alex", content=hard)
             self.assertEqual(calls, [])  # the normal model's reply is reused while the quota is out
-        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 5):
+        with patch.object(ai_tutor, "AI_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 5):
             _, calls = self.send("alex", content=hard)
         self.assertEqual(calls[0]["model"], "strong/model")  # never served as if the strong model wrote it
 
@@ -499,7 +499,7 @@ class TutorCacheTests(CacheTestCase):
 
     def test_hits_do_not_charge_the_strong_model_quota(self):
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
-        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 2):
+        with patch.object(ai_tutor, "AI_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 2):
             _, calls = self.send("alex", content=hard)  # uses one of two
             self.assertEqual(calls[0]["model"], "strong/model")
             _, calls = self.send("alex", content=hard)

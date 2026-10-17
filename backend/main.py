@@ -285,7 +285,7 @@ GUEST_ID_MAX_LENGTH = 100 - len(GUEST_ID_PREFIX)
 
 
 def ai_session_id(*parts: str) -> str:
-    """Stable, non-identifying key for OpenRouter provider stickiness."""
+    """Stable, non-identifying key for a study session (cache and log grouping; never sent to the AI provider)."""
     value = "\x1f".join(part.strip().lower() for part in parts)
     return f"bindit-{hashlib.blake2s(value.encode('utf-8'), digest_size=16).hexdigest()}"
 
@@ -419,18 +419,27 @@ class QuestionResponse(BaseModel):
 
 TUTOR_HOURLY_LIMIT = 60
 TUTOR_DAILY_LIMIT = 200
-# Replies routed to OPENROUTER_TUTOR_STRONG_MODEL per account per day; after that the
-# normal model answers hard questions too.
+# Replies routed to ai_tutor.AI_STRONG_MODEL per account per day; after that the
+# everyday chat model answers hard questions too.
 TUTOR_STRONG_PER_DAY = 30
-# Most characters of earlier turns sent with each tutor message (newest kept first).
-TUTOR_HISTORY_MAX_CHARS = 16_000
+# Most characters of earlier turns sent with each tutor message (newest kept first). Sized so a
+# whole Otto request stays under Groq's 8,000-tokens-a-minute free limit per model.
+TUTOR_HISTORY_MAX_CHARS = 8_000
+# Most characters of the student's notes sent with a tutor message.
+TUTOR_NOTES_MAX_CHARS = 6_000
+# Images cost 2,048 tokens each on Groq, so a message with images sends less history and notes.
+TUTOR_MAX_IMAGES = 2
+TUTOR_IMAGE_HISTORY_MAX_CHARS = 2_000
+TUTOR_IMAGE_NOTES_MAX_CHARS = 2_000
 # Tutor replies one account may be streaming at once, per server instance.
 TUTOR_MAX_CONCURRENT_STREAMS = 2
 OWNER_MAX_CONCURRENT_STREAMS = 6  # owner accounts (OWNER_EMAILS) have no per-student limits
 # A stream that never started (the client left before the first byte) frees its slot after this.
 TUTOR_STREAM_SLOT_SECONDS = 300
-# Every paid AI call across all accounts per day; past it AI features pause with a 503.
-AI_DAILY_GLOBAL_LIMIT_DEFAULT = 20_000
+# Every AI call across all accounts per day; past it AI features pause with a 503. Groq's free
+# plan allows roughly this many calls a day across bindet's models (see ai_tutor.py), so the
+# budget keeps one busy account or a burst of traffic from using the whole day's allowance.
+AI_DAILY_GLOBAL_LIMIT_DEFAULT = 2_500
 GLOBAL_AI_BUDGET_ID = "global:ai"
 NOTE_UPLOADS_PER_DAY = 60
 AI_OCR_PER_DAY = 30
@@ -460,7 +469,7 @@ class TutorMessageRequest(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     course: str = Field(default="", max_length=120)
     unit: str = Field(default="", max_length=160)
-    images: list[TutorImage] = Field(default_factory=list, max_length=3)
+    images: list[TutorImage] = Field(default_factory=list, max_length=TUTOR_MAX_IMAGES)
     # "explain" (default) or "guide" (Socratic hints, never the final answer); stored on the conversation.
     study_mode: Literal["explain", "guide"] | None = None
     # Replace the conversation's last reply with a new one (the student's last turn is answered again).
@@ -1398,7 +1407,7 @@ def health(db: bool = False):
 def warm_ai():
     """Called when a student is about to use an AI feature (focusing the tutor, opening a quiz).
 
-    It wakes this instance and opens the pooled OpenRouter connection ahead of the
+    It wakes this instance and opens the pooled Groq connection ahead of the
     real request. It needs no sign-in because it touches no student data and sends
     nothing to the model; it runs at most once every few minutes per instance.
     """
@@ -1530,14 +1539,14 @@ def ingest_note(owner: str, course: str, unit: str, filename: str, claimed_type:
                 text = note_ingestion.extract_text(filename, content)
             except note_ingestion.NoteIngestionError as exc:
                 if suffix == ".pdf" and str(exc) == "No readable text was found in that file":
-                    ocr_pdf, pages_skipped = note_ingestion.first_pdf_pages(content)
+                    page_scans, pages_skipped = note_ingestion.pdf_page_images(content)
                     cache_key = ai_cache.extraction_key(content, "application/pdf")
                     text = cached_ocr_text(owner, cache_key)
                     if text is None:
                         limit_action(owner, "ai_ocr", AI_OCR_PER_DAY, 1440)
                         spend_global_ai_call(owner)
                         ai_tutor.warm_connection()
-                        text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(pdf_bytes=ocr_pdf))
+                        text = note_ingestion.clean_text(ai_tutor.extract_pdf_notes(page_images=page_scans))
                         ai_cache.store_extraction(cache_key, text)
                 else:
                     raise
@@ -2182,12 +2191,12 @@ def tutor_limits(owner: str) -> None:
 def capped_tutor_route(owner: str, content: str, has_images: bool) -> dict:
     """ai_tutor.tutor_route, but the configured strong model only TUTOR_STRONG_PER_DAY times a day."""
     route = ai_tutor.tutor_route(content, has_images)
-    strong = ai_tutor.OPENROUTER_TUTOR_STRONG_MODEL
-    if strong and route["model"] == strong and strong != ai_tutor.OPENROUTER_MODEL:
+    strong = ai_tutor.AI_STRONG_MODEL
+    if route["model"] == strong and strong != ai_tutor.AI_CHAT_MODEL:
         try:
             database.check_social_rate_limit(owner, "tutor_strong", TUTOR_STRONG_PER_DAY, 1440)
         except ValueError:
-            route = {**route, "model": ai_tutor.OPENROUTER_MODEL}
+            route = {**route, "model": ai_tutor.AI_CHAT_MODEL, "effort": "minimal"}
     return route
 
 
@@ -2276,7 +2285,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         if early_context:
             grounding = early_context.result()
         elif requested_course or requested_unit:
-            grounding = note_store.context_for(owner, requested_course, requested_unit, limit_chars=12_000)
+            grounding = note_store.context_for(owner, requested_course, requested_unit, limit_chars=TUTOR_NOTES_MAX_CHARS)
         else:
             grounding = ([], "")
         # Keyed by the route (tier and model) the student would get; if the strong model's
@@ -2320,7 +2329,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     elif early_context:
         labels, source_text = early_context.result()
     else:
-        labels, source_text = note_store.context_for(owner, course, unit, limit_chars=12_000) if (course or unit) else ([], "")
+        labels, source_text = note_store.context_for(owner, course, unit, limit_chars=TUTOR_NOTES_MAX_CHARS) if (course or unit) else ([], "")
     # History was read above, so saving the new turn now cannot duplicate it. The write
     # overlaps the model's time to first token instead of delaying the request.
     if retry_of:
@@ -2345,6 +2354,9 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
     # The system prompt is fixed; the course, unit and notes travel in a delimited data
     # block inside the student's turn, never in the system prompt.
+    if image_parts:
+        history = trim_history(history, TUTOR_IMAGE_HISTORY_MAX_CHARS)
+        source_text = source_text[:TUTOR_IMAGE_NOTES_MAX_CHARS]
     turn_text = ai_tutor.tutor_user_text(content, course, unit, labels, source_text,
                                          profile={"name": otto_ctx["name"], "about": otto_ctx["about"]}, memory=otto_ctx["memory"])
     model_messages = [

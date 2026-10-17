@@ -23,7 +23,7 @@ Built by Sahil Bhuva, Bryan Chen, Xingchen Song and Aryaman for the 2026 Congres
 Browser (React + TypeScript, Vite)
    │  /api/*  with the student's sign-in token
    ▼
-FastAPI backend (Python) ── OpenRouter ── Gemini Flash Lite (text, photos), Mistral OCR (scanned PDFs)
+FastAPI backend (Python) ── Groq ── open models: gpt-oss 20B/120B (JSON study tools), Llama 3.3 70B (Otto), Qwen 3.8 27B (photos, scanned PDFs), Llama 3.1 8B (titles, help bot)
    │
    ▼
 Supabase: Postgres database, Auth, Storage, Realtime (group chat)
@@ -53,7 +53,7 @@ Supabase: Postgres database, Auth, Storage, Realtime (group chat)
 
 - **Sign-in:** every request is verified with Supabase Auth (`auth.py`), and every query filters by the signed-in student's id.
 - **Group chat:** protected by row-level security in Postgres.
-- **Keys:** server-only keys (the Supabase service role, OpenRouter) never reach the browser. The browser only ever holds the public Supabase key.
+- **Keys:** server-only keys (the Supabase service role, Groq) never reach the browser. The browser only ever holds the public Supabase key.
 - **Headers:** `vercel.json` sets strict security headers: Content Security Policy, HSTS, `X-Frame-Options: DENY`, and a Permissions-Policy.
 - **Uploads:** size-limited, checked by their real bytes, and parsed in a time-limited child process.
 - **Account deletion:** students can delete their account and all of its data from Settings.
@@ -68,7 +68,7 @@ You need Python 3.12+ and Node 22+.
 
 This creates the backend virtualenv, installs packages, and starts the API on http://127.0.0.1:8000 and the app on http://127.0.0.1:5173.
 
-To sign in and use the AI features, copy `backend/.env.example` to `backend/.env` and fill in the Supabase and OpenRouter settings. Without them, the landing page and its live demo still work.
+To sign in and use the AI features, copy `backend/.env.example` to `backend/.env` and fill in the Supabase settings and `GROQ_API_KEY`. Without them, the landing page and its live demo still work.
 
 ## Tests
 
@@ -91,4 +91,4 @@ supabase/migrations/      database schema and security policies
 
 ## How we used AI
 
-We used AI coding tools (Claude Code and OpenAI Codex) for parts of the code, tests and reviews. Inside the app, bindet calls AI models through OpenRouter. Our full disclosure is in our Congressional App Challenge submission.
+We used AI coding tools (Claude Code and OpenAI Codex) for parts of the code, tests and reviews. Inside the app, bindet calls open AI models hosted by Groq. Our full disclosure is in our Congressional App Challenge submission.

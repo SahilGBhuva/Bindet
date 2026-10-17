@@ -70,7 +70,7 @@ def model_reply(content: dict) -> dict:
 
 
 class FakeModel:
-    """Stands in for OpenRouter at ai_tutor._post and records every checked payload."""
+    """Stands in for Groq at ai_tutor._post and records every checked payload."""
 
     def __init__(self, sections=None):
         self.sections = GOOD if sections is None else sections
@@ -212,7 +212,7 @@ class GuideRouteTests(GuideTestCase):
         self.assertEqual(len(guide["sections"]), 3)
         self.assertEqual(len(self.model.guides()), 1)
         payload = self.model.calls[0]
-        self.assertEqual(payload["model"], ai_tutor.OPENROUTER_MODEL)
+        self.assertEqual(payload["model"], ai_tutor.AI_LONG_MODEL)
         self.assertLessEqual(payload["max_tokens"], ai_tutor.OPERATIONS["generate_guide"]["max_tokens"])
         self.assertEqual(payload["messages"][0]["content"], study_guides.GUIDE_PROMPT)
         self.assertNotIn("tools", payload)

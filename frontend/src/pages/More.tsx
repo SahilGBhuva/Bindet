@@ -73,7 +73,7 @@ const GUIDES: Guide[] = [
       <>
         <ol className="help__steps">
           <li>In <a href="#tutor">Otto</a>, the tutor, pick a course and unit so answers use your notes first. When it relies on a note, it names the file.</li>
-          <li>You can attach up to 3 images (JPG, PNG, WebP or GIF), like a photo of a problem.</li>
+          <li>You can attach up to 2 images (JPG, PNG, WebP or GIF), like a photo of a problem.</li>
         </ol>
         <div className="help__columns">
           <div>

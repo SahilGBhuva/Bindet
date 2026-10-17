@@ -35,7 +35,7 @@ The whole product (signed-in app, landing page and auth screens) follows the pap
 ## Security
 
 - **Never commit secrets.**
-- **Never** put server-only keys in frontend code. This specifically includes `SUPABASE_SERVICE_ROLE_KEY` and `OPENROUTER_API_KEY`. Frontend may only ever hold the Supabase anon/publishable key.
+- **Never** put server-only keys in frontend code. This specifically includes `SUPABASE_SERVICE_ROLE_KEY` and `GROQ_API_KEY`. Frontend may only ever hold the Supabase anon/publishable key.
 
 ## Git and deployment
 

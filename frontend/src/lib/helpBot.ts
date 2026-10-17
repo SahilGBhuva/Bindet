@@ -89,7 +89,7 @@ export const HELP_FAQ: HelpEntry[] = [
   {
     id: 'otto',
     question: 'What can Otto help with?',
-    answer: 'Otto (#tutor) is your AI tutor: pick a course and unit so answers use your notes first, and attach up to 3 images (JPG, PNG, WebP, GIF or iPhone HEIC photos). It explains your notes, guides you through homework, helps you prepare for exams and quizzes you. It has hourly and daily limits and can make mistakes.',
+    answer: 'Otto (#tutor) is your AI tutor: pick a course and unit so answers use your notes first, and attach up to 2 images (JPG, PNG, WebP, GIF or iPhone HEIC photos). It explains your notes, guides you through homework, helps you prepare for exams and quizzes you. It has hourly and daily limits and can make mistakes.',
     terms: ['otto', 'tutor', 'ai', 'explain', 'homework help', 'ask otto', 'chatbot'],
   },
   {

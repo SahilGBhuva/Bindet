@@ -161,7 +161,7 @@ class HelpBotTests(unittest.TestCase):
     def test_payload_is_single_turn_fixed_and_capped(self):
         self.ask("How do I change the color of a course?")
         payload = self.sent[0]
-        self.assertEqual(payload["model"], ai_tutor.OPENROUTER_MODEL)
+        self.assertEqual(payload["model"], ai_tutor.AI_SMALL_MODEL)
         self.assertLessEqual(payload["max_tokens"], 200)
         self.assertEqual(payload["temperature"], ai_tutor.OPERATIONS["help_bot"]["temperature"])
         self.assertNotIn("tools", payload)
@@ -181,7 +181,7 @@ class HelpBotTests(unittest.TestCase):
 
     def test_operation_is_registered(self):
         config = ai_tutor.OPERATIONS["help_bot"]
-        self.assertEqual(config["models"], ("text",))
+        self.assertEqual(config["models"], ("small",))
         self.assertLessEqual(config["max_tokens"], 200)
         self.assertLessEqual(config["timeout"], 8.0)
         self.assertLessEqual(config["temperature"], 0.2)

@@ -1,4 +1,4 @@
-"""Caches that let bindet skip OpenRouter calls whose answer it already has.
+"""Caches that let bindet skip AI calls whose answer it already has.
 
 Privacy rule: a cache hit only ever returns output derived purely from input the
 requester already supplied. Shared (cross-user) caches are keyed on a sha256 of the
@@ -274,7 +274,7 @@ def store(name: str, key: str, **values) -> bool:
 
 def flashcard_version() -> str:
     return "flashcards-v1:" + fingerprint(
-        ai_tutor.FLASHCARD_PROMPT, ai_tutor._DECK_SCHEMA, ai_tutor.OPENROUTER_MODEL, ai_tutor.FLASHCARD_NOTE_CHARS,
+        ai_tutor.FLASHCARD_PROMPT, ai_tutor._DECK_SCHEMA, ai_tutor.AI_MODEL, ai_tutor.FLASHCARD_NOTE_CHARS,
         ai_tutor.FLASHCARD_MAX_PER_NOTE, ai_tutor.FLASHCARD_CHARS_PER_CARD,
         ai_tutor.OPERATIONS["generate_flashcards"]["max_tokens"], ai_tutor.OPERATIONS["generate_flashcards"]["temperature"],
     )
@@ -312,7 +312,7 @@ def store_flashcards(key: str, cards: list[dict]) -> bool:
 
 def extraction_version() -> str:
     return "extract-v1:" + fingerprint(
-        ai_tutor.OCR_IMAGE_PROMPT, ai_tutor.OCR_PDF_PROMPT, ai_tutor.OPENROUTER_VISION_MODEL,
+        ai_tutor.OCR_IMAGE_PROMPT, ai_tutor.OCR_PDF_PROMPT, ai_tutor.AI_VISION_MODEL,
         note_ingestion.MAX_OCR_PDF_PAGES, note_ingestion.MAX_STORED_CHARS,
     )
 
@@ -348,7 +348,7 @@ GRADE_FIELDS = ("correct", "score", "mistake_type", "explanation", "hint", "misc
 
 def grading_version() -> str:
     return "grade-v1:" + fingerprint(
-        ai_tutor.GRADE_PROMPT, ai_tutor.OPENROUTER_MODEL,
+        ai_tutor.GRADE_PROMPT, ai_tutor.AI_MODEL,
         ai_tutor.OPERATIONS["grade_answer"]["max_tokens"], ai_tutor.OPERATIONS["grade_answer"]["temperature"],
     )
 
@@ -391,7 +391,7 @@ TUTOR_REPLY_PIECE_CHARS = 48
 
 def tutor_version() -> str:
     return "tutor-v2:" + fingerprint(
-        ai_tutor.TUTOR_SYSTEM_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.OPENROUTER_TUTOR_STRONG_MODEL,
+        ai_tutor.TUTOR_SYSTEM_PROMPT, ai_tutor.AI_CHAT_MODEL, ai_tutor.AI_STRONG_MODEL,
         ai_tutor.OPERATIONS["explain_material"]["max_tokens"], ai_tutor.OPERATIONS["explain_material"]["temperature"],
         ai_tutor.OFF_TOPIC_SENTINEL, ai_tutor.NOTES_OPEN, ai_tutor.NOTES_CLOSE,
     )
@@ -417,7 +417,7 @@ def tutor_key(*, owner_id: str, message: str, course: str, unit: str, labels: li
 def title_key(*, owner_id: str, first_message: str) -> str:
     """Otto's AI title for a conversation that opens with this message (per owner). Stored in
     tutor_reply_cache, so it is private to the owner, tied to the conversation and expires with it."""
-    version = "title-v1:" + fingerprint(ai_tutor.TITLE_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.TITLE_MAX_WORDS, ai_tutor.TITLE_MAX_CHARS)
+    version = "title-v1:" + fingerprint(ai_tutor.TITLE_PROMPT, ai_tutor.AI_SMALL_MODEL, ai_tutor.TITLE_MAX_WORDS, ai_tutor.TITLE_MAX_CHARS)
     return make_key("title", version, owner_id, normalize_message(first_message).casefold())
 
 
@@ -457,7 +457,7 @@ def reply_pieces(reply: str) -> list[str]:
 
 def practice_version() -> str:
     return "practice-v1:" + fingerprint(
-        ai_tutor.GENERATE_TEST_PROMPT, ai_tutor._TEST_SCHEMA, ai_tutor.OPENROUTER_MODEL, ai_tutor.PRACTICE_NOTE_CHARS,
+        ai_tutor.GENERATE_TEST_PROMPT, ai_tutor._TEST_SCHEMA, ai_tutor.AI_LONG_MODEL, ai_tutor.PRACTICE_NOTE_CHARS,
         ai_tutor.OPERATIONS["generate_test"]["max_tokens"], ai_tutor.OPERATIONS["generate_test"]["temperature"],
         ai_tutor.PRACTICE_MIN_KEPT_RATIO,
     )
@@ -511,7 +511,7 @@ def guide_version() -> str:
     import study_guides  # local: study_guides imports ai_tutor only, keep the graph one-way
     return "guide-v1:" + fingerprint(
         study_guides.GUIDE_PROMPT, study_guides.GUIDE_SCHEMA, {kind: spec["ask"] for kind, spec in study_guides.KINDS.items()},
-        ai_tutor.OPENROUTER_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
+        ai_tutor.AI_LONG_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
         ai_tutor.OPERATIONS["generate_guide"]["max_tokens"], ai_tutor.OPERATIONS["generate_guide"]["temperature"],
     )
 
@@ -525,7 +525,7 @@ def key_points_version() -> str:
     import study_guides
     return "keypoints-v1:" + fingerprint(
         study_guides.GUIDE_PROMPT, study_guides.GUIDE_SCHEMA, study_guides.KEY_POINTS_ASK, study_guides.KEY_POINTS_MAX,
-        study_guides.KEY_POINTS_BULLET_MAX, ai_tutor.OPENROUTER_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
+        study_guides.KEY_POINTS_BULLET_MAX, ai_tutor.AI_LONG_MODEL, study_guides.GUIDE_NOTE_CHARS, study_guides.MIN_KEPT_RATIO,
         study_guides.KEY_POINTS_TOKENS, ai_tutor.OPERATIONS["generate_guide"]["temperature"],
     )
 

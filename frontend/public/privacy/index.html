@@ -32,7 +32,7 @@
     <div class="legal-head">
       <p class="kicker">Legal</p>
       <h1>Privacy Policy</h1>
-      <p class="updated">Last updated: October 8, 2026</p>
+      <p class="updated">Last updated: October 16, 2026</p>
       <p class="lead">bindet is a study app that turns your class notes into flashcards, quizzes and a tutor you can ask questions. This policy explains, in plain language, what information bindet handles, why, who helps us process it, how long we keep it and what you can do about it.</p>
       <p class="lead">bindet is a free student project created for the Congressional App Challenge.</p>
     </div>
@@ -134,7 +134,7 @@
           <li>any study instructions you give;</li>
           <li>a question you type into the help bot (the small Help button in the app) that its built-in answers don't cover, on its own, with no notes, account details or other personal data. Its answers are kept for up to 7 days by a hash of the question, without recording who asked.</li>
         </ul>
-        <p>bindet uses <strong>Google Gemini models, accessed through OpenRouter</strong>, which forwards each request to the company that runs the model. Scanned PDFs may be read with Mistral's OCR service through OpenRouter. OpenRouter may route a request to another AI provider if one is unavailable. We don't send your email address with these requests, and your name is sent only if you tell Otto what to call you. Quick greetings and small talk (like "hi" or "thanks") get a fixed reply from bindet and are not sent to an AI provider.</p>
+        <p>bindet uses <strong>open AI models (from OpenAI, Meta and Qwen) run by Groq</strong>. Every request goes to Groq only; if one Groq model is busy, bindet may try another Groq model, never a different company. Groq's terms say it does not use these requests to train AI models. Scanned PDFs are read by sending images of their first pages to Groq's vision model. We don't send your email address with these requests, and your name is sent only if you tell Otto what to call you. Quick greetings and small talk (like "hi" or "thanks") get a fixed reply from bindet and are not sent to an AI provider.</p>
         <div class="callout">
           <p><strong>Please don't upload sensitive personal information</strong> (for example health, financial or government ID details, or other people's private information) in notes, photos or tutor messages. Anything you upload may be processed by AI providers as described here.</p>
           <p>AI output can be wrong. Always check important facts against your course materials.</p>
@@ -176,7 +176,7 @@
             <tbody>
               <tr><td>Supabase</td><td>Sign-in, database and file storage</td><td>Account details and everything you save in bindet, including group chat images</td></tr>
               <tr><td>Vercel</td><td>Hosts the website and the app's server</td><td>Requests to the app, including IP address and browser details in request logs</td></tr>
-              <tr><td>OpenRouter, and the AI providers it routes to (Google for Gemini models, Mistral for reading scanned PDFs, or another provider if one is unavailable)</td><td>Generates flashcards, quizzes, grading, study guides, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
+              <tr><td>Groq (runs the AI models)</td><td>Generates flashcards, quizzes, grading, study guides, tutor replies and text from photos</td><td>The content described in <a href="#ai">section 3</a></td></tr>
               <tr><td>Google</td><td>"Continue with Google" sign-in, only if you choose it</td><td>Your Google name, email and profile picture link</td></tr>
               <tr><td>Our email provider</td><td>Sends sign-up codes and password reset emails</td><td>Your email address and the email content</td></tr>
               <tr><td>Google Fonts</td><td>Serves the fonts used on the site</td><td>Your browser downloads fonts from Google's servers, so Google can see your IP address</td></tr>

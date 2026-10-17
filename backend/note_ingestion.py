@@ -21,7 +21,12 @@ TEXT_EXTENSIONS = {'.txt', '.md', '.csv', '.json'}
 IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.heic', '.heif'}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {'.pdf', '.docx'}
 MAX_PDF_PAGES = 200
-MAX_OCR_PDF_PAGES = 15  # scanned PDFs are OCR'd by a paid model, so only the first pages are sent
+# Scanned PDFs: the first pages' scans go to the vision model in one request. Groq counts each
+# image as 2,048 tokens against an 8,000-tokens-a-minute limit, so three pages is the most that fits.
+MAX_OCR_PDF_PAGES = 3
+OCR_PAGE_MAX_EDGE = 1600   # pixels; the scans are re-encoded as JPEG, metadata-free
+OCR_PAGE_JPEG_QUALITY = 82
+OCR_PAGE_MAX_PIXELS = 24_000_000  # a page scan larger than this is skipped, never decoded
 MAX_DOCX_FILES = 500
 MAX_DOCX_EXPANDED_BYTES = 30 * 1024 * 1024
 
@@ -113,13 +118,17 @@ def extract_pdf_in_process(content: bytes, deadline: float) -> str:
 
 def _pdf_worker(mode: str = 'text', max_pages: int = MAX_OCR_PDF_PAGES) -> None:
     """Child process entry point: PDF bytes on stdin, one JSON object on stdout.
-    mode 'text' extracts the text; mode 'trim' returns the first max_pages pages as a PDF."""
+    mode 'text' extracts the text; mode 'trim' returns the first max_pages pages as a PDF;
+    mode 'images' returns the scans of the first max_pages pages as JPEGs."""
     content = sys.stdin.buffer.read()
     deadline = time.monotonic() + PDF_TIME_LIMIT_SECONDS
     try:
         if mode == 'trim':
             trimmed, omitted = first_pdf_pages_in_process(content, max_pages, deadline)
             result = {'ok': True, 'pdf': base64.b64encode(trimmed).decode('ascii'), 'omitted': omitted}
+        elif mode == 'images':
+            pages, omitted = pdf_page_images_in_process(content, max_pages, deadline)
+            result = {'ok': True, 'images': [base64.b64encode(page).decode('ascii') for page in pages], 'omitted': omitted}
         else:
             result = {'ok': True, 'text': extract_pdf_in_process(content, deadline)}
     except NoteIngestionError as exc:
@@ -219,6 +228,76 @@ def _first_pdf_pages(content: bytes, max_pages: int, deadline: float = float('in
     return output.getvalue(), total - max_pages
 
 
+def pdf_page_images(content: bytes, max_pages: int = MAX_OCR_PDF_PAGES, time_limit: float | None = None) -> tuple[list[bytes], int]:
+    """The scans of a scanned PDF's first pages, as JPEG bytes (one per page that has one), and
+    how many pages were left out. Runs in the same timed child process as text extraction."""
+    limit = PDF_TIME_LIMIT_SECONDS if time_limit is None else time_limit
+    if not PDF_IN_SUBPROCESS:
+        return pdf_page_images_in_process(content, max_pages, time.monotonic() + limit)
+
+    def in_process(deadline: float) -> dict:
+        pages, omitted = pdf_page_images_in_process(content, max_pages, deadline)
+        return {'images': [base64.b64encode(page).decode('ascii') for page in pages], 'omitted': omitted}
+
+    result = _run_pdf_child(['--pdf-images', str(int(max_pages))], content, limit, in_process)
+    try:
+        images = [base64.b64decode(str(item), validate=True) for item in result.get('images') or []]
+        return images, int(result.get('omitted') or 0)
+    except (ValueError, TypeError) as exc:
+        raise NoteIngestionError(PDF_UNREADABLE) from exc
+
+
+def pdf_page_images_in_process(content: bytes, max_pages: int, deadline: float = float('inf')) -> tuple[list[bytes], int]:
+    with pdf_limits():
+        return _pdf_page_images(content, max_pages, deadline)
+
+
+def _page_scan_jpeg(page) -> bytes | None:
+    """The page's largest embedded image (the scan), downsized and re-encoded as a plain JPEG."""
+    from PIL import Image  # only the PDF child and this path need Pillow
+
+    Image.MAX_IMAGE_PIXELS = OCR_PAGE_MAX_PIXELS
+    best = None
+    for embedded in page.images:
+        try:
+            picture = embedded.image
+        except Exception:  # noqa: BLE001 - an image pypdf can't decode is skipped
+            continue
+        if picture is None or picture.width * picture.height > OCR_PAGE_MAX_PIXELS:
+            continue
+        if best is None or picture.width * picture.height > best.width * best.height:
+            best = picture
+    if best is None:
+        return None
+    best = best.convert('RGB')
+    best.thumbnail((OCR_PAGE_MAX_EDGE, OCR_PAGE_MAX_EDGE))
+    output = BytesIO()
+    best.save(output, format='JPEG', quality=OCR_PAGE_JPEG_QUALITY, optimize=True)
+    return output.getvalue()
+
+
+def _pdf_page_images(content: bytes, max_pages: int, deadline: float = float('inf')) -> tuple[list[bytes], int]:
+    try:
+        reader = PdfReader(BytesIO(content))
+        if reader.is_encrypted:
+            raise NoteIngestionError('Password-protected PDFs are not supported')
+        total = len(reader.pages)
+        if total > MAX_PDF_PAGES:
+            raise NoteIngestionError(f'PDFs must have {MAX_PDF_PAGES} pages or fewer')
+        scans: list[bytes] = []
+        for page in reader.pages[:max_pages]:
+            if time.monotonic() > deadline:
+                raise PdfTimeout(PDF_TOO_SLOW)
+            scan = _page_scan_jpeg(page)
+            if scan:
+                scans.append(scan)
+    except NoteIngestionError:
+        raise
+    except Exception as exc:
+        raise NoteIngestionError(PDF_UNREADABLE) from exc
+    return scans, max(0, total - max_pages)
+
+
 def extract_text(filename: str, content: bytes) -> str:
     if not content:
         raise NoteIngestionError('The uploaded file is empty')
@@ -255,3 +334,5 @@ if __name__ == '__main__' and sys.argv[1:] == ['--pdf-worker']:
     _pdf_worker()
 elif __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '--pdf-trim' and sys.argv[2].isdigit():
     _pdf_worker('trim', int(sys.argv[2]))
+elif __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '--pdf-images' and sys.argv[2].isdigit():
+    _pdf_worker('images', int(sys.argv[2]))

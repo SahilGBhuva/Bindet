@@ -17,6 +17,15 @@ import note_ingestion
 import note_store
 
 
+def scan_pdf(pages: int) -> bytes:
+    """A scanned-style PDF: one full-page image per page and no text, as a phone scanner saves."""
+    from PIL import Image
+    images = [Image.new("RGB", (1200, 1600), (255, 255, 255 - index)) for index in range(pages)]
+    output = BytesIO()
+    images[0].save(output, format="PDF", save_all=True, append_images=images[1:])
+    return output.getvalue()
+
+
 def blank_pdf(pages: int) -> bytes:
     writer = PdfWriter()
     for _ in range(pages):
@@ -98,24 +107,33 @@ class NoteIngestionTests(unittest.TestCase):
             note_ingestion.collect_page_text(pages, deadline=0.0)
         pages[0].extract_text.assert_not_called()
 
-    def test_scanned_pdf_is_trimmed_in_a_timed_child_process(self):
+    def test_scanned_pdf_pages_are_read_in_a_timed_child_process(self):
         import subprocess
-        content = blank_pdf(20)
-        with patch.object(note_ingestion, "first_pdf_pages_in_process", side_effect=AssertionError("ran in-process")):
-            trimmed, omitted = note_ingestion.first_pdf_pages(content)
-        self.assertEqual(omitted, 5)
-        self.assertEqual(len(PdfReader(BytesIO(trimmed)).pages), note_ingestion.MAX_OCR_PDF_PAGES)
-        small = blank_pdf(3)
-        self.assertEqual(note_ingestion.first_pdf_pages(small), (small, 0))
+        from PIL import Image
+        content = scan_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 2)
+        with patch.object(note_ingestion, "pdf_page_images_in_process", side_effect=AssertionError("ran in-process")):
+            scans, omitted = note_ingestion.pdf_page_images(content)
+        self.assertEqual(omitted, 2)
+        self.assertEqual(len(scans), note_ingestion.MAX_OCR_PDF_PAGES)
+        first = Image.open(BytesIO(scans[0]))
+        self.assertEqual(first.format, "JPEG")
+        self.assertLessEqual(max(first.size), note_ingestion.OCR_PAGE_MAX_EDGE)
+        # A page with no scan on it (a blank page) sends nothing.
+        self.assertEqual(note_ingestion.pdf_page_images(blank_pdf(2)), ([], 0))
         with patch.object(note_ingestion.subprocess, "run", side_effect=subprocess.TimeoutExpired("python", 10)) as run:
             with self.assertRaises(note_ingestion.PdfTimeout):
-                note_ingestion.first_pdf_pages(content)
+                note_ingestion.pdf_page_images(content)
         self.assertEqual(run.call_args.kwargs["timeout"], note_ingestion.PDF_TIME_LIMIT_SECONDS)
         with self.assertRaisesRegex(note_ingestion.NoteIngestionError, "Could not read"):
-            note_ingestion.first_pdf_pages(b"%PDF-1.7 garbage")
+            note_ingestion.pdf_page_images(b"%PDF-1.7 garbage")
         # In-process (no child processes on the host), the deadline is checked between pages.
         with self.assertRaises(note_ingestion.PdfTimeout):
-            note_ingestion.first_pdf_pages_in_process(content, 15, deadline=0.0)
+            note_ingestion.pdf_page_images_in_process(content, 3, deadline=0.0)
+
+    def test_scanned_pdf_trim_still_works(self):
+        trimmed, omitted = note_ingestion.first_pdf_pages(blank_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 5))
+        self.assertEqual(omitted, 5)
+        self.assertEqual(len(PdfReader(BytesIO(trimmed)).pages), note_ingestion.MAX_OCR_PDF_PAGES)
 
     def test_pdf_extraction_stops_after_enough_text(self):
         pages = [MagicMock() for _ in range(10)]
@@ -203,48 +221,47 @@ class NoteIngestionTests(unittest.TestCase):
             return UploadFile(filename=name, file=BytesIO(PNG_BYTES), headers={"content-type": "image/png"})
 
         with patch.object(main.auth, "authenticated_user", return_value={"id": "ocr-fail", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
-            with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("OpenRouter request failed")):
+            with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("Groq request failed")):
                 with self.assertRaises(HTTPException) as caught:
                     asyncio.run(main.upload_note("Biology", "Cells", upload(), "Bearer test"))
             self.assertEqual(caught.exception.status_code, 503)
-            self.assertNotIn("OpenRouter", caught.exception.detail)
+            self.assertNotIn("Groq", caught.exception.detail)
             with patch.object(main.ai_tutor, "extract_image_notes", side_effect=main.ai_tutor.AITutorError("No readable notes were found in that image")):
                 with self.assertRaises(HTTPException) as caught:
                     asyncio.run(main.upload_note("Biology", "Cells", upload(), "Bearer test"))
             self.assertEqual(caught.exception.status_code, 400)
 
-    def test_image_vision_uses_fast_model_and_routing(self):
+    def test_image_vision_uses_the_groq_vision_model(self):
         response = {"choices": [{"message": {"content": "Fast OCR"}}]}
         with patch.object(main.ai_tutor, "_post", return_value=response) as post:
             self.assertEqual(main.ai_tutor.extract_image_notes(image_bytes=b"image", content_type="image/png"), "Fast OCR")
         payload = post.call_args.args[0]
-        self.assertEqual(payload["model"], "google/gemini-3.1-flash-lite")
-        self.assertEqual(payload["provider"]["sort"], "throughput")
-        self.assertEqual(payload["reasoning"]["effort"], "minimal")
-        self.assertEqual(post.call_args.kwargs["timeout"], 8.0)
+        self.assertEqual(payload["model"], main.ai_tutor.AI_VISION_MODEL)
+        self.assertNotIn("provider", payload)
+        self.assertNotIn("plugins", payload)
+        self.assertEqual(post.call_args.kwargs["timeout"], main.ai_tutor.AI_VISION_TIMEOUT)
 
     def test_scanned_pdf_falls_back_to_ai_ocr(self):
-        scanned = blank_pdf(2)
+        scanned = scan_pdf(2)
         upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
         with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
         ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
             result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
         self.assertEqual(result.status, "ready")
-        ocr.assert_called_once_with(pdf_bytes=scanned)
+        self.assertEqual(len(ocr.call_args.kwargs["page_images"]), 2)
         self.assertEqual(result.pages_skipped, 0)
 
     def test_scanned_pdf_ocr_only_sends_the_first_pages(self):
-        scanned = blank_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 4)
+        scanned = scan_pdf(note_ingestion.MAX_OCR_PDF_PAGES + 4)
         upload = UploadFile(filename="scan.pdf", file=BytesIO(scanned), headers={"content-type": "application/pdf"})
         with patch.object(main.auth, "authenticated_user", return_value={"id": "pdf-student", "email_confirmed_at": "2026-01-01T00:00:00Z"}), patch.object(
             main.note_ingestion, "extract_text", side_effect=note_ingestion.NoteIngestionError("No readable text was found in that file")
         ), patch.object(main.ai_tutor, "extract_pdf_notes", return_value="OCR text about mitosis") as ocr:
             result = asyncio.run(main.upload_note("Biology", "Mitosis", upload, "Bearer test"))
-        sent = PdfReader(BytesIO(ocr.call_args.kwargs["pdf_bytes"]))
-        self.assertEqual(len(sent.pages), note_ingestion.MAX_OCR_PDF_PAGES)
+        self.assertEqual(len(ocr.call_args.kwargs["page_images"]), note_ingestion.MAX_OCR_PDF_PAGES)
         self.assertEqual(result.pages_skipped, 4)
-        self.assertIn("first 15 pages", result.notice)
+        self.assertIn(f"first {note_ingestion.MAX_OCR_PDF_PAGES} pages", result.notice)
 
     def test_question_generation_uses_owned_note_excerpt(self):
         note_store.save_note("student-a", "Biology", "Cells", "cells.txt", "text/plain", "Mitochondria generate ATP.", 25)

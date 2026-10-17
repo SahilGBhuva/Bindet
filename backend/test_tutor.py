@@ -251,13 +251,13 @@ class TutorTests(unittest.TestCase):
     def test_strong_model_is_used_a_limited_number_of_times_a_day(self):
         hard = "Explain why the derivative of sin x is cos x and prove it step by step using the limit definition, " * 2
         # The reply cache would answer Alex's repeated question without any model; this test is about the quota.
-        with patch.object(ai_tutor, "OPENROUTER_TUTOR_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 1), \
+        with patch.object(ai_tutor, "AI_STRONG_MODEL", "strong/model"), patch.object(main, "TUTOR_STRONG_PER_DAY", 1), \
                 patch.dict(os.environ, {"AI_CACHE_ENABLED": "0"}):
             _, first = self.send("alex", content=hard)
             _, second = self.send("alex", content=hard)
             _, other = self.send("sam", content=hard)
         self.assertEqual(first["route"]["model"], "strong/model")
-        self.assertEqual(second["route"]["model"], ai_tutor.OPENROUTER_MODEL)
+        self.assertEqual(second["route"]["model"], ai_tutor.AI_CHAT_MODEL)
         self.assertEqual(second["route"]["tier"], "deep")
         self.assertEqual(other["route"]["model"], "strong/model")
 
@@ -313,7 +313,7 @@ class TutorTests(unittest.TestCase):
         self.assertEqual(ai_tutor.tutor_route(hard, False)["tier"], "deep")
         self.assertEqual(ai_tutor.tutor_route("What is this?", True)["tier"], "vision")
 
-    def test_stream_parser_reads_openrouter_events(self):
+    def test_stream_parser_reads_groq_events(self):
         lines = [
             'data: {"choices":[{"delta":{"content":"Hel"}}]}',
             ": keep-alive",
@@ -323,21 +323,29 @@ class TutorTests(unittest.TestCase):
 
         class FakeResponse:
             status_code = 200
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
+            closed = False
             def iter_lines(self): return iter(lines)
+            def close(self): self.closed = True
 
         class FakeClient:
-            def stream(self, *args, **kwargs):
-                self.payload = kwargs["json"]
-                return FakeResponse()
+            def build_request(self, method, url, **kwargs):
+                self.url, self.payload = url, kwargs["json"]
+                return object()
+            def send(self, request, stream=False):
+                self.streamed = stream
+                self.response = FakeResponse()
+                return self.response
 
         client = FakeClient()
-        with patch.object(ai_tutor, "_client", return_value=client), patch.dict(os.environ, {"OPENROUTER_API_KEY": "test"}):
+        ai_tutor._cooldowns.clear()
+        with patch.object(ai_tutor, "_client", return_value=client), patch.dict(os.environ, {"GROQ_API_KEY": "test"}):
             text = "".join(ai_tutor.stream_tutor_reply(messages=[{"role": "user", "content": "hi"}], route=ai_tutor.tutor_route("hi", False)))
         self.assertEqual(text, "Hello")
-        self.assertTrue(client.payload["stream"])
-        self.assertEqual(client.payload["reasoning"]["effort"], "minimal")
+        self.assertTrue(client.payload["stream"] and client.streamed)
+        self.assertEqual(client.payload["model"], ai_tutor.AI_CHAT_MODEL)
+        self.assertEqual(client.url, ai_tutor.AI_URL)
+        self.assertNotIn("reasoning", client.payload)
+        self.assertTrue(client.response.closed)
 
 
 if __name__ == "__main__":

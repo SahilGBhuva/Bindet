@@ -9,7 +9,7 @@ cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # fill in Supabase and OpenRouter settings
+cp .env.example .env      # fill in Supabase settings and GROQ_API_KEY
 uvicorn main:app --reload
 ```
 

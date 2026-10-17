@@ -33,7 +33,7 @@ type Attachment = { id: string; name: string; preview: string; dataUrl?: string;
 type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streaming' | 'failed' | 'stopped'; previews?: string[]; progress?: number; error?: string; tier?: string; grounded?: string[]; groundedIn?: { course: string; unit: string }; thinking?: ThinkingContext; making?: OttoMakingInfo }
 
 const NEW = 'new'
-const MAX_IMAGES = 3
+const MAX_IMAGES = 2
 // One request to the server must stay under the host's ~4.5 MB body limit; base64 adds a
 // third, so all images in a message together are capped at 3 MB (the server's limit too).
 // Photos are downscaled first.

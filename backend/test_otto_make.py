@@ -56,7 +56,7 @@ def model_reply(content: dict) -> dict:
 
 
 class FakeModel:
-    """OpenRouter at ai_tutor._post: decks, practice tests and grades, grounded in the chat."""
+    """Groq at ai_tutor._post: decks, practice tests and grades, grounded in the chat."""
 
     def __init__(self):
         self.calls: list[dict] = []
