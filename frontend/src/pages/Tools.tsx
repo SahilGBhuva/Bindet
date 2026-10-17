@@ -1417,7 +1417,16 @@ export function Tools({ accessToken, startReview = false }: { accessToken?: stri
       }
       return { course: activeCourse, unit: activeUnit }
     },
-    notesIn: () => unitNotes,
+    // Page numbers follow every note in the unit, on any device. Until the server's list
+    // for this unit is in, read it (as Home does) rather than number from this device's notes.
+    notesIn: (place) => {
+      if (libraryLoaded && !libraryFailed) return unitNotes
+      const local = localUnitNotes
+      return data.listNotes(place.course, place.unit, accessToken).then(
+        (listed) => [...local, ...listed.filter((note) => !local.some((item) => item.id === note.id)).map((note) => ({ fileName: note.file_name }))],
+        () => unitNotes,
+      )
+    },
     upload: (job, onSent) => ingestNote(job.file, 'photo', onSent),
     onStart: () => setUploadError(null),
     onPrepareError: (message) => setUploadError({ source: 'photo', message, retry: false }),
