@@ -642,3 +642,14 @@
 .bindit-rail__strip-settings.is-current { background: var(--color-brand-tint); color: var(--color-brand-text); }
 .bindit-rail__strip-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .bindit-rail__plan { flex: none; height: 18px; padding: 0 6px; }
+
+/* Light / Dark switch above the sidebar footer. */
+.bindit-rail__themes { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin: 12px 0 0; padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-sunken); }
+.bindit-rail__themes button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 0; border-radius: calc(var(--radius-md) - 2px); background: none; color: var(--color-text-secondary); font: inherit; font-size: var(--text-sm); font-weight: var(--weight-medium); cursor: pointer; }
+.bindit-rail__themes button:hover { color: var(--color-text); }
+.bindit-rail__themes button.is-on { background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-xs); }
+.bindit-rail__themes button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.bindit-rail__themes svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bindit-rail__themes button:first-child.is-on svg { color: var(--color-amber-text); }
+.bindit-rail__themes button:last-child.is-on svg { color: var(--color-violet-text); }
+.bindit-rail.is-collapsed .bindit-rail__themes { display: none; }

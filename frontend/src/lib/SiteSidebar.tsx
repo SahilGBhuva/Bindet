@@ -102,6 +102,26 @@ function ThemeButton() {
   )
 }
 
+/* Light or dark, in plain words: two clear choices instead of a cycling icon. */
+function ThemeSwitch() {
+  const preference = useThemePreference()
+  const systemDark = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches
+  const current = preference === 'system' ? (systemDark ? 'dark' : 'light') : preference
+  return (
+    <div className="bindit-rail__themes" role="group" aria-label="Color theme">
+      {(['light', 'dark'] as const).map((choice) => (
+        <button key={choice} type="button" className={current === choice ? 'is-on' : ''} aria-pressed={current === choice} onClick={() => saveThemePreference(choice)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            {choice === 'dark' ? <path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z" />
+              : <><circle cx="12" cy="12" r="3.6" /><path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8M6 6l1.3 1.3M16.7 16.7 18 18M6 18l1.3-1.3M16.7 7.3 18 6" /></>}
+          </svg>
+          {choice === 'dark' ? 'Dark' : 'Light'}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /* ---------- Panel layout: which sections show, in what order, and which are folded (per device). ---------- */
 
 type SectionId = 'highlighted' | 'study' | 'directory' | 'important' | 'groups' | 'tasks'
@@ -764,6 +784,7 @@ export function SiteSidebar({ active, session = null, onOpenCommand, collapsed =
 
             {editing ? <p className="bindit-rail__hint">Drag <span aria-hidden="true">⋮⋮</span> to move a section, or use the arrows. The eye hides one.</p> : null}
 
+            {data.sandboxed ? null : <ThemeSwitch />}
             <div className="bindit-rail__footer">
               <button type="button" className={`bindit-rail__lock${editing ? ' is-editing' : ''}`} onClick={() => setEditing((value) => !value)}>
                 <span className="bindit-rail__lock-state" aria-hidden="true">
