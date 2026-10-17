@@ -671,3 +671,16 @@
 .bindit-rail__tool.is-active { background: color-mix(in srgb, var(--color-violet) 16%, var(--color-surface)); color: var(--color-violet-text); }
 .bindit-rail__tool:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .bindit-rail__tool svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The three top icons sit together in one rounded toolbar, so they read as a set. */
+.bindit-rail:not(.is-collapsed) .bindit-rail__tools {
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+.bindit-rail:not(.is-collapsed) .bindit-rail__tool { width: 36px; height: 30px; border-radius: calc(var(--radius-md) - 3px); }
+.bindit-rail:not(.is-collapsed) .bindit-rail__tool:hover { background: var(--color-surface); }
+.bindit-rail:not(.is-collapsed) .bindit-rail__tool.is-active { background: var(--color-surface); box-shadow: var(--shadow-xs); }
+.bindit-rail:not(.is-collapsed) .bindit-rail__top { margin: 2px 0 10px; }

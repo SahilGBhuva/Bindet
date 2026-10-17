@@ -12,6 +12,18 @@ import { MathText } from '../math/Math'
 import { Icons } from '../Icons'
 import './InstantStudy.css'
 
+/* bindet's own Instant Study mark: two study cards with a spark, instead of the stock lightning emoji. */
+function InstantMark({ size = 24 }: { size?: number }) {
+  return (
+    <svg className="instant-mark-svg" viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" focusable="false">
+      <rect x="3.5" y="7" width="12" height="13" rx="2.4" transform="rotate(-8 9.5 13.5)" fill="currentColor" opacity=".35" />
+      <rect x="6.5" y="6" width="12" height="13.5" rx="2.4" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9.6 12.6h5.8M9.6 15.6h3.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M19.4 2.2l.75 1.85 1.85.75-1.85.75-.75 1.85-.75-1.85-1.85-.75 1.85-.75z" fill="currentColor" />
+    </svg>
+  )
+}
+
 /*
  * Instant Study: Home's one-tap session over one unit of the student's own notes.
  *
@@ -60,7 +72,7 @@ export function InstantStudyButton({ pick, onStart, streak }: { pick: InstantPic
   return (
     <div className="instant-entry">
       <button type="button" className="instant-cta" onClick={onStart} aria-describedby="instant-hint">
-        <span className="instant-cta__bolt" aria-hidden="true">⚡</span>
+        <span className="instant-cta__bolt" aria-hidden="true"><InstantMark size={30} /></span>
         <span className="instant-cta__text">
           <span className="instant-cta__title">Instant Study</span>
           <span className="instant-cta__hint" id="instant-hint">{instantHint(pick)}</span>
@@ -773,7 +785,7 @@ function Celebration({ accessToken, studentId, goal, streakBefore, xp, cardsDone
       {unsaved ? <p className="instant-feedback__error" role="alert">{unsaved === 1 ? 'One card grade' : `${unsaved} card grades`} didn’t save. Check your connection.</p> : null}
       <div className="instant__actions instant-done__actions">
         <button ref={again} type="button" className={`instant-button instant-button--go instant-button--big${going ? ' is-busy' : ''}`} onClick={() => { void anotherRound() }} disabled={going}>
-          <span aria-hidden="true">⚡</span> Another round
+          <InstantMark size={18} /> Another round
         </button>
         <button type="button" className="instant-button" onClick={onClose}>Done</button>
       </div>
@@ -846,7 +858,7 @@ function AddNotes({ accessToken, notebook, onNotebook, onClose, onReady }: {
     <div className="instant__frame">
       <div className="instant__band">
         <header className="instant__head">
-          <span className="instant__mark instant__mark--bolt" aria-hidden="true">⚡</span>
+          <span className="instant__mark instant__mark--bolt" aria-hidden="true"><InstantMark size={22} /></span>
           <div className="instant__where">
             <h2 className="instant__title" id="instant-title">Instant Study</h2>
             <p className="instant__sub">A 5-minute session made from your own notes</p>
@@ -893,7 +905,7 @@ function AddNotes({ accessToken, notebook, onNotebook, onClose, onReady }: {
             {error ? <p className="instant-feedback__error" role="alert">{error}</p> : null}
             <div className="instant__actions">
               <button type="submit" className={`instant-button instant-button--go${busy ? ' is-busy' : ''}`} disabled={!text.trim() || busy}>
-                {busy ? 'Saving…' : <><span aria-hidden="true">⚡</span> Save and study</>}
+                {busy ? 'Saving…' : <><InstantMark size={18} /> Save and study</>}
               </button>
             </div>
           </form>

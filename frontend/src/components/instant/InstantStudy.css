@@ -761,3 +761,8 @@
   .instant__step-bar span,
   .instant-stat__meter span { transition: none; }
 }
+
+/* The Instant Study mark is white on the button's gradient and inherits text color elsewhere. */
+.instant-cta__bolt, .instant__mark--bolt { color: #fff; }
+.instant-mark-svg { display: block; }
+.instant-button .instant-mark-svg { display: inline-block; margin-right: 6px; vertical-align: -3px; }
