@@ -1,32 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { getCachedStudyGroups, getStudyGroups, parseServerTime, type StudyGroup } from '../lib/api'
 import { accountDisplayName } from '../lib/accountName'
 import type { AuthSession } from '../lib/auth'
 import {
-  deleteGroupImage, getCachedGroupMessages, getGroupImageUrl, isSafeAttachmentPath, listChatUnreads, listGroupMessages,
+  deleteGroupImage, getCachedGroupMessages, listChatUnreads, listGroupMessages,
   listGroupReadReceipts, listGroupTyping, markGroupRead, sendGroupMessage,
   isTypingNow, setGroupTyping, subscribeToAllGroupMessages, subscribeToGroupMessages, CHAT_LOAD_ERROR, type RealtimeStatus,
   uploadGroupImage, type ChatMessage, type ChatReadReceipt, type ChatTypingState,
 } from '../lib/chat'
+import { buildThread, dayLabel, emojiOnlyCount, listTimeLabel, matchesSearch, previewLine, seenLine } from '../lib/chatView'
 import { formatClockTime } from '../lib/time'
-import { courseInitial, toneClass, toneForName } from '../lib/tones'
-import { useDrawer, useMediaQuery } from '../lib/useDrawer'
+import { toneClass, toneForName } from '../lib/tones'
+import { useMediaQuery } from '../lib/useDrawer'
 import { useAnnounce } from '../lib/announce'
+import { GroupAvatar, ImageLightbox, MessageImage, MessageText, PersonAvatar, type OpenImage } from '../components/chat/ChatParts'
+import { rememberLocalPreview } from '../components/chat/chatImageCache'
+import { ChatIcon } from '../components/chat/chatIcons'
 import './Chat.css'
 
 /*
- * Messages: private study-group conversations, the tutor's sibling.
+ * Messages: private study-group conversations.
  * The list and the open room render at once from what is already cached; the
  * network refreshes both behind them. Images are signed and fetched only when
  * they scroll near the screen. A sent message appears immediately, uploads show
  * progress, and anything that fails stays put with Retry and Remove.
+ * On narrow screens the list and the room are two screens, like a phone's Messages app.
  */
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_IMAGES = 4
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-const GROUPING_WINDOW = 5 * 60 * 1000
 const ACTIVE_KEY = 'bindit:chat:active'
+const VIEW_KEY = 'bindit:chat:view'
+const COMPOSER_MAX_HEIGHT = 150
+const STARTERS = ['👋 Hi everyone!', 'When should we study this week?', 'Can someone explain today’s homework?']
 
 type Summary = { unread: number; lastAt: string | null; last?: ChatMessage }
 type DraftImage = { id: string; file: File; preview: string; error?: string }
@@ -42,18 +49,18 @@ type Pending = {
   uploadedPath?: string
   error?: string
 }
+/* A row in the open thread: a saved message, or one of ours still on its way. */
+type ThreadEntry = { id: string; sender_id: string; created_at: string; message?: ChatMessage; pending?: Pending }
 
 /* In memory only (never written to storage): survives switching pages, not a reload. */
 const summaryMemory = new Map<string, Record<string, Summary>>()
-const signedUrls = new Map<string, { url: string; expires: number }>()
-/* Images this device just sent, shown from the local copy instead of being downloaded again. */
-const localPreviews = new Map<string, string>()
 
-const dayFormat = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
-const shortDayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+function readSession(key: string): string {
+  try { return sessionStorage.getItem(key) || '' } catch { return '' }
+}
 
-function readActiveGroup(): string {
-  try { return sessionStorage.getItem(ACTIVE_KEY) || '' } catch { return '' }
+function writeSession(key: string, value: string) {
+  try { sessionStorage.setItem(key, value) } catch { /* convenience only */ }
 }
 
 function time(iso: string | null | undefined) {
@@ -61,22 +68,8 @@ function time(iso: string | null | undefined) {
   return Number.isFinite(value) ? value : 0
 }
 
-function startOfDay(value: number) {
-  const date = new Date(value)
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
-}
-
-function dayLabel(iso: string) {
-  const days = Math.round((startOfDay(Date.now()) - startOfDay(time(iso))) / 86_400_000)
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Yesterday'
-  return dayFormat.format(new Date(time(iso)))
-}
-
-function listTime(iso: string) {
-  const value = time(iso)
-  return startOfDay(value) === startOfDay(Date.now()) ? formatClockTime(value) : shortDayFormat.format(value)
+function firstName(name: string) {
+  return name.trim().split(/\s+/)[0] || name
 }
 
 function formatFileSize(bytes: number) {
@@ -101,82 +94,13 @@ function withMessage(list: ChatMessage[] | undefined, message: ChatMessage) {
   return list.some((item) => item.id === message.id) ? list : mergeMessages(list, [message])
 }
 
-function cachedImageUrl(path: string) {
-  const local = localPreviews.get(path)
-  if (local) return local
-  const signed = signedUrls.get(path)
-  return signed && signed.expires > Date.now() + 60_000 ? signed.url : ''
+/* The wall clock, for event handlers and timers (never read while rendering). */
+function clockNow() {
+  return Date.now()
 }
 
-const Icon = {
-  attach: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20 11-7.5 7.5a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7L10.2 16a1.7 1.7 0 0 1-2.4-2.4L14.5 7" /></svg>,
-  camera: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>,
-  send: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>,
-  list: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" /></svg>,
-  image: <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m4 16 5-5 4 4 3-3 4 4" /></svg>,
-  lock: <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>,
-}
-
-/* Signs and loads a shared image only when it comes near the screen, and remembers the link. */
-function MessageImage({ message, session }: { message: ChatMessage; session: AuthSession }) {
-  // A path outside the sender's folder is never signed or fetched.
-  const { group_id: groupId, sender_id: senderId } = message
-  const safe = isSafeAttachmentPath(message.attachment_path, { group_id: groupId, sender_id: senderId })
-  const path = safe ? message.attachment_path ?? '' : ''
-  const name = message.attachment_name || 'Shared image'
-  const [url, setUrl] = useState(() => path ? cachedImageUrl(path) : '')
-  const [failed, setFailed] = useState(false)
-  const [attempt, setAttempt] = useState(0)
-  const [near, setNear] = useState(() => Boolean(cachedImageUrl(path)))
-  const holder = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (near) return
-    const node = holder.current
-    if (!node || typeof IntersectionObserver === 'undefined') {
-      const timer = window.setTimeout(() => setNear(true), 0)
-      return () => window.clearTimeout(timer)
-    }
-    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) setNear(true) }, { rootMargin: '600px 0px' })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [near])
-
-  useEffect(() => {
-    if (!near || url || !path) return
-    let live = true
-    void getGroupImageUrl(path, { group_id: groupId, sender_id: senderId }, session)
-      .then((next) => {
-        signedUrls.set(path, { url: next, expires: Date.now() + 3_600_000 })
-        if (live) setUrl(next)
-      })
-      .catch(() => { if (live) setFailed(true) })
-    return () => { live = false }
-  }, [near, url, path, groupId, senderId, session, attempt])
-
-  if (!safe) {
-    return (
-      <div className="chat-image is-failed">
-        {Icon.image}
-        <span>Image unavailable</span>
-      </div>
-    )
-  }
-  if (failed) {
-    return (
-      <div className="chat-image is-failed">
-        {Icon.image}
-        <span>Image unavailable</span>
-        <button type="button" className="ui-link" onClick={() => { setFailed(false); setAttempt((value) => value + 1) }}>Try again</button>
-      </div>
-    )
-  }
-  if (!url) return <div ref={holder} className="chat-image is-loading ui-skeleton" role="img" aria-label={`Loading ${name}`} />
-  return (
-    <a className="chat-image" href={url} target="_blank" rel="noreferrer" aria-label={`Open ${name} in a new tab`}>
-      <img src={url} alt={name} width="320" height="240" loading="lazy" decoding="async" />
-    </a>
-  )
+function prefersReducedMotion() {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
 export function Chat({ session }: { session: AuthSession | null }) {
@@ -185,7 +109,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const [groups, setGroups] = useState<StudyGroup[] | null>(() => token ? getCachedStudyGroups(token) : [])
   const [groupsError, setGroupsError] = useState(false)
   const [groupsAttempt, setGroupsAttempt] = useState(0)
-  const [preferredId, setPreferredId] = useState(readActiveGroup)
+  const [preferredId, setPreferredId] = useState(() => readSession(ACTIVE_KEY))
   const [threads, setThreads] = useState<Record<string, ChatMessage[]>>({})
   const [threadErrors, setThreadErrors] = useState<Record<string, string>>({})
   const [threadAttempt, setThreadAttempt] = useState(0)
@@ -197,20 +121,31 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const [draft, setDraft] = useState('')
   const [images, setImages] = useState<DraftImage[]>([])
   const [dragActive, setDragActive] = useState(false)
-  const [listOpen, setListOpen] = useState(false)
-  // Under 1000px the conversation list is a drawer: inert while closed, modal while open.
+  const [search, setSearch] = useState('')
+  const [lightbox, setLightbox] = useState<OpenImage | null>(null)
+  const [revealed, setRevealed] = useState('')
+  const [unseen, setUnseen] = useState(0)
+  const [away, setAway] = useState(false)
+  // Messages newer than this slide in; the history already there when the room opened does not.
+  const [openedAt, setOpenedAt] = useState(clockNow)
+  // "Today", "Yesterday" and list times follow the clock, re-read once a minute.
+  const [now, setNow] = useState(clockNow)
+  // Under 1000px the list and the conversation are separate screens.
   const narrow = useMediaQuery('(max-width: 1000px)')
-  const listPanel = useRef<HTMLElement>(null)
-  const closeList = useCallback(() => setListOpen(false), [])
-  useDrawer({ open: listOpen && narrow, onClose: closeList, panel: listPanel })
+  const [phoneView, setPhoneView] = useState<'list' | 'room'>(() => readSession(VIEW_KEY) === 'room' ? 'room' : 'list')
+  const roomVisible = !narrow || phoneView === 'room'
   const [notice, setNotice] = useState('')
   const [toast, setToast] = useState<{ groupId: string; groupName: string; preview: string } | null>(null)
 
   const scroller = useRef<HTMLDivElement>(null)
+  const threadNode = useRef<HTMLDivElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const roomHeading = useRef<HTMLHeadingElement>(null)
+  const listNode = useRef<HTMLUListElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const cameraInput = useRef<HTMLInputElement>(null)
   const stickToBottom = useRef(true)
+  const focusAfter = useRef<'room' | 'list' | null>(null)
   const activeIdRef = useRef('')
   const groupsRef = useRef<StudyGroup[]>([])
   const ownNameRef = useRef('You')
@@ -218,10 +153,12 @@ export function Chat({ session }: { session: AuthSession | null }) {
   const lastTypingSignal = useRef(0)
   const imagesRef = useRef<DraftImage[]>([])
   const pendingRef = useRef<Pending[]>([])
+  const counted = useRef({ id: '', count: 0 })
 
   const groupList = useMemo(() => groups ?? [], [groups])
   const activeGroup = groupList.find((group) => group.id === preferredId) ?? groupList[0] ?? null
-  const activeId = activeGroup?.id ?? ''
+  // The room actually on screen. On a phone's list screen no room is open, so nothing is marked read.
+  const activeId = roomVisible ? activeGroup?.id ?? '' : ''
   const ownName = activeGroup?.members.find((member) => member.student_id === userId)?.display_name
     || accountDisplayName(session?.user)
     || 'You'
@@ -239,11 +176,30 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   const selectGroup = useCallback((id: string) => {
     setPreferredId(id)
-    setListOpen(false)
+    setPhoneView('room')
+    setOpenedAt(clockNow())
+    setRevealed('')
     setSummaries((current) => current[id]?.unread ? { ...current, [id]: { ...current[id], unread: 0 } } : current)
     stickToBottom.current = true
-    try { sessionStorage.setItem(ACTIVE_KEY, id) } catch { /* convenience only */ }
+    focusAfter.current = 'room'
+    writeSession(ACTIVE_KEY, id)
+    writeSession(VIEW_KEY, 'room')
   }, [])
+
+  const showList = useCallback(() => {
+    setPhoneView('list')
+    focusAfter.current = 'list'
+    writeSession(VIEW_KEY, 'list')
+  }, [])
+
+  // Moving between the two phone screens puts focus where the reader now is.
+  useEffect(() => {
+    const target = focusAfter.current
+    if (!target || !narrow) return
+    focusAfter.current = null
+    if (target === 'room' && phoneView === 'room') roomHeading.current?.focus({ preventScroll: true })
+    if (target === 'list' && phoneView === 'list') listNode.current?.querySelector<HTMLElement>(`[data-group="${CSS.escape(preferredId)}"]`)?.focus()
+  }, [phoneView, narrow, preferredId])
 
   // The group list refreshes behind the cached one already on screen.
   useEffect(() => {
@@ -355,7 +311,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
         return { ...current, [message.group_id]: { unread: (previous?.unread ?? 0) + (own || isOpen ? 0 : 1), lastAt: message.created_at, last: message } }
       })
       setThreads((current) => current[message.group_id] ? { ...current, [message.group_id]: withMessage(current[message.group_id], message) } : current)
-      if (own || isOpen) return
+      // The nudge is for someone in a room; on the phone list screen the list itself shows the new message.
+      if (own || isOpen || !activeIdRef.current) return
       const group = groupsRef.current.find((item) => item.id === message.group_id)
       if (!group) return
       const sender = group.members.find((member) => member.student_id === message.sender_id)?.display_name || 'Someone'
@@ -390,6 +347,11 @@ export function Chat({ session }: { session: AuthSession | null }) {
     return () => window.clearTimeout(timer)
   }, [notice])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(clockNow()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   // Typing states expire on their own.
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -405,12 +367,13 @@ export function Chat({ session }: { session: AuthSession | null }) {
     for (const item of pendingRef.current) if (item.preview) URL.revokeObjectURL(item.preview)
   }, [])
 
+  // The composer grows with the text, up to about six lines.
   useEffect(() => {
     const node = textarea.current
     if (!node) return
     node.style.height = 'auto'
-    node.style.height = `${Math.min(node.scrollHeight, 180)}px`
-  }, [draft])
+    node.style.height = `${Math.min(node.scrollHeight, COMPOSER_MAX_HEIGHT)}px`
+  }, [draft, roomVisible])
 
   const serverMessages = useMemo(() => {
     if (!activeId || !session) return []
@@ -432,16 +395,47 @@ export function Chat({ session }: { session: AuthSession | null }) {
     if (node && stickToBottom.current) node.scrollTop = node.scrollHeight
   }, [serverMessages.length, roomPending.length, activeId, typingUsers.length])
 
-  // Late layout changes (an image finishing loading) keep the reader at the end if they were there.
-  const roomMounted = Boolean(session) && !(groups === null && groupsError) && !(groups && !groups.length)
+  // Messages from others that arrive while the reader is scrolled up are counted for the "New messages" pill.
+  const othersCount = serverMessages.reduce((sum, message) => sum + (message.sender_id === userId ? 0 : 1), 0)
+  useEffect(() => {
+    const previous = counted.current
+    counted.current = { id: activeId, count: othersCount }
+    if (previous.id !== activeId) { setUnseen(0); setAway(false); return }
+    if (othersCount > previous.count && !stickToBottom.current) setUnseen((value) => value + othersCount - previous.count)
+  }, [activeId, othersCount])
+
+  // Late layout changes keep the reader at the end if they were there: an image finishing
+  // loading (the thread grows) or the composer growing with text or image chips (the view shrinks).
+  const roomMounted = Boolean(session) && roomVisible && !(groups === null && groupsError) && !(groups && !groups.length)
   useEffect(() => {
     const node = scroller.current
-    const thread = node?.firstElementChild
+    const thread = threadNode.current
     if (!roomMounted || !node || !thread || typeof ResizeObserver === 'undefined') return
+    node.scrollTop = node.scrollHeight
     const observer = new ResizeObserver(() => { if (stickToBottom.current) node.scrollTop = node.scrollHeight })
     observer.observe(thread)
+    observer.observe(node)
     return () => observer.disconnect()
   }, [roomMounted])
+
+  function onThreadScroll() {
+    const node = scroller.current
+    if (!node) return
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight
+    stickToBottom.current = distance < 80
+    const far = distance > 320
+    if (far !== away) setAway(far)
+    if (stickToBottom.current && unseen) setUnseen(0)
+  }
+
+  function jumpToBottom() {
+    const node = scroller.current
+    if (!node) return
+    stickToBottom.current = true
+    setUnseen(0)
+    setAway(false)
+    node.scrollTo({ top: node.scrollHeight, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+  }
 
   function addFiles(files: FileList | File[]) {
     if (roomUnavailable) return
@@ -463,6 +457,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   function removeImage(id: string) {
     setImages((current) => current.filter((item) => { if (item.id === id) { URL.revokeObjectURL(item.preview); return false } return true }))
+    textarea.current?.focus()
   }
 
   function updatePending(key: string, change: Partial<Pending>) {
@@ -480,7 +475,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
       uploadedPath = uploaded?.path ?? ''
       if (uploadedPath) updatePending(item.key, { uploadedPath })
       const message = await sendGroupMessage(item.groupId, item.body, session, uploaded)
-      if (uploadedPath && item.preview) localPreviews.set(uploadedPath, item.preview)
+      if (uploadedPath && item.preview) rememberLocalPreview(uploadedPath, item.preview)
       setThreads((current) => ({ ...current, [item.groupId]: withMessage(current[item.groupId] ?? getCachedGroupMessages(item.groupId, session) ?? [], message) }))
       setSummaries((current) => ({ ...current, [item.groupId]: { unread: current[item.groupId]?.unread ?? 0, lastAt: message.created_at, last: message } }))
       setPending((current) => current.filter((entry) => entry.key !== item.key))
@@ -498,7 +493,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   function submit(event?: FormEvent) {
     event?.preventDefault()
-    if (!session || !activeGroup || roomUnavailable) return
+    if (!session || !activeGroup || !activeId || roomUnavailable) return
     const body = draft.trim()
     const ready = images.filter((item) => !item.error)
     if (!body && !ready.length) {
@@ -511,6 +506,7 @@ export function Chat({ session }: { session: AuthSession | null }) {
       ? ready.map((image, index) => ({ key: `${base}-${index}`, groupId: activeGroup.id, body: index === 0 ? body : '', file: image.file, preview: image.preview, createdAt: stamp, status: 'sending' }))
       : [{ key: base, groupId: activeGroup.id, body, createdAt: stamp, status: 'sending' }]
     stickToBottom.current = true
+    setUnseen(0)
     setPending((current) => [...current, ...items])
     setDraft('')
     setImages((current) => current.filter((item) => item.error))
@@ -522,8 +518,8 @@ export function Chat({ session }: { session: AuthSession | null }) {
 
   function onDraftChange(value: string) {
     setDraft(value)
-    if (!session || !activeGroup) return
-    const now = Date.now()
+    if (!session || !activeGroup || !activeId) return
+    const now = clockNow()
     if (value && now - lastTypingSignal.current > 1800) {
       lastTypingSignal.current = now
       void setGroupTyping(activeGroup.id, ownName, true, session).catch(() => undefined)
@@ -546,6 +542,12 @@ export function Chat({ session }: { session: AuthSession | null }) {
     event.preventDefault()
     setDragActive(false)
     if (event.dataTransfer.files.length) addFiles(event.dataTransfer.files)
+  }
+
+  /* A starter fills the composer; nothing is sent until the student presses Send. */
+  function applyStarter(text: string) {
+    onDraftChange(text)
+    textarea.current?.focus()
   }
 
   if (!session) {
@@ -585,52 +587,146 @@ export function Chat({ session }: { session: AuthSession | null }) {
     )
   }
 
-  const lastActivity = (group: StudyGroup) => time(summaries[group.id]?.lastAt ?? getCachedGroupMessages(group.id, session)?.at(-1)?.created_at)
+  const signedIn = session
+  const lastActivity = (group: StudyGroup) => time(summaries[group.id]?.lastAt ?? getCachedGroupMessages(group.id, signedIn)?.at(-1)?.created_at)
   const sortedGroups = [...groupList].sort((a, b) => lastActivity(b) - lastActivity(a))
+  const visibleGroups = sortedGroups.filter((group) => matchesSearch(search, [group.name, ...group.members.map((member) => member.display_name || member.username)]))
   const totalUnread = groupList.reduce((sum, group) => sum + (group.id === activeId ? 0 : summaries[group.id]?.unread ?? 0), 0)
-  const memberName = (id: string, fallback?: string) => id === userId ? 'You' : fallback || activeGroup?.members.find((member) => member.student_id === id)?.display_name || 'Deleted user'
+  const members = activeGroup?.members ?? []
+  const memberName = (id: string, fallback?: string) => id === userId ? 'You' : fallback || members.find((member) => member.student_id === id)?.display_name || 'Deleted user'
   const activeTyping = typingUsers.filter((item) => item.group_id === activeId && item.student_id !== userId && isTypingNow(item))
   const lastOwn = [...serverMessages].reverse().find((message) => message.sender_id === userId)
-  const seenBy = lastOwn ? receipts.filter((receipt) => receipt.group_id === activeId && receipt.student_id !== userId && time(receipt.last_read_at) >= time(lastOwn.created_at)).length : 0
-  const threadError = threadErrors[activeId]
-  const members = activeGroup?.members ?? []
   const others = members.filter((member) => member.student_id !== userId)
+  const seenNames = lastOwn
+    ? receipts
+      .filter((receipt) => receipt.group_id === activeId && receipt.student_id !== userId && time(receipt.last_read_at) >= time(lastOwn.created_at))
+      .map((receipt) => others.find((member) => member.student_id === receipt.student_id)?.display_name)
+      .filter((name): name is string => Boolean(name))
+    : []
+  const threadError = threadErrors[activeId]
   const memberLine = others.length
-    ? `You, ${others.slice(0, 2).map((member) => member.display_name).join(', ')}${others.length > 2 ? ` and ${others.length - 2} more` : ''}`
+    ? `You, ${others.slice(0, 2).map((member) => firstName(member.display_name || member.username)).join(', ')}${others.length > 2 ? ` and ${others.length - 2} more` : ''}`
     : 'Just you so far. Invite classmates from Groups.'
   const canSend = Boolean(draft.trim()) || images.some((item) => !item.error)
+  const composerDisabled = !activeGroup || !activeId || roomUnavailable
+
+  const entries: ThreadEntry[] = [
+    ...serverMessages.map((message) => ({ id: message.id, sender_id: message.sender_id, created_at: message.created_at, message })),
+    ...roomPending.map((item) => ({ id: item.key, sender_id: userId, created_at: item.createdAt, pending: item })),
+  ]
+  const thread = buildThread(entries, userId, (entry) => time(entry.created_at))
+  const typingNames = activeTyping.map((item) => firstName(item.display_name))
+  const typingLabel = typingNames.length === 1
+    ? `${typingNames[0]} is typing`
+    : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing` : `${typingNames.length} people are typing`
+
+  function renderEntry(entry: ThreadEntry, own: boolean, name: string, position: string) {
+    const message = entry.message
+    const item = entry.pending
+    const body = message ? message.body ?? '' : item?.body ?? ''
+    const stamp = formatClockTime(time(entry.created_at))
+    const hasImage = Boolean(message?.attachment_path || item?.preview)
+    const emoji = hasImage ? 0 : emojiOnlyCount(body)
+    // Our own messages already slid in while sending; history from before the room opened stays still.
+    const fresh = item ? true : !own && time(entry.created_at) > openedAt
+    const showReceipt = Boolean(message && message.id === lastOwn?.id && !roomPending.length)
+    const classes = ['chat-msg', `is-${position}`]
+    if (emoji) classes.push('is-emoji')
+    if (fresh) classes.push('is-fresh')
+    if (revealed === entry.id) classes.push('is-revealed')
+    if (item) classes.push(`is-${item.status}`)
+    const style = emoji ? { '--emoji-size': emoji === 1 ? '48px' : emoji <= 3 ? '40px' : '32px' } as CSSProperties : undefined
+    return (
+      <article key={entry.id} className={classes.join(' ')} style={style}>
+        <span className="sr-only">{`${name}, ${stamp}: ${body ? '' : hasImage ? 'shared an image' : ''}`}</span>
+        <div className="chat-msg__line">
+          <div className="chat-msg__content">
+            {message?.attachment_path ? <MessageImage message={message} session={signedIn} onOpen={setLightbox} /> : null}
+            {item?.preview ? (
+              <span className="chat-photo is-local">
+                <img src={item.preview} alt={item.file?.name || 'Image being sent'} width="280" height="210" decoding="async" />
+                {item.status === 'sending' && item.progress !== undefined && item.progress < 100 ? (
+                  <span className="chat-photo__progress" role="progressbar" aria-label="Uploading image" aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress}><i style={{ transform: `scaleX(${item.progress / 100})` }} /></span>
+                ) : null}
+              </span>
+            ) : null}
+            {body ? (
+              <p
+                className="chat-msg__bubble"
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest('a')) return
+                  setRevealed((current) => current === entry.id ? '' : entry.id)
+                }}
+              >
+                {emoji ? body.trim() : <MessageText text={body} />}
+              </p>
+            ) : null}
+          </div>
+          <time className="chat-msg__time" dateTime={entry.created_at} aria-hidden="true">{stamp}</time>
+        </div>
+        {showReceipt ? (
+          <p className="chat-msg__receipt">
+            {seenNames.length ? (
+              <span className="chat-msg__seen" aria-hidden="true">
+                {seenNames.slice(0, 4).map((seen) => <PersonAvatar key={seen} name={seen} size="xs" />)}
+              </span>
+            ) : null}
+            <span>{seenLine(seenNames, others.length)}</span>
+          </p>
+        ) : null}
+        {item?.status === 'sending' ? <p className="chat-msg__receipt">{item.preview && item.progress !== undefined && item.progress < 100 ? `Uploading ${item.progress}%` : 'Sending…'}</p> : null}
+        {item?.status === 'failed' ? (
+          <div className="chat-msg__failed" role="alert">
+            {ChatIcon.alert}
+            <span>{item.error || 'Not sent.'}</span>
+            <button type="button" className="ui-link" onClick={() => void deliver(item)}>Retry</button>
+            <button type="button" className="ui-link" onClick={() => discardPending(item)}>Remove</button>
+          </div>
+        ) : null}
+      </article>
+    )
+  }
 
   return (
-    <div className={`chat${listOpen ? ' is-list-open' : ''}`}>
-      <aside ref={listPanel} className="chat__list" aria-label="Conversations" inert={narrow && !listOpen} role={narrow && listOpen ? 'dialog' : undefined} aria-modal={narrow && listOpen ? true : undefined}>
+    <div className={`chat${narrow ? ` is-narrow is-${phoneView}` : ''}`}>
+      <aside className="chat__list" aria-label="Conversations" hidden={narrow && phoneView !== 'list'}>
         <div className="chat__list-head">
-          <h1>Messages</h1>
-          <a className="ui-button ui-button--ghost ui-button--sm" href="#profile">Groups</a>
+          <h1 className="chat__heading">Messages</h1>
+          <a className="chat__new" href="#profile">{ChatIcon.plus}<span>New group</span></a>
         </div>
+        <label className="chat__search">
+          {ChatIcon.search}
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search groups and people" aria-label="Search conversations" autoComplete="off" enterKeyHint="search" />
+        </label>
         {groups === null ? (
-          <div className="chat__list-skeleton" aria-label="Loading conversations">{[0, 1, 2].map((item) => <span key={item} className="ui-skeleton" />)}</div>
-        ) : (
-          <ul>
-            {sortedGroups.map((group) => {
+          <div className="chat__list-skeleton" aria-label="Loading conversations">{[0, 1, 2, 3].map((item) => <span key={item}><i className="ui-skeleton" /><b className="ui-skeleton" /></span>)}</div>
+        ) : visibleGroups.length ? (
+          <ul ref={listNode}>
+            {visibleGroups.map((group) => {
               const summary = summaries[group.id]
-              const last = summary?.last ?? threads[group.id]?.at(-1) ?? getCachedGroupMessages(group.id, session)?.at(-1)
+              const last = summary?.last ?? threads[group.id]?.at(-1) ?? getCachedGroupMessages(group.id, signedIn)?.at(-1)
               const unread = group.id === activeId ? 0 : summary?.unread ?? 0
-              const preview = last
-                ? `${last.sender_id === userId ? 'You: ' : ''}${last.body || 'Shared an image'}`
-                : `${group.members.length} member${group.members.length === 1 ? '' : 's'}`
+              const sender = last ? group.members.find((member) => member.student_id === last.sender_id)?.display_name || last.sender?.display_name || 'Someone' : ''
               const lastAt = last?.created_at ?? summary?.lastAt
+              const memberCount = `${group.members.length} member${group.members.length === 1 ? '' : 's'}`
+              // Only rooms opened on this device have their last message; others show what the unread counts know.
+              const preview = last
+                ? previewLine(last, userId, sender)
+                : unread ? `${unread} new message${unread === 1 ? '' : 's'}` : lastAt ? memberCount : `${memberCount} · Say hi 👋`
+              const current = roomVisible && group.id === activeGroup?.id
               return (
                 <li key={group.id}>
                   <button
                     type="button"
-                    className={`chat__group${group.id === activeId ? ' is-active' : ''}${unread ? ' is-unread' : ''}`}
+                    data-group={group.id}
+                    className={`chat-row${current ? ' is-active' : ''}${unread ? ' is-unread' : ''}`}
                     onClick={() => selectGroup(group.id)}
-                    aria-current={group.id === activeId ? 'true' : undefined}
+                    aria-current={current ? 'true' : undefined}
                   >
-                    <span className={`chat__mark ${toneClass(toneForName(group.name))}`} aria-hidden="true">{courseInitial(group.name)}</span>
-                    <span className="chat__group-text">
-                      <span className="chat__group-top"><b>{group.name}</b>{lastAt ? <time dateTime={lastAt}>{listTime(lastAt)}</time> : null}</span>
-                      <span className="chat__group-bottom">
+                    <GroupAvatar name={group.name} />
+                    <span className="chat-row__text">
+                      <span className="chat-row__top"><b>{group.name}</b>{lastAt ? <time dateTime={lastAt}>{listTimeLabel(time(lastAt), formatClockTime, now)}</time> : null}</span>
+                      <span className="chat-row__bottom">
                         <small>{preview}</small>
                         {unread ? <span className="chat__unread">{unread > 99 ? '99+' : unread}<span className="sr-only"> unread</span></span> : null}
                       </span>
@@ -640,114 +736,118 @@ export function Chat({ session }: { session: AuthSession | null }) {
               )
             })}
           </ul>
+        ) : (
+          <div className="chat__no-results" role="status">
+            <span className="chat__no-results-icon">{ChatIcon.search}</span>
+            <b>No matches for “{search.trim()}”</b>
+            <small>Try a group name or a classmate’s name.</small>
+            <button type="button" className="ui-link" onClick={() => setSearch('')}>Clear search</button>
+          </div>
         )}
-        <p className="chat__privacy">{Icon.lock}<span>Only members of a group can read its messages and images.</span></p>
+        <div className="chat__privacy">
+          {ChatIcon.lock}
+          <span>Only members of a group can read its messages and images.</span>
+          <a className="chat__groups-link" href="#profile">Groups</a>
+        </div>
       </aside>
-      {listOpen ? <button type="button" className="chat__scrim" aria-label="Close conversations" onClick={() => setListOpen(false)} /> : null}
 
       <section
-        className="chat__room"
+        className={`chat__room${activeGroup ? ` ${toneClass(toneForName(activeGroup.name))}` : ''}`}
         aria-label={activeGroup ? `Conversation with ${activeGroup.name}` : 'Conversation'}
-        onDragOver={(event) => { if (Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); setDragActive(true) } }}
+        hidden={!roomVisible}
+        onDragOver={(event) => { if (!composerDisabled && Array.from(event.dataTransfer.types).includes('Files')) { event.preventDefault(); setDragActive(true) } }}
         onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false) }}
         onDrop={onDrop}
       >
         <header className="chat__head">
-          <button type="button" className="chat__list-toggle ui-button ui-button--ghost ui-button--sm" onClick={() => setListOpen(true)} aria-label={totalUnread ? `Show conversations, ${totalUnread} unread` : 'Show conversations'}>
-            {Icon.list}
-            {totalUnread ? <span className="chat__unread" aria-hidden="true">{totalUnread > 99 ? '99+' : totalUnread}</span> : null}
-          </button>
+          {narrow ? (
+            <button type="button" className="chat__icon-button chat__back" onClick={showList} aria-label={totalUnread ? `Back to conversations, ${totalUnread} unread` : 'Back to conversations'}>
+              {ChatIcon.back}
+              {totalUnread ? <span className="chat__unread" aria-hidden="true">{totalUnread > 99 ? '99+' : totalUnread}</span> : null}
+            </button>
+          ) : null}
           {activeGroup ? (
             <>
-              <span className={`chat__mark ${toneClass(toneForName(activeGroup.name))}`} aria-hidden="true">{courseInitial(activeGroup.name)}</span>
+              <GroupAvatar name={activeGroup.name} size="lg" />
               <div className="chat__title">
-                <h2>{activeGroup.name}</h2>
-                <p>{memberLine}</p>
+                <h2 ref={roomHeading} tabIndex={-1}>{activeGroup.name}</h2>
+                <p>{activeTyping.length ? <span className="chat__title-typing">{typingLabel}…</span> : memberLine}</p>
               </div>
               <div className="chat__members" role="img" aria-label={`${members.length} member${members.length === 1 ? '' : 's'}`}>
-                {members.slice(0, 4).map((member) => (
-                  <span key={member.student_id} className={`ui-avatar ${toneClass(toneForName(member.display_name || member.username))}`} title={member.display_name}>{courseInitial(member.display_name || member.username)}</span>
-                ))}
-                {members.length > 4 ? <span className="ui-avatar">+{members.length - 4}</span> : null}
+                {members.slice(0, 4).map((member) => <PersonAvatar key={member.student_id} name={member.display_name || member.username} size="sm" />)}
+                {members.length > 4 ? <span className="chat-avatar chat-avatar--sm chat-avatar--more" aria-hidden="true">+{members.length - 4}</span> : null}
               </div>
-              <a className="ui-button ui-button--sm chat__details" href="#profile">Details</a>
+              <a className="chat__icon-button chat__details" href="#profile" aria-label="Details" title="Group details">{ChatIcon.info}</a>
             </>
           ) : (
             <div className="chat__title"><span className="ui-skeleton chat__title-skeleton" /></div>
           )}
         </header>
 
-        <div className="chat__scroll" ref={scroller} onScroll={(event) => { const node = event.currentTarget; stickToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80 }}>
-          <div className="chat__thread" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages">
-            {threadError ? (
-              <div className="ui-alert" role="alert">
-                <span>{serverMessages.length ? 'Newer messages could not be loaded.' : threadError}</span>
-                <button type="button" className="ui-button ui-button--sm" onClick={() => setThreadAttempt((value) => value + 1)}>Try again</button>
-              </div>
-            ) : null}
-            {!serverMessages.length && !roomPending.length && !threadError ? (
-              groups === null || loadingThread === activeId ? (
-                <div className="chat__skeleton" aria-label="Loading conversation"><span className="ui-skeleton" /><span className="ui-skeleton is-own" /><span className="ui-skeleton is-short" /></div>
-              ) : (
-                <div className="chat__first">
-                  <h3>Start the conversation</h3>
-                  <p>Ask a question, share a photo of a problem, or plan your next study session. Only members of {activeGroup?.name ?? 'this group'} can see it.</p>
-                  <button type="button" className="ui-button ui-button--sm" onClick={() => fileInput.current?.click()}>{Icon.attach}Share an image</button>
+        <div className="chat__stage">
+          <div className="chat__scroll" ref={scroller} onScroll={onThreadScroll}>
+            <div className="chat__thread" ref={threadNode}>
+              {threadError ? (
+                <div className="ui-alert chat__alert" role="alert">
+                  <span>{serverMessages.length ? 'Newer messages could not be loaded.' : threadError}</span>
+                  <button type="button" className="ui-button ui-button--sm" onClick={() => setThreadAttempt((value) => value + 1)}>Try again</button>
                 </div>
-              )
-            ) : null}
-
-            {serverMessages.map((message, index) => {
-              const previous = serverMessages[index - 1]
-              const own = message.sender_id === userId
-              const newDay = !previous || startOfDay(time(previous.created_at)) !== startOfDay(time(message.created_at))
-              const grouped = !newDay && previous?.sender_id === message.sender_id && time(message.created_at) - time(previous.created_at) < GROUPING_WINDOW
-              const name = memberName(message.sender_id, message.sender?.display_name)
-              const stamp = formatClockTime(time(message.created_at))
-              return (
-                <div key={message.id} className={`chat__item${grouped ? ' is-grouped' : ''}`}>
-                  {newDay ? <p className="chat__day"><span>{dayLabel(message.created_at)}</span></p> : null}
-                  <article className={`chat-message${own ? ' is-own' : ''}${grouped ? ' is-grouped' : ''}`} aria-label={`${name}, ${stamp}`}>
-                    {own ? null : grouped
-                      ? <span className="chat-message__gutter" aria-hidden="true" />
-                      : <span className={`ui-avatar ${toneClass(toneForName(name))}`} aria-hidden="true">{courseInitial(name)}</span>}
-                    <div className="chat-message__body">
-                      {grouped ? null : <p className="chat-message__meta">{own ? null : <b>{name}</b>}<time dateTime={message.created_at}>{stamp}</time></p>}
-                      {message.attachment_path ? <MessageImage message={message} session={session} /> : null}
-                      {message.body ? <p className="chat-message__text">{message.body}</p> : null}
-                      {message.id === lastOwn?.id && !roomPending.length ? <small className="chat-message__receipt">{seenBy ? `Seen by ${seenBy}` : 'Delivered'}</small> : null}
+              ) : null}
+              {!entries.length && !threadError ? (
+                groups === null || loadingThread === activeId ? (
+                  <div className="chat__skeleton" aria-label="Loading conversation"><span className="ui-skeleton" /><span className="ui-skeleton is-short" /><span className="ui-skeleton is-own" /><span className="ui-skeleton" /></div>
+                ) : (
+                  <div className="chat__first">
+                    {activeGroup ? <GroupAvatar name={activeGroup.name} size="xl" /> : null}
+                    <h3>Start the conversation</h3>
+                    <p>Ask a question, share a photo of a problem, or plan your next study session. Only members of {activeGroup?.name ?? 'this group'} can see it.</p>
+                    <div className="chat__starters">
+                      {STARTERS.map((starter) => <button key={starter} type="button" className="chat__starter" onClick={() => applyStarter(starter)} disabled={composerDisabled}>{starter}</button>)}
+                      <button type="button" className="chat__starter" onClick={() => fileInput.current?.click()} disabled={composerDisabled}>{ChatIcon.attach}Share an image</button>
                     </div>
-                  </article>
-                </div>
-              )
-            })}
+                  </div>
+                )
+              ) : null}
 
-            {roomPending.map((item) => (
-              <article key={item.key} className={`chat-message is-own is-${item.status}`}>
-                <div className="chat-message__body">
-                  {item.preview ? <span className="chat-image is-local"><img src={item.preview} alt={item.file?.name || 'Image being sent'} width="320" height="240" decoding="async" /></span> : null}
-                  {item.body ? <p className="chat-message__text">{item.body}</p> : null}
-                  {item.status === 'sending' && item.progress !== undefined && item.progress < 100 ? (
-                    <div className="chat-message__progress" role="progressbar" aria-label="Uploading image" aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress}><i style={{ transform: `scaleX(${item.progress / 100})` }} /></div>
-                  ) : null}
-                  {item.status === 'sending' ? <small className="chat-message__receipt">Sending…</small> : (
-                    <div className="chat-message__failed" role="alert">
-                      <span>{item.error || 'Not sent.'}</span>
-                      <button type="button" className="ui-link" onClick={() => void deliver(item)}>Retry</button>
-                      <button type="button" className="ui-link" onClick={() => discardPending(item)}>Remove</button>
+              <div key={activeId} className="chat__log" role="log" aria-live="polite" aria-relevant="additions" aria-label={activeGroup ? `Messages in ${activeGroup.name}` : 'Messages'}>
+                {thread.map((item) => {
+                  if (item.kind === 'day') return <p key={item.key} className="chat__chip"><span>{dayLabel(item.at, now)}</span></p>
+                  if (item.kind === 'time') return <p key={item.key} className="chat__chip is-time"><span>{formatClockTime(item.at)}</span></p>
+                  const name = memberName(item.senderId, item.messages[0].message?.sender?.display_name)
+                  return (
+                    <div key={item.key} className={`chat-run${item.own ? ' is-own' : ` ${toneClass(toneForName(name))}`}`}>
+                      {item.own ? null : <PersonAvatar name={name} className="chat-run__avatar" />}
+                      <div className="chat-run__body">
+                        {item.own ? null : <p className="chat-run__name" aria-hidden="true">{name}</p>}
+                        {item.messages.map((entry, index) => {
+                          const count = item.messages.length
+                          const position = count === 1 ? 'single' : index === 0 ? 'first' : index === count - 1 ? 'last' : 'middle'
+                          return renderEntry(entry, item.own, name, position)
+                        })}
+                      </div>
                     </div>
-                  )}
-                </div>
-              </article>
-            ))}
-
-            {activeTyping.length ? (
-              <div className="chat__typing" role="status">
-                <span aria-hidden="true"><i /><i /><i /></span>
-                {activeTyping.length === 1 ? `${activeTyping[0].display_name} is typing` : `${activeTyping.length} people are typing`}
+                  )
+                })}
               </div>
-            ) : null}
+
+              {activeTyping.length ? (
+                <div className="chat-typing">
+                  <span className="chat-typing__avatars" aria-hidden="true">
+                    {activeTyping.slice(0, 2).map((item) => <PersonAvatar key={item.student_id} name={item.display_name} size="sm" />)}
+                  </span>
+                  <span className="chat-typing__bubble" aria-hidden="true"><i /><i /><i /></span>
+                  <span className="chat-typing__label" role="status">{typingLabel}</span>
+                </div>
+              ) : null}
+            </div>
           </div>
+
+          {unseen || away ? (
+            <button type="button" className={`chat__jump${unseen ? ' has-new' : ''}`} onClick={jumpToBottom} aria-label={unseen ? `${unseen} new message${unseen === 1 ? '' : 's'}, jump to latest` : 'Jump to latest message'}>
+              {unseen ? <span aria-hidden="true">{unseen === 1 ? 'New message' : `${unseen} new messages`}</span> : null}
+              {ChatIcon.down}
+            </button>
+          ) : null}
         </div>
 
         <form className="chat__composer" onSubmit={submit}>
@@ -755,15 +855,17 @@ export function Chat({ session }: { session: AuthSession | null }) {
             <ul className="chat__attachments" aria-label="Images to send">
               {images.map((item) => (
                 <li key={item.id} className={item.error ? 'is-failed' : undefined}>
-                  <img src={item.preview} alt="" width="40" height="40" />
-                  <span><b>{item.file.name || 'Image'}</b><small>{item.error ?? formatFileSize(item.file.size)}</small></span>
-                  <button type="button" onClick={() => removeImage(item.id)} aria-label={`Remove ${item.file.name || 'image'}`}>×</button>
+                  <img src={item.preview} alt={item.file.name || 'Image'} width="64" height="64" />
+                  <small>{item.error ?? formatFileSize(item.file.size)}</small>
+                  <button type="button" onClick={() => removeImage(item.id)} aria-label={`Remove ${item.file.name || 'image'}`}>{ChatIcon.close}</button>
                 </li>
               ))}
             </ul>
           ) : null}
           {roomUnavailable ? <p className="chat__composer-note" id="chat-composer-note" role="status">Messages can’t be sent until this chat loads.</p> : null}
           <div className="chat__input">
+            <button type="button" className="chat__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" title="Attach images" disabled={composerDisabled || images.length >= MAX_IMAGES}>{ChatIcon.attach}</button>
+            <button type="button" className="chat__tool chat__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={composerDisabled || images.length >= MAX_IMAGES}>{ChatIcon.camera}</button>
             <textarea
               ref={textarea}
               value={draft}
@@ -771,35 +873,32 @@ export function Chat({ session }: { session: AuthSession | null }) {
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               placeholder={roomUnavailable ? 'Chat unavailable' : activeGroup ? `Message ${activeGroup.name}` : 'Message'}
-              aria-describedby={roomUnavailable ? 'chat-composer-note' : undefined}
+              aria-describedby={roomUnavailable ? 'chat-composer-note chat-hint' : 'chat-hint'}
               aria-label={activeGroup ? `Message ${activeGroup.name}` : 'Message'}
               enterKeyHint="send"
               autoCapitalize="sentences"
               rows={1}
               maxLength={2000}
-              disabled={!activeGroup || roomUnavailable}
+              disabled={composerDisabled}
             />
-            <div className="chat__tools">
-              <button type="button" className="chat__tool" onClick={() => fileInput.current?.click()} aria-label="Attach images" disabled={!activeGroup || roomUnavailable || images.length >= MAX_IMAGES}>{Icon.attach}</button>
-              <button type="button" className="chat__tool chat__camera" onClick={() => cameraInput.current?.click()} aria-label="Take a photo" disabled={!activeGroup || roomUnavailable || images.length >= MAX_IMAGES}>{Icon.camera}</button>
-              <span className="chat__hint">Enter to send · Shift+Enter for a new line · drop or paste images</span>
-              <button type="submit" className="chat__send" disabled={!activeGroup || roomUnavailable || !canSend} aria-label="Send message">{Icon.send}</button>
-            </div>
+            <button type="submit" className={`chat__send${canSend && !composerDisabled ? ' is-ready' : ''}`} disabled={composerDisabled || !canSend} aria-label="Send message">{ChatIcon.send}</button>
           </div>
+          <p className="chat__hint" id="chat-hint">Enter to send · Shift+Enter for a new line · paste or drop images</p>
           <input ref={fileInput} className="ui-file-input" type="file" accept={ACCEPTED.join(',')} multiple onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
           <input ref={cameraInput} className="ui-file-input" type="file" accept="image/*" capture="environment" onChange={(event) => { if (event.target.files) addFiles(event.target.files); event.target.value = '' }} />
         </form>
 
-        {dragActive ? <div className="chat__drop" aria-hidden="true"><span>Drop images to share with {activeGroup?.name ?? 'the group'}</span><small>JPG, PNG, WebP, or GIF · up to 10 MB each</small></div> : null}
+        {dragActive ? <div className="chat__drop" aria-hidden="true">{ChatIcon.image}<span>Drop images to share with {activeGroup?.name ?? 'the group'}</span><small>JPG, PNG, WebP, or GIF · up to 10 MB each</small></div> : null}
         {toast ? (
           <button type="button" className="chat__toast" onClick={() => { selectGroup(toast.groupId); setToast(null) }}>
-            <span className={`chat__mark ${toneClass(toneForName(toast.groupName))}`} aria-hidden="true">{courseInitial(toast.groupName)}</span>
+            <GroupAvatar name={toast.groupName} size="sm" />
             <span className="chat__toast-text"><b>{toast.groupName}</b><small>{toast.preview}</small></span>
             <span className="chat__toast-open">Open</span>
           </button>
         ) : null}
         {notice ? <p className="app-toast">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss">×</button></p> : null}
       </section>
+      {lightbox ? <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} /> : null}
     </div>
   )
 }
