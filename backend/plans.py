@@ -1,8 +1,8 @@
 """Plans: every account is Free unless the owner has granted its email a plan.
 
 Grants live in account_plans, keyed by the normalized inbox (disposable_email.inbox_of),
-so the owner can grant a plan before the person signs up, and kid+1@gmail.com and
-k.i.d@gmail.com resolve to the same grant.
+so the owner can grant a plan before the person signs up, and '+tag' aliases (and
+Gmail's ignored dots) of one inbox resolve to the same grant.
 
 - 'pro': the per-student AI limits are PRO_AI_MULTIPLIER (3) times higher
   (rate_limit.PRO_AI_ACTIONS) and the account's share of the shared daily AI budget is
