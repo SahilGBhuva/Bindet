@@ -390,7 +390,7 @@ TUTOR_REPLY_PIECE_CHARS = 48
 
 
 def tutor_version() -> str:
-    return "tutor-v1:" + fingerprint(
+    return "tutor-v2:" + fingerprint(
         ai_tutor.TUTOR_SYSTEM_PROMPT, ai_tutor.OPENROUTER_MODEL, ai_tutor.OPENROUTER_TUTOR_STRONG_MODEL,
         ai_tutor.OPERATIONS["explain_material"]["max_tokens"], ai_tutor.OPERATIONS["explain_material"]["temperature"],
         ai_tutor.OFF_TOPIC_SENTINEL, ai_tutor.NOTES_OPEN, ai_tutor.NOTES_CLOSE,
