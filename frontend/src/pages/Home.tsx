@@ -14,6 +14,8 @@ import { saveThemePreference, useThemePreference, type ThemePreference } from '.
 import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import { SnapNotes } from '../components/SnapNotes'
+import { InstantStudy, InstantStudyButton } from '../components/instant/InstantStudy'
+import { pickInstantUnit, type InstantPick } from '../lib/instantStudy'
 import { notificationHref, notificationLabel } from '../lib/planLabels'
 import './Home.css'
 
@@ -265,10 +267,14 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   const [stats, setStats] = useState<Progress | null>(() => data.getCachedProgress(studentId))
   // Saved notes per course and unit on the server, so Home counts notes added on any device.
   const [scopes, setScopes] = useState<NoteScope[] | null>(null)
+  // Instant Study: open with the unit it picked (null: no notes yet, so it asks for some).
+  const [instant, setInstant] = useState<{ start: InstantPick | null } | null>(null)
+  // Bumped when a session closes, so Home reads the new totals and notes.
+  const [studied, setStudied] = useState(0)
 
   useEffect(() => {
     let active = true
-    void data.getProgress(studentId, token).then((value) => { if (active) setStats(value) }).catch(() => undefined)
+    void data.getProgress(studentId, token, studied > 0).then((value) => { if (active) setStats(value) }).catch(() => undefined)
     void data.listNoteScopes(token).then((listed) => {
       if (!active) return
       setScopes(listed)
@@ -285,7 +291,7 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
       setNotebook({ ...merged, courses: withCourseTones(merged.courses) })
     }, () => undefined)
     return () => { active = false }
-  }, [data, studentId, token])
+  }, [data, studentId, token, studied])
 
   // Cached values above render first; everything refreshes in parallel in the background.
   useEffect(() => {
@@ -363,6 +369,26 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
   // Notification: the next event or task; failing that, the newest unread notice.
   const nextItem = dated.find((task) => dueAt(task) >= now)
   const unread = (social?.notifications ?? []).filter((item) => !item.is_read).toSorted((a, b) => parseServerTime(b.created_at) - parseServerTime(a.created_at))[0]
+
+  // What one tap on Instant Study would study (no AI, nothing fetched for it).
+  function unitAttempts() {
+    try {
+      return data.loadUnitAttempts()
+    } catch {
+      return []
+    }
+  }
+  const instantPick = pickInstantUnit({ scopes, deposits: notebook.deposits, review: reviewSummary, attempts: unitAttempts(), topics: stats?.topics })
+
+  async function chooseNext(exclude: string[]) {
+    const review = await data.getReviewSummary(token).catch(() => reviewSummary)
+    return pickInstantUnit({ scopes, deposits: data.loadNotebook().deposits, review, attempts: unitAttempts(), topics: stats?.topics, exclude })
+  }
+
+  function closeInstant() {
+    setInstant(null)
+    setStudied((value) => value + 1)
+  }
 
   function cycleTheme() {
     if (data.sandboxed) return
@@ -559,6 +585,22 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
             )}
           </section>
         </header>
+
+        {/* The page's main action: a short session from the student's own notes. */}
+        <InstantStudyButton pick={instantPick} streak={streak} onStart={() => setInstant({ start: instantPick })} />
+        {instant ? (
+          <InstantStudy
+            start={instant.start}
+            accessToken={token}
+            studentId={studentId}
+            notebook={notebook}
+            goal={goal}
+            streak={streak}
+            choose={chooseNext}
+            onNotebook={(next) => setNotebook({ ...next, courses: withCourseTones(next.courses) })}
+            onClose={closeInstant}
+          />
+        ) : null}
 
         {/* Phones only (Home.css): one tap from Home to the camera. */}
         <SnapNotes accessToken={token} notebook={notebook} onNotebook={(next) => setNotebook({ ...next, courses: withCourseTones(next.courses) })} />

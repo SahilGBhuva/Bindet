@@ -83,6 +83,10 @@
 
   /* Progress fills use the binder thread. */
   --gradient-brand: var(--color-brand);
+  /* Instant Study's button: blue to violet, each at least 5:1 under white text. */
+  --instant-from: #2f63e0;
+  --instant-to: #6d4fd6;
+  --instant-ink: #5b3fc4;
 
   /* Type: Inter for interface, Instrument Serif for editorial moments. */
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -188,6 +192,9 @@
   --color-brand-text: #a99ff6;
   --color-brand-tint: #25223a;
   --color-focus: rgba(169, 159, 246, .6);
+  --instant-from: #3a62c4;
+  --instant-to: #5e45c4;
+  --instant-ink: #4a33a8;
 
   --color-blue: #4d7ee8;
   --color-blue-text: #8fb0f5;
