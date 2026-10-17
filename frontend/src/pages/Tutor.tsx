@@ -29,11 +29,13 @@ type LocalMessage = TutorMessage & { key: string; status?: 'sending' | 'streamin
 
 const NEW = 'new'
 const MAX_IMAGES = 3
-// The server accepts 4 MB per image and 12 MB per request; base64 adds a third, so
-// all images together must stay under about 8.5 MB. Photos are downscaled first.
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024
-// One request to the server must stay under the host's ~4.5 MB body limit; base64 adds a third.
+// One request to the server must stay under the host's ~4.5 MB body limit; base64 adds a
+// third, so all images in a message together are capped at 3 MB (the server's limit too).
+// Photos are downscaled first.
 const MAX_TOTAL_IMAGE_BYTES = 3 * 1024 * 1024
+// One image can use the whole message allowance, but no more: a 3–4 MB image would be
+// accepted here and then refused at Send, even on its own.
+const MAX_IMAGE_BYTES = MAX_TOTAL_IMAGE_BYTES
 const ACCEPTED = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const dayFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 
@@ -414,7 +416,7 @@ export function Tutor({ session }: { session: AuthSession | null }) {
         if (!ACCEPTED.includes(file.type) && !heic) return { ...attachment, state: 'failed' as const, error: 'Use JPG, PNG, WebP, GIF, or HEIC' }
         void prepareTutorImage(file).then((prepared) => {
           setAttachments((items) => items.map((item) => item.id === attachment.id
-            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 4 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size, preview: item.preview || (prepared.previewable ? prepared.dataUrl : '') }
+            ? prepared.size > MAX_IMAGE_BYTES ? { ...item, state: 'failed', error: 'Larger than 3 MB' } : { ...item, state: 'ready', dataUrl: prepared.dataUrl, size: prepared.size, preview: item.preview || (prepared.previewable ? prepared.dataUrl : '') }
             : item))
         }).catch((error: unknown) => setAttachments((items) => items.map((item) => item.id === attachment.id ? { ...item, state: 'failed', error: error instanceof HeicTooLargeError ? error.short : 'Could not read this image' } : item)))
         return attachment
