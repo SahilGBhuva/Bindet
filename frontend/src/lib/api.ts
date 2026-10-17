@@ -131,7 +131,7 @@ export type FriendQuest = { id: number; friend_id: string; friend_name: string; 
 export type PersonSuggestion = { student_id: string; username: string; display_name: string; avatar_path: string; friend_code: string }
 export type SocialActivity = { id: number; student_id: string; username: string; display_name: string; xp: number; created_at: string; reaction_count: number; reacted: boolean }
 export type SocialNotification = { id: number; kind: string; message: string; is_read: boolean; created_at: string }
-/* A request this student sent that is still waiting; cancel it with removeFriend(student_id). */
+/* A request this student sent that is still waiting; cancel it with cancelFriendRequest(request_id). */
 export type SentFriendRequest = { request_id: number; student_id: string; username: string; display_name: string; created_at: string }
 export type FriendsHub = { friends: Friend[]; requests: FriendRequest[]; sent?: SentFriendRequest[]; leaderboard: LeaguePerson[]; quests: FriendQuest[]; suggestions: PersonSuggestion[]; activity: SocialActivity[]; notifications: SocialNotification[] }
 export type StudyGroupMember = { student_id: string; username: string; display_name: string; avatar_path: string; role: 'owner' | 'member'; weekly_xp: number; joined_at: string }
@@ -840,6 +840,12 @@ export function sendFriendRequest(friendCode: string, accessToken: string) {
 
 export function answerFriendRequest(requestId: number, accept: boolean, accessToken: string) {
   return request(`/api/friends/requests/${requestId}`, { method: 'POST', body: JSON.stringify({ accept }) }, accessToken)
+}
+
+/* Withdraws a pending request you sent. Never removes a friendship: if they already
+   accepted, it fails with 409 and code request_already_accepted. */
+export function cancelFriendRequest(requestId: number, accessToken: string) {
+  return request<{ cancelled: boolean }>(`/api/friends/requests/${requestId}`, { method: 'DELETE' }, accessToken)
 }
 
 export function removeFriend(friendId: string, accessToken: string) {

@@ -564,6 +564,7 @@ export function createDemoData(onLocked: (action: string) => void): DataSource {
     reactToActivity: locked('react to activity'),
     readSocialNotifications: locked('manage notifications'),
     removeFriend: locked('manage friends'),
+    cancelFriendRequest: locked('manage friends'),
     reportSocialUser: locked('manage friends'),
     saveSocialPrivacy: locked('change privacy settings'),
     searchFriends: locked('find friends'),

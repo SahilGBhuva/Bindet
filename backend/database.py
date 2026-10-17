@@ -2168,6 +2168,24 @@ def _cancel_quests_between(connection, first_id: str, second_id: str) -> None:
     ).values(status="cancelled"))
 
 
+def cancel_friend_request(request_id: int, requester_id: str) -> None:
+    """Withdraw a request this student sent. Only ever deletes a pending row they sent;
+    if the other student accepted in the meantime, the friendship stays."""
+    init_db()
+    with engine().begin() as connection:
+        result = connection.execute(delete(friendships).where(
+            friendships.c.id == request_id,
+            friendships.c.requester_id == requester_id,
+            friendships.c.status == "pending",
+        ))
+        if result.rowcount:
+            return
+        status = connection.execute(select(friendships.c.status).where(
+            friendships.c.id == request_id, friendships.c.requester_id == requester_id,
+        )).scalar_one_or_none()
+    raise ValueError("request_already_accepted" if status == "accepted" else "request_not_found")
+
+
 def remove_friend(student_id: str, friend_id: str) -> bool:
     init_db()
     with engine().begin() as connection:

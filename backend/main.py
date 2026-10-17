@@ -2512,6 +2512,22 @@ def decide_friend_request(request_id: DbId, data: FriendRequestDecision, authori
         raise social_error(error) from error
 
 
+@app.delete("/api/friends/requests/{request_id}")
+def cancel_friend_request(request_id: DbId, authorization: Annotated[str | None, Header()] = None):
+    """Cancel a request you sent. Never removes a friendship: if they already accepted, 409."""
+    user = auth.authenticated_user(authorization)
+    try:
+        database.check_social_rate_limit(user["id"], "unfriend", 20)
+        database.cancel_friend_request(request_id, user["id"])
+    except ValueError as error:
+        if str(error) == "request_already_accepted":
+            raise HTTPException(status_code=409, detail={
+                "code": "request_already_accepted", "message": "They already accepted. You’re friends now.",
+            }) from error
+        raise social_error(error) from error
+    return {"cancelled": True}
+
+
 @app.delete("/api/friends/{friend_id}")
 def delete_friend(friend_id: str, authorization: Annotated[str | None, Header()] = None):
     user = auth.authenticated_user(authorization)

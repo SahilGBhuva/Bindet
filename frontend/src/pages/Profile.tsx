@@ -234,11 +234,17 @@ export function Profile({ session, onError }: ProfileProps) {
     if (!session) return
     setSocialBusy(true)
     try {
-      await data.removeFriend(request.student_id, session.access_token)
+      await data.cancelFriendRequest(request.request_id, session.access_token)
       say(`Request to ${firstName(request.display_name)} cancelled.`)
       await refreshSocial()
-    } catch {
-      say('Could not cancel that request. Try again.', true)
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'request_already_accepted') {
+        // They said yes before the cancel arrived; the friendship stays.
+        say(`${firstName(request.display_name)} already accepted. You’re friends now.`)
+        await refreshSocial().catch(() => undefined)
+      } else {
+        say('Could not cancel that request. Try again.', true)
+      }
     } finally {
       setSocialBusy(false)
     }

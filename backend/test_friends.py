@@ -100,6 +100,25 @@ class FriendsTests(unittest.TestCase):
             database.send_friend_request("sam-id", self.alex["friend_code"])
         self.assertIn("friend:alex-id:sam-id", [call.args[1] for call in lock.call_args_list])
 
+    def test_cancel_only_withdraws_a_pending_request_you_sent(self):
+        request = database.send_friend_request("alex-id", self.sam["friend_code"])
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "sam-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+            with self.assertRaises(main.HTTPException) as caught:
+                main.cancel_friend_request(request["request_id"], "Bearer t")
+        self.assertEqual(caught.exception.status_code, 404)
+        database.respond_to_friend_request(request["request_id"], "sam-id", True)
+        with patch.object(main.auth, "authenticated_user", return_value={"id": "alex-id", "email_confirmed_at": "2026-01-01T00:00:00Z"}):
+            with self.assertRaises(main.HTTPException) as caught:
+                main.cancel_friend_request(request["request_id"], "Bearer t")
+            self.assertEqual(caught.exception.status_code, 409)
+            self.assertEqual(caught.exception.detail["code"], "request_already_accepted")
+            self.assertEqual([row["student_id"] for row in database.list_friends("alex-id")], ["sam-id"])
+            database.remove_friend("alex-id", "sam-id")
+            pending = database.send_friend_request("alex-id", self.sam["friend_code"])
+            self.assertEqual(main.cancel_friend_request(pending["request_id"], "Bearer t"), {"cancelled": True})
+        self.assertEqual(database.sent_friend_requests("alex-id"), [])
+        self.assertEqual(database.pending_friend_requests("sam-id"), [])
+
     def test_friend_quest_tracks_combined_xp(self):
         self.become_friends()
         quest = database.create_friend_quest("alex-id", "sam-id", 100)

@@ -54,6 +54,7 @@ export type DataSource = {
   reactToActivity: typeof api.reactToActivity
   readSocialNotifications: typeof api.readSocialNotifications
   removeFriend: typeof api.removeFriend
+  cancelFriendRequest: typeof api.cancelFriendRequest
   reportSocialUser: typeof api.reportSocialUser
   saveSocialPrivacy: typeof api.saveSocialPrivacy
   searchFriends: typeof api.searchFriends
@@ -138,6 +139,7 @@ export const realData: DataSource = {
   reactToActivity: api.reactToActivity,
   readSocialNotifications: api.readSocialNotifications,
   removeFriend: api.removeFriend,
+  cancelFriendRequest: api.cancelFriendRequest,
   reportSocialUser: api.reportSocialUser,
   saveSocialPrivacy: api.saveSocialPrivacy,
   searchFriends: api.searchFriends,
