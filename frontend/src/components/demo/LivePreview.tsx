@@ -31,7 +31,8 @@ const ALLOWED = [
   '.progress__node',
   '.progress__info',
   '.progress__info-panel button',
-  '.profile__group-tabs .ui-tab',
+  // Study group cards: "Members" only switches which group's details show below.
+  '.profile__group-pick',
   // Friend streaks: opening a friend's 14-day history only changes what is shown
   // (sorting uses .ui-segmented__item above). "Remind … to study" stays locked.
   '.profile__streak-toggle',
@@ -105,7 +106,10 @@ const ACTION_NAMES: [string, string][] = [
   ['.guide__tools *', 'Print or save a study guide'],
   ['.guide__cards', 'Make flashcards from a study guide'],
   ['.avatar', 'Change your avatar'],
-  ['.profile__friend-forms *', 'Find friends'],
+  ['.profile__add-friend, .profile__suggest-add', 'Add a friend'],
+  ['.profile__id-chip', 'Copy your friend ID'],
+  ['.profile__cancel-request', 'Cancel a friend request'],
+  ['.profile__group-open', 'Open a study group'],
   ['.profile__menu *', 'Manage friends'],
   ['.profile__nudge', 'Remind a friend to study'],
   ['.profile__toggle, .profile__toggle *', 'Privacy settings'],

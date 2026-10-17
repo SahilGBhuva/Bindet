@@ -130,7 +130,9 @@ export type FriendQuest = { id: number; friend_id: string; friend_name: string; 
 export type PersonSuggestion = { student_id: string; username: string; display_name: string; avatar_path: string; friend_code: string }
 export type SocialActivity = { id: number; student_id: string; username: string; display_name: string; xp: number; created_at: string; reaction_count: number; reacted: boolean }
 export type SocialNotification = { id: number; kind: string; message: string; is_read: boolean; created_at: string }
-export type FriendsHub = { friends: Friend[]; requests: FriendRequest[]; leaderboard: LeaguePerson[]; quests: FriendQuest[]; suggestions: PersonSuggestion[]; activity: SocialActivity[]; notifications: SocialNotification[] }
+/* A request this student sent that is still waiting; cancel it with removeFriend(student_id). */
+export type SentFriendRequest = { request_id: number; student_id: string; username: string; display_name: string; created_at: string }
+export type FriendsHub = { friends: Friend[]; requests: FriendRequest[]; sent?: SentFriendRequest[]; leaderboard: LeaguePerson[]; quests: FriendQuest[]; suggestions: PersonSuggestion[]; activity: SocialActivity[]; notifications: SocialNotification[] }
 export type StudyGroupMember = { student_id: string; username: string; display_name: string; avatar_path: string; role: 'owner' | 'member'; weekly_xp: number; joined_at: string }
 export type StudyGroupActivity = { id: number; student_id: string; display_name: string; xp: number; created_at: string }
 export type StudyGroup = {
@@ -810,8 +812,10 @@ export function leaveStudyGroup(groupId: string, accessToken: string) {
   return request<{ left: boolean }>(`/api/study-groups/${encodeURIComponent(groupId)}/members/me`, { method: 'DELETE' }, accessToken).then(groupsChanged<{ left: boolean }>(accessToken))
 }
 
+export type SentFriendRequestResult = { request_id: number; status: 'pending'; friend: { student_id: string; username: string; display_name: string; avatar_path: string } }
+
 export function sendFriendRequest(friendCode: string, accessToken: string) {
-  return request('/api/friends/requests', { method: 'POST', body: JSON.stringify({ friend_code: friendCode }) }, accessToken)
+  return request<SentFriendRequestResult>('/api/friends/requests', { method: 'POST', body: JSON.stringify({ friend_code: friendCode }) }, accessToken)
 }
 
 export function answerFriendRequest(requestId: number, accept: boolean, accessToken: string) {

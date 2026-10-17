@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type MouseEvent, type ReactNode } from 'react'
-import { parseServerTime, type Friend, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type StudyGroup } from '../lib/api'
+import { ApiError, parseServerTime, type Friend, type FriendsHub, type PersonSuggestion, type Profile as ProfileData, type Progress as ProgressData, type SentFriendRequest, type SentFriendRequestResult, type StudyGroup } from '../lib/api'
 import { useData } from '../lib/dataSource'
 import type { AuthSession } from '../lib/auth'
 import type { Course } from '../lib/types'
 import { AvatarControl } from '../lib/AvatarControl'
 import { withCourseTones } from '../lib/session'
-import { courseInitial, toneClass, toneForName } from '../lib/tones'
+import { TONES, courseInitial, toneClass, toneForName, type Tone } from '../lib/tones'
 import { useDrawer } from '../lib/useDrawer'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
+import { PlanBadge } from '../components/PlanBadge'
 import { Icons } from '../components/Icons'
 import { canNudge, firstName, rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
 import { useAnnounce } from '../lib/announce'
@@ -40,6 +41,40 @@ function initials(name: string) {
 
 function percent(value: number, total: number) {
   return total > 0 ? Math.min(100, Math.round((value / total) * 100)) : 0
+}
+
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+
+/* The weekly league counts XP from Monday 00:00 UTC (the server's week), so count down to the next one. */
+function leagueReset(now: number) {
+  const today = new Date(now)
+  const daysToMonday = ((8 - today.getUTCDay()) % 7) || 7
+  const left = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + daysToMonday) - now
+  if (left < HOUR_MS) return 'Resets in under an hour'
+  if (left < DAY_MS) {
+    const hours = Math.floor(left / HOUR_MS)
+    return `Resets in ${hours} ${hours === 1 ? 'hour' : 'hours'}`
+  }
+  const days = Math.floor(left / DAY_MS)
+  const hours = Math.floor((left % DAY_MS) / HOUR_MS)
+  return `Resets in ${days}d ${hours}h`
+}
+
+/* Friend IDs are 8 hex characters. Accept spaces, dashes and lowercase, and the look-alikes O, I and L. */
+const FRIEND_ID = /^[0-9A-F]{8}$/
+function normalizeFriendId(value: string) {
+  return value.toUpperCase().replace(/[\s-]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1')
+}
+
+/* Plain words for why a friend request did not go through. */
+function friendRequestError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 404) return 'No one has that ID. Check the 8 characters.'
+    if (error.status === 403) return 'They aren’t accepting friend requests right now.'
+    if (error.status === 400 && /yourself/i.test(error.message)) return 'That’s your own friend ID. Share it with a friend instead.'
+  }
+  return error instanceof Error && error.message ? error.message : 'Could not send that request. Try again.'
 }
 
 // Closes the ⋯ menu a button lives in once its action is chosen.
@@ -75,12 +110,10 @@ export function Profile({ session, onError }: ProfileProps) {
   const [groupName, setGroupName] = useState('')
   const [groupDescription, setGroupDescription] = useState('')
   const [groupCode, setGroupCode] = useState('')
-  const [friendCode, setFriendCode] = useState('')
   const [socialBusy, setSocialBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
-  const [peopleQuery, setPeopleQuery] = useState('')
-  const [peopleResults, setPeopleResults] = useState<PersonSuggestion[]>([])
-  const [searched, setSearched] = useState('')
+  // The Add a friend dialog (search, friend ID, share your ID).
+  const [addOpen, setAddOpen] = useState(false)
   // Signed in, but no bindet profile yet (a new Google account): no friend ID until it is set up.
   const [profileMissing, setProfileMissing] = useState(false)
   const [groupDialog, setGroupDialog] = useState<{ kind: GroupDialogKind; groupId: string } | null>(null)
@@ -176,67 +209,48 @@ export function Profile({ session, onError }: ProfileProps) {
     }
   }, [data])
 
-  async function addFriend(event: FormEvent) {
-    event.preventDefault()
-    if (!session || !friendCode.trim()) return
-    setSocialBusy(true)
-    setNotice(null)
-    try {
-      await data.sendFriendRequest(friendCode.trim(), session.access_token)
-      setFriendCode('')
-      say('Friend request sent.')
-      await refreshSocial()
-    } catch (error) {
-      say(error instanceof Error ? error.message : 'Could not send that request.', true)
-    } finally {
-      setSocialBusy(false)
-    }
-  }
-
-  async function findPeople(event: FormEvent) {
-    event.preventDefault()
-    if (!session || peopleQuery.trim().length < 2) return
-    setSocialBusy(true)
-    try {
-      const found = await data.searchFriends(peopleQuery, session.access_token)
-      setPeopleResults(found)
-      setSearched(peopleQuery.trim())
-      // An empty result used to look like the button did nothing.
-      if (!found.length) say(`No one found for “${peopleQuery.trim()}”. Try their username, or ask for their friend ID.`)
-    } catch {
-      say('Search is not working right now. Try again in a moment.', true)
-    } finally {
-      setSocialBusy(false)
-    }
+  // Sends a request by friend ID (from the dialog or a suggestion), then reloads the lists so it shows as Pending.
+  async function sendRequest(friendCode: string) {
+    if (!session) throw new Error('Log in to add friends.')
+    const result = await data.sendFriendRequest(friendCode, session.access_token)
+    void refreshSocial()
+    return result
   }
 
   async function addSuggested(person: PersonSuggestion) {
     if (!session) return
     setSocialBusy(true)
     try {
-      await data.sendFriendRequest(person.friend_code, session.access_token)
-      setPeopleResults((current) => current.filter((item) => item.student_id !== person.student_id))
-      say(`Friend request sent to ${person.display_name}.`)
-      await refreshSocial()
+      await sendRequest(person.friend_code)
+      say(`Request sent to ${firstName(person.display_name)}. They’ll see it on their Home.`)
     } catch (error) {
-      say(error instanceof Error ? error.message : `Could not send a request to ${person.display_name}.`, true)
+      say(friendRequestError(error), true)
     } finally {
       setSocialBusy(false)
     }
   }
 
-  async function shareFriendId() {
-    if (!profile?.friend_code) return
-    const share = { title: 'Add me on bindet', text: `Add me on bindet with friend ID ${profile.friend_code}`, url: window.location.origin }
+  async function cancelRequest(request: SentFriendRequest) {
+    if (!session) return
+    setSocialBusy(true)
     try {
-      if (nativeShare) await navigator.share(share)
-      else {
-        await navigator.clipboard.writeText(`${share.text} — ${share.url}`)
-        say('Friend ID copied. Paste it into a message, email, or any app.')
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return
-      say(nativeShare ? 'Could not open sharing. You can copy the ID from the top of this page.' : 'Could not copy your friend ID. You can copy it from the top of this page.', true)
+      await data.removeFriend(request.student_id, session.access_token)
+      say(`Request to ${firstName(request.display_name)} cancelled.`)
+      await refreshSocial()
+    } catch {
+      say('Could not cancel that request. Try again.', true)
+    } finally {
+      setSocialBusy(false)
+    }
+  }
+
+  async function copyFriendId() {
+    if (!profile?.friend_code) return
+    try {
+      await navigator.clipboard.writeText(profile.friend_code)
+      say(`Friend ID ${profile.friend_code} copied.`)
+    } catch {
+      say(`Could not copy automatically. Your friend ID is ${profile.friend_code}.`, true)
     }
   }
 
@@ -302,12 +316,12 @@ export function Profile({ session, onError }: ProfileProps) {
     }
   }
 
-  async function answerRequest(requestId: number, accept: boolean) {
+  async function answerRequest(requestId: number, accept: boolean, name: string) {
     if (!session) return
     setSocialBusy(true)
     try {
       await data.answerFriendRequest(requestId, accept, session.access_token)
-      say(accept ? 'You are friends now.' : 'Request declined.')
+      say(accept ? `You and ${firstName(name)} are friends now.` : 'Request declined.')
       await refreshSocial()
     } catch {
       say('Could not answer that request. Try again.', true)
@@ -480,18 +494,28 @@ export function Profile({ session, onError }: ProfileProps) {
   const { level, inLevel, toNext } = xpLevel(totalXp)
   // The study streak, the same one Home, the league and friend streaks show.
   const streak = Math.max(stats?.streak ?? profile?.streak ?? 0, 0)
+  const bestStreak = Math.max(stats?.best_streak ?? 0, streak)
   const unitStats = stats?.topics ?? []
   const username = profile?.username ?? 'Learner'
   const displayName = profile?.display_name ?? username
-  const tag = profile?.friend_code ?? '—'
   const groupList = groups ?? []
+  const groupTones = groupToneMap(groupList)
   const activeGroup = groupList.find((group) => group.id === activeGroupId) ?? groupList[0] ?? null
   const dialogGroup = groupDialog ? groupList.find((group) => group.id === groupDialog.groupId) ?? null : null
   const socialLoading = Boolean(session) && !social && !socialFailed
   const groupsLoading = Boolean(session) && groups === null && !socialFailed
-  const people = peopleResults.length ? peopleResults : social?.suggestions ?? []
+  const suggestions = social?.suggestions ?? []
+  const sent = social?.sent ?? []
+  const requests = social?.requests ?? []
   const unread = social?.notifications.filter((item) => !item.is_read).length ?? 0
   const friendList = social ? (friendSort === 'streak' ? rankFriendStreaks(social.friends) : social.friends.toSorted((a, b) => a.display_name.localeCompare(b.display_name))) : []
+  const league = social?.leaderboard ?? []
+  const leaderXp = Math.max(0, ...league.map((person) => person.weekly_xp))
+  const myLeagueIndex = league.findIndex((person) => person.student_id === studentId)
+  const weekXp = myLeagueIndex >= 0 ? league[myLeagueIndex].weekly_xp : null
+  // Adding friends needs a profile (that is where the friend ID lives).
+  const canAdd = Boolean(session && profile)
+  const openAdd = () => setAddOpen(true)
   const failedAlert = socialFailed && !social ? (
     <div className="ui-alert" role="alert">
       <span>Friends and groups could not be loaded.</span>
@@ -501,23 +525,33 @@ export function Profile({ session, onError }: ProfileProps) {
 
   return (
     <div className="ui-page profile">
-      <header className="ui-page-header profile__header">
+      <header className={`profile__hero ${toneClass(toneForName(displayName || 'bindit'))}`}>
         <div className="profile__identity">
-          <AvatarControl name={displayName} onError={onError} />
+          <span className="profile__avatar-ring"><AvatarControl name={displayName} onError={onError} /></span>
           <div className="profile__identity-text">
             <span className="ui-eyebrow">Friends &amp; groups</span>
-            <h1 className="ui-page-title profile__name">{displayName}</h1>
-            <p className="profile__handle">
-              {profile ? <span>@{profile.username}</span> : null}
-              <span>Friend ID <span className="profile__code">{tag}</span></span>
-            </p>
+            <div className="profile__name-row">
+              <h1 className="ui-page-title profile__name">{displayName}</h1>
+              <PlanBadge plan={profile?.plan} className="profile__plan" />
+            </div>
+            <div className="profile__handle">
+              {profile ? <span className="profile__username">@{profile.username}</span> : null}
+              {profile?.friend_code ? (
+                <button type="button" className="profile__id-chip" onClick={() => void copyFriendId()} title="Copy your friend ID">
+                  <span className="profile__id-label">Friend ID</span>
+                  <span className="profile__code">{profile.friend_code}</span>
+                  <CopyMark />
+                  <span className="sr-only">Copy</span>
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="profile__header-actions">
-          {profile?.friend_code ? (
-            <button className="ui-button ui-button--primary" type="button" onClick={() => void shareFriendId()}>
-              <ShareMark />
-              Share friend ID
+          {canAdd ? (
+            <button className="ui-button ui-button--primary profile__add-friend" type="button" onClick={openAdd}>
+              <PlusMark />
+              Add a friend
             </button>
           ) : null}
           <a className="ui-button" href="#settings">
@@ -527,12 +561,13 @@ export function Profile({ session, onError }: ProfileProps) {
         </div>
       </header>
 
-      <section className="ui-panel ui-stats profile__stats" aria-label="Your stats">
-        <div className="ui-stat">
-          <span className="ui-stat__label">Level</span>
-          <span className="ui-stat__value">{level}</span>
-          <div
-            className="ui-meter"
+      <ul className="profile-stats" aria-label="Your stats">
+        <li className="profile-stat ui-tone--blue">
+          <span className="profile-stat__icon">{Icons.level}</span>
+          <span className="profile-stat__label">Level</span>
+          <span className="profile-stat__value">{level}</span>
+          <span
+            className="profile-stat__meter"
             role="progressbar"
             aria-valuenow={inLevel}
             aria-valuemin={0}
@@ -540,41 +575,69 @@ export function Profile({ session, onError }: ProfileProps) {
             aria-label={`${inLevel} of ${XP_PER_LEVEL} XP toward level ${level + 1}`}
           >
             <span style={{ width: `${(inLevel / XP_PER_LEVEL) * 100}%` }} />
-          </div>
-        </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Total XP</span>
-          <span className="ui-stat__value">{totalXp.toLocaleString()}</span>
-          <span className="ui-stat__meta">{toNext} XP to level {level + 1}</span>
-        </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Study streak</span>
-          <span className="ui-stat__value profile__streak">
-            {streak}<span className="ui-stat__unit">{streak === 1 ? 'day' : 'days'}</span>
-            {streak >= 7 ? <img className="ui-mascot-cheer profile__streak-mascot" src="/bindit-mascot-cutout.webp" alt="" width="28" height="34" title={`${streak}-day streak`} /> : null}
           </span>
-        </div>
-        <div className="ui-stat">
-          <span className="ui-stat__label">Friends</span>
-          <span className="ui-stat__value">{social ? social.friends.length : socialLoading ? <span className="ui-skeleton profile__stat-skeleton" /> : 0}</span>
-          {social?.requests.length ? <span className="ui-stat__meta">{social.requests.length} pending {social.requests.length === 1 ? 'request' : 'requests'}</span> : null}
-        </div>
-      </section>
+          <span className="profile-stat__meta">{toNext} XP to level {level + 1}</span>
+        </li>
+        <li className="profile-stat ui-tone--violet">
+          <span className="profile-stat__icon">{Icons.sparkle}</span>
+          <span className="profile-stat__label">Total XP</span>
+          <span className="profile-stat__value">{totalXp.toLocaleString()}</span>
+          <span className="profile-stat__meta">{weekXp !== null ? `+${weekXp.toLocaleString()} this week` : 'From quizzes and practice'}</span>
+        </li>
+        <li className="profile-stat ui-tone--orange">
+          <span className="profile-stat__icon">{Icons.flame}</span>
+          <span className="profile-stat__label">Study streak</span>
+          <span className="profile-stat__value">{streak}<small> {streak === 1 ? 'day' : 'days'}</small></span>
+          <span className="profile-stat__meta">{bestStreak > streak ? `Best: ${streakDays(bestStreak)}` : streak ? 'Your best yet' : 'Study today to start one'}</span>
+          {streak >= 7 ? <img className="ui-mascot-cheer profile-stat__cheer" src="/bindit-mascot-cutout.webp" alt="" width="36" height="43" title={`${streak}-day streak`} /> : null}
+        </li>
+        <li className="profile-stat ui-tone--pink">
+          <span className="profile-stat__icon">{Icons.users}</span>
+          <span className="profile-stat__label">Friends</span>
+          <span className="profile-stat__value">{social ? social.friends.length : socialLoading ? <span className="ui-skeleton profile__stat-skeleton" /> : 0}</span>
+          <span className="profile-stat__meta">
+            {requests.length ? `${requests.length} ${requests.length === 1 ? 'request' : 'requests'} waiting`
+              : myLeagueIndex >= 0 && league.length > 1 ? `#${myLeagueIndex + 1} of ${league.length} in your league`
+                : 'Add one to start a league'}
+          </span>
+        </li>
+      </ul>
 
       {session && profileMissing && !data.sandboxed ? <ProfileSetupCard className="profile__setup" /> : null}
 
       {failedAlert}
 
-      <div className="profile__grid">
+      <div className={`profile__grid${requests.length ? ' has-requests' : ''}`}>
+        {requests.length ? (
+          <section className="profile__requests" aria-labelledby="requests-title">
+            <h2 className="profile__requests-title" id="requests-title">
+              <span className="profile__head-icon ui-tone--pink">{Icons.users}</span>
+              Friend requests
+              <span className="profile__requests-count">{requests.length}</span>
+            </h2>
+            <ul className="ui-list">
+              {requests.map((request) => (
+                <PersonRow key={request.request_id} name={request.display_name} label={request.display_name} meta={`@${request.username} wants to be friends`}>
+                  <span className="profile__row-actions">
+                    <button className="ui-button ui-button--sm profile__btn-blue" type="button" onClick={() => void answerRequest(request.request_id, true, request.display_name)} disabled={socialBusy} aria-label={`Accept ${request.display_name}`}>Accept</button>
+                    <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => void answerRequest(request.request_id, false, request.display_name)} disabled={socialBusy} aria-label={`Decline ${request.display_name}`}>Decline</button>
+                  </span>
+                </PersonRow>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <div className="profile__main">
           <section className="ui-section" aria-labelledby="study-groups-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="study-groups-title">
+                <span className="profile__head-icon ui-tone--teal"><UsersMark /></span>
                 Study groups {groupList.length ? <span className="ui-count">{groupList.length}</span> : null}
               </h2>
-              {session ? (
+              {session && groupList.length ? (
                 <button className="ui-button ui-button--sm" type="button" aria-expanded={showGroupSetup} aria-controls="group-setup" onClick={() => setShowGroupSetup((current) => !current)}>
-                  {showGroupSetup ? 'Close' : 'New or join'}
+                  {showGroupSetup ? 'Close' : <><PlusMark />New or join</>}
                 </button>
               ) : null}
             </div>
@@ -591,7 +654,7 @@ export function Profile({ session, onError }: ProfileProps) {
                     <span>What are you studying? <span className="profile__optional">Optional</span></span>
                     <input className="ui-input" value={groupDescription} onChange={(event) => setGroupDescription(event.target.value)} placeholder="Weekly review before unit tests" maxLength={160} autoComplete="off" enterKeyHint="done" />
                   </label>
-                  <button className="ui-button" disabled={socialBusy || groupName.trim().length < 2}>Create group</button>
+                  <button className="ui-button ui-button--primary" disabled={socialBusy || groupName.trim().length < 2}>Create group</button>
                 </form>
                 <form className="profile__form" onSubmit={joinGroup}>
                   <h3 className="profile__form-title">Join with a code</h3>
@@ -613,71 +676,54 @@ export function Profile({ session, onError }: ProfileProps) {
                 <SkeletonRows rows={2} />
               </div>
             ) : groupList.length && activeGroup ? (
-              <div className="ui-panel profile__groups">
-                {groupList.length > 1 ? (
-                  <div
-                    className="ui-tabs profile__group-tabs"
-                    role="tablist"
-                    aria-label="Your study groups"
-                    onKeyDown={(event) => {
-                      // Arrow keys, Home and End move between groups (one tab stop for the list).
-                      const at = groupList.findIndex((group) => group.id === activeGroup.id)
-                      const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: groupList.length - 1 }[event.key]
-                      if (to === undefined) return
-                      event.preventDefault()
-                      const next = groupList[(to + groupList.length) % groupList.length]
-                      setActiveGroupId(next.id)
-                      const tab = document.getElementById(`group-tab-${next.id}`)
-                      tab?.focus()
-                      tab?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-                    }}
-                  >
-                    {groupList.map((group) => (
-                      <button
-                        key={group.id}
-                        type="button"
-                        role="tab"
-                        id={`group-tab-${group.id}`}
-                        className="ui-tab"
-                        aria-selected={activeGroup.id === group.id}
-                        tabIndex={activeGroup.id === group.id ? 0 : -1}
-                        aria-controls="group-panel"
-                        onClick={() => setActiveGroupId(group.id)}
-                      >
-                        {group.name}<span className="ui-count">{group.members.length}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <div
-                  className="profile__group-body"
-                  id="group-panel"
-                  role={groupList.length > 1 ? 'tabpanel' : undefined}
-                  aria-labelledby={groupList.length > 1 ? `group-tab-${activeGroup.id}` : undefined}
-                >
+              <>
+                <ul className="profile__group-cards">
+                  {groupList.map((group) => {
+                    const goal = percent(group.weekly_xp, group.weekly_goal_xp)
+                    const selected = activeGroup.id === group.id
+                    return (
+                      <li key={group.id} className={`profile__group-card ${toneClass(groupTones.get(group.id) ?? 'teal')}${selected && groupList.length > 1 ? ' is-selected' : ''}`}>
+                        <div className="profile__group-card-top">
+                          <span className="profile__group-mark" aria-hidden="true">{courseInitial(group.name)}</span>
+                          <span className="profile__group-card-text">
+                            <span className="profile__group-card-name">{group.name}</span>
+                            <span className="profile__group-card-meta">{group.members.length} {group.members.length === 1 ? 'member' : 'members'} · {group.role === 'owner' ? 'You own it' : 'Member'}</span>
+                          </span>
+                        </div>
+                        <AvatarStack names={group.members.map((member) => member.student_id === studentId ? displayName : member.display_name)} />
+                        <div className="profile__group-card-goal">
+                          <span><strong>{group.weekly_xp.toLocaleString()}</strong> / {group.weekly_goal_xp.toLocaleString()} XP this week</span>
+                          <span className="profile__group-card-pct">{goal}%</span>
+                        </div>
+                        <span className="profile__group-card-meter" role="progressbar" aria-label={`${group.name} weekly goal`} aria-valuemin={0} aria-valuemax={group.weekly_goal_xp} aria-valuenow={Math.min(group.weekly_xp, group.weekly_goal_xp)}>
+                          <span style={{ width: `${goal}%` }} />
+                        </span>
+                        <div className="profile__group-card-actions">
+                          <a className="ui-button ui-button--sm profile__group-open" href={`#stats?group=${encodeURIComponent(group.id)}`}>
+                            Open<span className="sr-only"> {group.name}</span>
+                          </a>
+                          {groupList.length > 1 ? (
+                            <button type="button" className="ui-button ui-button--ghost ui-button--sm profile__group-pick" aria-pressed={selected} aria-controls="group-panel" onClick={() => setActiveGroupId(group.id)}>
+                              {selected ? 'Shown below' : 'Members'}<span className="sr-only"> of {group.name}</span>
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+
+                <div className={`ui-panel profile__group-body ${toneClass(groupTones.get(activeGroup.id) ?? 'teal')}`} id="group-panel" aria-label={`${activeGroup.name} details`}>
                   <div className="profile__group-top">
                     <div className="profile__group-heading">
                       <h3 className="profile__group-name">{activeGroup.name}</h3>
                       <p className="profile__group-copy">{activeGroup.description || 'A private place to keep each other moving.'}</p>
-                      <p className="profile__group-meta">
-                        {activeGroup.members.length} {activeGroup.members.length === 1 ? 'member' : 'members'} · {activeGroup.role === 'owner' ? 'You own this group' : 'You are a member'}
-                      </p>
                     </div>
                     <button type="button" className="profile__invite" onClick={() => void copyGroupCode(activeGroup.invite_code)} aria-label={`Copy invite code ${activeGroup.invite_code}`}>
                       <span>Invite code</span>
                       <strong>{activeGroup.invite_code}</strong>
                       <small><CopyMark /> Copy</small>
                     </button>
-                  </div>
-
-                  <div className="profile__goal">
-                    <div className="profile__goal-line">
-                      <span>Weekly group goal</span>
-                      <span><strong>{activeGroup.weekly_xp.toLocaleString()}</strong> of {activeGroup.weekly_goal_xp.toLocaleString()} XP · {percent(activeGroup.weekly_xp, activeGroup.weekly_goal_xp)}%</span>
-                    </div>
-                    <div className="ui-meter" role="progressbar" aria-label={`${activeGroup.name} weekly XP`} aria-valuemin={0} aria-valuemax={activeGroup.weekly_goal_xp} aria-valuenow={Math.min(activeGroup.weekly_xp, activeGroup.weekly_goal_xp)}>
-                      <span style={{ width: `${percent(activeGroup.weekly_xp, activeGroup.weekly_goal_xp)}%` }} />
-                    </div>
                   </div>
 
                   <div className="profile__group-columns">
@@ -687,14 +733,14 @@ export function Profile({ session, onError }: ProfileProps) {
                         {activeGroup.members.map((member, index) => (
                           <PersonRow
                             key={member.student_id}
-                            name={member.display_name}
+                            name={member.student_id === studentId ? displayName : member.display_name}
                             label={member.student_id === studentId ? 'You' : member.display_name}
                             meta={`@${member.username}`}
                             rank={index + 1}
                             me={member.student_id === studentId}
                           >
-                            {member.role === 'owner' ? <span className="ui-badge">Owner</span> : null}
-                            <span className="ui-row__aside">{member.weekly_xp} XP</span>
+                            {member.role === 'owner' ? <span className="ui-badge ui-badge--tone ui-tone--teal">Owner</span> : null}
+                            <span className="ui-row__aside profile__league-xp">{member.weekly_xp} XP</span>
                           </PersonRow>
                         ))}
                       </ol>
@@ -706,7 +752,7 @@ export function Profile({ session, onError }: ProfileProps) {
                           {activeGroup.activity.slice(0, 5).map((item) => (
                             <PersonRow
                               key={item.id}
-                              name={item.display_name}
+                              name={item.student_id === studentId ? displayName : item.display_name}
                               label={item.student_id === studentId ? 'You' : item.display_name}
                               meta={shortDate.format(new Date(parseServerTime(item.created_at)))}
                             >
@@ -730,57 +776,77 @@ export function Profile({ session, onError }: ProfileProps) {
                     <button type="button" className="ui-button ui-button--ghost ui-button--sm" onClick={() => void exitGroup(activeGroup)}>Leave group</button>
                   </div>
                 </div>
-              </div>
+              </>
             ) : !showGroupSetup && !(socialFailed && !social) ? (
-              <div className="profile__placeholder">
-                <span className="ui-icon"><UsersMark /></span>
+              <div className="profile__placeholder ui-tone--teal">
+                <span className="ui-icon profile__placeholder-icon"><UsersMark /></span>
                 <div>
                   <p className="profile__placeholder-title">No study groups yet</p>
                   <p className="profile__placeholder-copy">
-                    {session ? 'Start one or join with a code. Members pool XP toward a weekly goal.' : 'Log in to start or join a study group.'}
+                    {session ? 'Members pool XP toward a weekly goal.' : 'Log in to start or join a study group.'}
                   </p>
                 </div>
-                {session ? <button type="button" className="ui-button ui-button--sm" onClick={() => setShowGroupSetup(true)}>Start or join a group</button> : null}
+                {session ? <button type="button" className="ui-button ui-button--primary ui-button--sm" onClick={() => setShowGroupSetup(true)}><PlusMark />Start or join a group</button> : null}
               </div>
             ) : null}
           </section>
 
           <section className="ui-section" aria-labelledby="league-title">
             <div className="ui-section-head">
-              <h2 className="ui-section-title" id="league-title">Weekly league</h2>
-              <span className="ui-count">Resets Monday</span>
+              <h2 className="ui-section-title" id="league-title">
+                <span className="profile__head-icon ui-tone--amber">{Icons.trophy}</span>
+                Weekly league
+              </h2>
+              <span className="profile__reset">{leagueReset(data.now())}</span>
             </div>
             <div className="ui-panel">
-              {socialLoading ? <SkeletonRows rows={3} /> : !social?.leaderboard.length ? (
-                <p className="profile__empty">Add a friend to start your weekly competition.</p>
+              {socialLoading ? <SkeletonRows rows={3} /> : league.length < 2 ? (
+                <div className="profile__empty-cta">
+                  <p>Add a friend to start a weekly XP race. It resets every Monday.</p>
+                  {canAdd ? <button type="button" className="ui-button ui-button--sm profile__add-friend" onClick={openAdd}><PlusMark />Add a friend</button> : null}
+                </div>
               ) : (
                 <ol className="ui-list">
-                  {social.leaderboard.map((friend, index) => (
-                    <PersonRow
-                      key={friend.student_id}
-                      name={friend.display_name}
-                      label={friend.student_id === studentId ? 'You' : friend.display_name}
-                      meta={friend.active_today ? 'Active today' : friend.streak > 0 ? `${friend.streak}-day study streak` : 'No study streak yet'}
-                      rank={index + 1}
-                      me={friend.student_id === studentId}
-                    >
-                      <span className="ui-row__aside profile__league-xp">{friend.weekly_xp} XP</span>
-                    </PersonRow>
-                  ))}
+                  {league.map((person, index) => {
+                    const me = person.student_id === studentId
+                    const name = me ? displayName : person.display_name
+                    const share = leaderXp > 0 ? Math.max(3, Math.round((person.weekly_xp / leaderXp) * 100)) : 0
+                    return (
+                      <li key={person.student_id} className={`ui-row profile__person profile__league-row${me ? ' profile__me' : ''}`}>
+                        <span className={`profile__rank${index < 3 ? ` profile__rank--medal profile__rank--${index + 1}` : ''}`}>
+                          <span className="sr-only">Rank </span>{index + 1}
+                        </span>
+                        <span className={`ui-avatar ${toneClass(toneForName(name))}`} aria-hidden="true">{initials(name)}</span>
+                        <span className="ui-row__main">
+                          <span className="profile__league-name">
+                            <span className="ui-row__title">{me ? 'You' : person.display_name}</span>
+                            <span className="profile__row-meta">{person.active_today ? 'Active today' : person.streak > 0 ? `${person.streak}-day streak` : 'No streak yet'}</span>
+                          </span>
+                          <span className={`profile__league-bar ${toneClass(toneForName(name))}`} aria-hidden="true"><span style={{ width: `${share}%` }} /></span>
+                        </span>
+                        <span className="ui-row__aside profile__league-xp">{person.weekly_xp.toLocaleString()} XP</span>
+                      </li>
+                    )
+                  })}
                 </ol>
               )}
             </div>
           </section>
 
           <section className="ui-section" aria-labelledby="activity-title">
-            <div className="ui-section-head"><h2 className="ui-section-title" id="activity-title">Friend activity</h2></div>
+            <div className="ui-section-head">
+              <h2 className="ui-section-title" id="activity-title">
+                <span className="profile__head-icon ui-tone--green">{Icons.bolt}</span>
+                Friend activity
+              </h2>
+            </div>
             <div className="ui-panel">
               {socialLoading ? <SkeletonRows rows={2} /> : social?.activity.length ? (
                 <ul className="ui-list">
                   {social.activity.slice(0, 6).map((event) => (
                     <PersonRow
                       key={event.id}
-                      name={event.display_name}
+                      name={event.student_id === studentId ? displayName : event.display_name}
                       label={`${event.student_id === studentId ? 'You' : event.display_name} earned ${event.xp} XP`}
                       meta={shortDate.format(new Date(parseServerTime(event.created_at)))}
                     >
@@ -798,27 +864,38 @@ export function Profile({ session, onError }: ProfileProps) {
                     </PersonRow>
                   ))}
                 </ul>
-              ) : <p className="profile__empty">Study activity from you and your friends will appear here.</p>}
+              ) : (
+                <div className="profile__empty-cta">
+                  <p>Study activity from you and your friends shows up here.</p>
+                  <a className="ui-link" href="#tools">Take a quiz</a>
+                </div>
+              )}
             </div>
           </section>
 
           <section className="ui-section" aria-labelledby="record-title">
             <div className="ui-section-head">
-              <h2 className="ui-section-title" id="record-title">Record</h2>
+              <h2 className="ui-section-title" id="record-title">
+                <span className="profile__head-icon ui-tone--blue">{Icons.check}</span>
+                Record
+              </h2>
               <a className="ui-link" href="#progress">Full progress</a>
             </div>
             <div className="ui-panel">
               {unitStats.length === 0 ? (
-                <p className="profile__empty">Take a quiz in Study to track unit accuracy here.</p>
+                <div className="profile__empty-cta">
+                  <p>Unit accuracy shows up here after your first quiz.</p>
+                  <a className="ui-link" href="#tools">Take a quiz</a>
+                </div>
               ) : (
                 <ul className="ui-list">
                   {unitStats.map((unit) => (
-                    <li key={unit.topic} className="profile__record">
+                    <li key={unit.topic} className={`profile__record ${unit.accuracy >= 70 ? 'ui-tone--green' : 'ui-tone--amber'}`}>
                       <div className="profile__goal-line">
                         <span className="profile__record-name">{formatTopic(unit.topic)}</span>
-                        <span><strong>{Math.round(unit.accuracy)}%</strong> · {unit.correct_answers} of {unit.attempts} correct</span>
+                        <span><strong className="profile__record-pct">{Math.round(unit.accuracy)}%</strong> · {unit.correct_answers} of {unit.attempts} correct</span>
                       </div>
-                      <div className="ui-meter" role="progressbar" aria-label={`${formatTopic(unit.topic)} accuracy`} aria-valuenow={unit.accuracy} aria-valuemin={0} aria-valuemax={100}>
+                      <div className="ui-meter profile__record-meter" role="progressbar" aria-label={`${formatTopic(unit.topic)} accuracy`} aria-valuenow={unit.accuracy} aria-valuemin={0} aria-valuemax={100}>
                         <span style={{ width: `${unit.accuracy}%` }} />
                       </div>
                     </li>
@@ -832,48 +909,29 @@ export function Profile({ session, onError }: ProfileProps) {
         <aside className="profile__side" aria-label="People">
           <section className="ui-section" aria-labelledby="friends-title">
             <div className="ui-section-head">
-              <h2 className="ui-section-title" id="friends-title">Friends</h2>
-              <span className="ui-count">{social?.friends.length ?? 0}</span>
+              <h2 className="ui-section-title" id="friends-title">
+                <span className="profile__head-icon ui-tone--pink">{Icons.users}</span>
+                Friends {social?.friends.length ? <span className="ui-count">{social.friends.length}</span> : null}
+              </h2>
             </div>
             <div className="ui-panel profile__friends">
-              {social?.requests.length ? (
-                <div className="profile__block profile__requests">
-                  <h3 className="profile__label">
-                    Requests <span className="ui-badge ui-badge--accent">{social.requests.length}</span>
-                  </h3>
-                  <ul className="ui-list">
-                    {social.requests.map((request) => (
-                      <PersonRow key={request.request_id} name={request.display_name} label={request.display_name} meta={`@${request.username} wants to be friends`}>
-                        <span className="profile__row-actions">
-                          <button className="ui-button ui-button--sm" type="button" onClick={() => void answerRequest(request.request_id, true)} disabled={socialBusy} aria-label={`Accept ${request.display_name}`}>Accept</button>
-                          <button className="ui-button ui-button--ghost ui-button--sm" type="button" onClick={() => void answerRequest(request.request_id, false)} disabled={socialBusy} aria-label={`Decline ${request.display_name}`}>Decline</button>
-                        </span>
-                      </PersonRow>
-                    ))}
-                  </ul>
+              {canAdd && social?.friends.length ? (
+                <div className="profile__add-row">
+                  <button className="ui-button ui-button--primary profile__add-friend profile__add-friend--wide" type="button" onClick={openAdd}>
+                    <PlusMark />
+                    Add a friend
+                  </button>
                 </div>
               ) : null}
 
-              {session ? (
-                <div className="profile__friend-forms">
-                  <form className="profile__inline-form" onSubmit={findPeople} role="search">
-                    <input className="ui-input" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Search people" maxLength={40} aria-label="Search people by name or username" type="search" autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" />
-                    <button className="ui-button" disabled={socialBusy || peopleQuery.trim().length < 2}>Search</button>
-                  </form>
-                  <form className="profile__inline-form" onSubmit={addFriend}>
-                    <input className="ui-input profile__code-input" value={friendCode} onChange={(event) => setFriendCode(event.target.value.toUpperCase())} placeholder="Or enter a friend ID" maxLength={12} aria-label="Friend ID" autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} enterKeyHint="go" />
-                    <button className="ui-button" disabled={socialBusy || !friendCode.trim()}>Add</button>
-                  </form>
-                </div>
-              ) : null}
-
-              {people.length ? (
+              {sent.length ? (
                 <div className="profile__block">
-                  <h3 className="profile__label">{peopleResults.length ? `Results for “${searched}”` : 'Suggested for you'}</h3>
+                  <h3 className="profile__label">Waiting for an answer</h3>
                   <ul className="ui-list">
-                    {people.slice(0, 4).map((person) => (
-                      <PersonRow key={person.student_id} name={person.display_name} label={person.display_name} meta={`@${person.username}`}>
-                        <button className="ui-button ui-button--sm" type="button" onClick={() => void addSuggested(person)} disabled={socialBusy} aria-label={`Add ${person.display_name}`}>Add</button>
+                    {sent.map((request) => (
+                      <PersonRow key={request.request_id} name={request.display_name} label={request.display_name} meta={`@${request.username}`}>
+                        <span className="ui-badge ui-badge--tone ui-tone--amber">Pending</span>
+                        <button className="ui-button ui-button--ghost ui-button--sm profile__cancel-request" type="button" onClick={() => void cancelRequest(request)} disabled={socialBusy} aria-label={`Cancel your request to ${request.display_name}`}>Cancel</button>
                       </PersonRow>
                     ))}
                   </ul>
@@ -915,7 +973,7 @@ export function Profile({ session, onError }: ProfileProps) {
                             >
                               {Icons.flame}<span>{friend.friend_streak}</span>
                             </button>
-                            <button className="ui-button ui-button--sm" type="button" onClick={() => void beginQuest(friend.student_id)} disabled={socialBusy} aria-label={`Start a quest with ${friend.display_name}`}>Quest</button>
+                            <button className="ui-button ui-button--sm profile__quest-button ui-tone--violet" type="button" onClick={() => void beginQuest(friend.student_id)} disabled={socialBusy} aria-label={`Start a quest with ${friend.display_name}`}>Quest</button>
                             <details className="profile__menu">
                               <summary aria-label={`Options for ${friend.display_name}`}>
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
@@ -943,22 +1001,44 @@ export function Profile({ session, onError }: ProfileProps) {
                 </div>
               ) : null}
 
-              {session && social && !social.friends.length && !social.requests.length ? (
+              {session && social && !social.friends.length ? (
                 <div className="ui-empty profile__friends-empty">
-                  <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="104" height="125" />
+                  <img className="ui-empty__mascot" src="/bindit-mascot-cutout.webp" alt="" width="120" height="144" />
                   <p className="ui-empty__title">No friends yet</p>
-                  <p className="ui-empty__copy">Search for classmates above or share your friend ID to start a weekly league.</p>
+                  <p className="ui-empty__copy">Add a classmate by name or friend ID to start a weekly league and friend streaks.</p>
+                  {canAdd ? (
+                    <button className="ui-button ui-button--primary profile__add-friend" type="button" onClick={openAdd}>
+                      <PlusMark />
+                      Add a friend
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
-              <p className="profile__hint">
-                {session && profileMissing ? 'Finish setting up your profile to get a friend ID you can share.' : !session || !profile?.friend_code ? 'Log in to get a friend ID you can share.' : nativeShare ? 'Share friend ID sends it with your phone’s share menu.' : 'Share friend ID copies your ID and a link to bindet, ready to paste into a message.'}
-              </p>
+
+              {suggestions.length ? (
+                <div className="profile__block">
+                  <h3 className="profile__label">People you may know</h3>
+                  <ul className="ui-list">
+                    {suggestions.slice(0, 4).map((person) => (
+                      <PersonRow key={person.student_id} name={person.display_name} label={person.display_name} meta={`@${person.username}`}>
+                        <button className="ui-button ui-button--sm profile__suggest-add" type="button" onClick={() => void addSuggested(person)} disabled={socialBusy} aria-label={`Add ${person.display_name}`}><PlusMark />Add</button>
+                      </PersonRow>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {session && profileMissing ? <p className="profile__hint">Finish setting up your profile to get a friend ID you can share.</p>
+                : !session ? <p className="profile__hint">Log in to get a friend ID you can share.</p> : null}
             </div>
           </section>
 
           <section className="ui-section" aria-labelledby="quests-title">
             <div className="ui-section-head">
-              <h2 className="ui-section-title" id="quests-title">Friend quests</h2>
+              <h2 className="ui-section-title" id="quests-title">
+                <span className="profile__head-icon ui-tone--violet">{Icons.swords}</span>
+                Friend quests
+              </h2>
               <span className="ui-count">Earn XP together in a week</span>
             </div>
             <div className="ui-panel">
@@ -985,7 +1065,7 @@ export function Profile({ session, onError }: ProfileProps) {
                   {!social?.quests.length && social?.friends.length ? (
                     <div className="profile__quest-start">
                       <p className="profile__empty profile__empty--flush">No quest running. Pair up with a friend and earn 100 XP together this week.</p>
-                      <button className="ui-button ui-button--sm" type="button" disabled={socialBusy} onClick={() => void beginQuest(social.friends[0].student_id)}>Start a quest with {social.friends[0].display_name}</button>
+                      <button className="ui-button ui-button--sm profile__quest-button ui-tone--violet" type="button" disabled={socialBusy} onClick={() => void beginQuest(social.friends[0].student_id)}>Start a quest with {social.friends[0].display_name}</button>
                     </div>
                   ) : null}
                   {!social?.friends.length ? <p className="profile__empty">Friend quests unlock after you add a friend.</p> : null}
@@ -997,6 +1077,7 @@ export function Profile({ session, onError }: ProfileProps) {
           <section className="ui-section" aria-labelledby="notifications-title">
             <div className="ui-section-head">
               <h2 className="ui-section-title" id="notifications-title">
+                <span className="profile__head-icon ui-tone--blue">{Icons.message}</span>
                 Notifications {unread ? <span className="ui-badge ui-badge--accent">{unread} new</span> : null}
               </h2>
               {unread ? <button className="ui-link" type="button" onClick={() => void markNotificationsRead()}>Mark all read</button> : null}
@@ -1026,7 +1107,12 @@ export function Profile({ session, onError }: ProfileProps) {
 
           {profile ? (
             <section className="ui-section" aria-labelledby="privacy-title">
-              <div className="ui-section-head"><h2 className="ui-section-title" id="privacy-title">Privacy and safety</h2></div>
+              <div className="ui-section-head">
+                <h2 className="ui-section-title" id="privacy-title">
+                  <span className="profile__head-icon ui-tone--green">{Icons.check}</span>
+                  Privacy and safety
+                </h2>
+              </div>
               <div className="ui-panel">
                 <label className="ui-row profile__toggle">
                   <span className="ui-row__main">
@@ -1049,12 +1135,18 @@ export function Profile({ session, onError }: ProfileProps) {
 
           <section className="ui-section" aria-labelledby="studying-title">
             <div className="ui-section-head">
-              <h2 className="ui-section-title" id="studying-title">Currently studying</h2>
+              <h2 className="ui-section-title" id="studying-title">
+                <span className="profile__head-icon ui-tone--orange">{Icons.target}</span>
+                Currently studying
+              </h2>
               {courses.length ? <a className="ui-link" href="#tools">Open Study</a> : null}
             </div>
             <div className="ui-panel ui-panel--padded">
               {courses.length === 0 ? (
-                <p className="profile__empty profile__empty--flush">Add courses in Study to see them here.</p>
+                <div className="profile__empty-cta profile__empty-cta--flush">
+                  <p>Your courses show up here.</p>
+                  <a className="ui-link" href="#tools">Add a course</a>
+                </div>
               ) : (
                 <ul className="profile__courses">
                   {courses.map((course) => (
@@ -1081,6 +1173,16 @@ export function Profile({ session, onError }: ProfileProps) {
           <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss">×</button>
         </div>
       ) : null}
+      {addOpen && session && profile ? (
+        <AddFriendDialog
+          token={session.access_token}
+          ownCode={profile.friend_code}
+          social={social}
+          nativeShare={nativeShare}
+          onSend={sendRequest}
+          onClose={() => setAddOpen(false)}
+        />
+      ) : null}
       {groupDialog && dialogGroup ? (
         <GroupOwnerDialog
           key={`${groupDialog.kind}-${dialogGroup.id}`}
@@ -1094,6 +1196,268 @@ export function Profile({ session, onError }: ProfileProps) {
         />
       ) : null}
     </div>
+  )
+}
+
+type AddTab = 'search' | 'code' | 'share'
+const ADD_TABS: { id: AddTab; label: string }[] = [
+  { id: 'search', label: 'Search' },
+  { id: 'code', label: 'Friend ID' },
+  { id: 'share', label: 'Share your ID' },
+]
+
+/*
+ * Add a friend: search by name or username (live, debounced), type their friend ID, or
+ * share your own. A bottom sheet on phones. Sending reloads the page's lists (Pending).
+ */
+function AddFriendDialog({ token, ownCode, social, nativeShare, onSend, onClose }: {
+  token: string
+  ownCode: string
+  social: FriendsHub | null
+  nativeShare: boolean
+  onSend: (friendCode: string) => Promise<SentFriendRequestResult>
+  onClose: () => void
+}) {
+  const data = useData()
+  const panel = useRef<HTMLDivElement>(null)
+  useDrawer({ open: true, onClose, panel })
+  const [tab, setTab] = useState<AddTab>('search')
+  const [query, setQuery] = useState('')
+  const [found, setFound] = useState<{ query: string; people: PersonSuggestion[]; error: string }>({ query: '', people: [], error: '' })
+  const [code, setCode] = useState('')
+  const [codeError, setCodeError] = useState('')
+  const [busy, setBusy] = useState('')
+  const [status, setStatus] = useState<Notice | null>(null)
+  // Sent from this dialog, before the page's lists have reloaded.
+  const [sentHere, setSentHere] = useState<Set<string>>(() => new Set())
+  const q = query.trim()
+
+  // Live results: wait for a pause in typing, then ask the server. Stale answers are dropped.
+  useEffect(() => {
+    if (q.length < 2) return
+    let live = true
+    const timer = window.setTimeout(() => {
+      data.searchFriends(q, token)
+        .then((people) => { if (live) setFound({ query: q, people, error: '' }) })
+        .catch(() => { if (live) setFound({ query: q, people: [], error: 'Search isn’t working right now. Try again in a moment, or use their friend ID.' }) })
+    }, 300)
+    return () => { live = false; window.clearTimeout(timer) }
+  }, [data, q, token])
+
+  const friendIds = new Set((social?.friends ?? []).map((friend) => friend.student_id))
+  const pendingIds = new Set([...(social?.sent ?? []).map((request) => request.student_id), ...sentHere])
+  const titleId = 'add-friend-title'
+
+  async function send(friendCode: string, key: string) {
+    setBusy(key)
+    setStatus(null)
+    try {
+      const result = await onSend(friendCode)
+      setSentHere((current) => new Set(current).add(result.friend.student_id))
+      setStatus({ text: `Request sent to ${firstName(result.friend.display_name)}. They’ll see it on their Home.` })
+      return true
+    } catch (error) {
+      const text = friendRequestError(error)
+      if (key === 'code') setCodeError(text)
+      else setStatus({ text, error: true })
+      return false
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function submitCode(event: FormEvent) {
+    event.preventDefault()
+    const normalized = normalizeFriendId(code)
+    if (!FRIEND_ID.test(normalized)) {
+      setCodeError('Friend IDs are 8 letters and numbers, like 4F2A9C01. Check what they sent you.')
+      return
+    }
+    if (normalized === ownCode) {
+      setCodeError('That’s your own friend ID. Share it with a friend instead.')
+      return
+    }
+    if (await send(normalized, 'code')) setCode('')
+  }
+
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(ownCode)
+      setStatus({ text: `Friend ID ${ownCode} copied.` })
+    } catch {
+      setStatus({ text: `Could not copy automatically. Your friend ID is ${ownCode}.`, error: true })
+    }
+  }
+
+  async function shareId() {
+    const share = { title: 'Add me on bindet', text: `Add me on bindet with friend ID ${ownCode}`, url: window.location.origin }
+    try {
+      if (nativeShare) await navigator.share(share)
+      else {
+        await navigator.clipboard.writeText(`${share.text} — ${share.url}`)
+        setStatus({ text: 'Invite message copied. Paste it into a text or chat.' })
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      setStatus({ text: `Could not share. Your friend ID is ${ownCode}.`, error: true })
+    }
+  }
+
+  return (
+    <div className="ui-dialog-backdrop profile__add-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div ref={panel} className="ui-dialog profile__add-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <header className="ui-dialog__header profile__add-header">
+          <h2 className="ui-dialog__title" id={titleId}>Add a friend</h2>
+          <button type="button" className="profile__add-close" onClick={onClose} aria-label="Close">×</button>
+        </header>
+        <div className="profile__add-body">
+          <div
+            className="ui-segmented profile__add-tabs"
+            role="tablist"
+            aria-label="Ways to add a friend"
+            onKeyDown={(event) => {
+              const at = ADD_TABS.findIndex((item) => item.id === tab)
+              const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: ADD_TABS.length - 1 }[event.key]
+              if (to === undefined) return
+              event.preventDefault()
+              const next = ADD_TABS[(to + ADD_TABS.length) % ADD_TABS.length]
+              setTab(next.id)
+              document.getElementById(`add-tab-${next.id}`)?.focus()
+            }}
+          >
+            {ADD_TABS.map((item) => (
+              <button
+                key={item.id}
+                id={`add-tab-${item.id}`}
+                type="button"
+                role="tab"
+                className="ui-segmented__item"
+                aria-selected={tab === item.id}
+                aria-controls={`add-panel-${item.id}`}
+                tabIndex={tab === item.id ? 0 : -1}
+                onClick={() => setTab(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'search' ? (
+            <div className="profile__add-panel" id="add-panel-search" role="tabpanel" aria-labelledby="add-tab-search">
+              <label className="ui-field">
+                <span>Search by name or username</span>
+                <input
+                  className="ui-input profile__add-input"
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Maya, or maya_chen"
+                  maxLength={40}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  enterKeyHint="search"
+                  autoFocus
+                />
+              </label>
+              {q.length < 2 ? (
+                <p className="profile__add-help">Type at least 2 letters. Someone who hid their profile from search can still be added by friend ID.</p>
+              ) : found.query !== q ? (
+                <p className="profile__add-help" aria-live="polite">Searching…</p>
+              ) : found.error ? (
+                <p className="profile__add-error" role="alert">{found.error}</p>
+              ) : !found.people.length ? (
+                <p className="profile__add-help" aria-live="polite">No one found for “{q}”. Try their username, or ask for their friend ID.</p>
+              ) : (
+                <ul className="ui-list profile__add-results" aria-label={`People matching ${q}`}>
+                  {found.people.map((person) => (
+                    <PersonRow key={person.student_id} name={person.display_name} label={person.display_name} meta={`@${person.username}`}>
+                      {friendIds.has(person.student_id) ? <span className="ui-badge ui-badge--tone ui-tone--green">Friends</span>
+                        : pendingIds.has(person.student_id) ? <span className="ui-badge ui-badge--tone ui-tone--amber">Pending</span>
+                          : (
+                            <button type="button" className={`ui-button ui-button--sm profile__btn-blue${busy === person.student_id ? ' is-busy' : ''}`} disabled={Boolean(busy)} onClick={() => void send(person.friend_code, person.student_id)} aria-label={`Add ${person.display_name}`}>
+                              <PlusMark />Add
+                            </button>
+                          )}
+                    </PersonRow>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : tab === 'code' ? (
+            <form className="profile__add-panel" id="add-panel-code" role="tabpanel" aria-labelledby="add-tab-code" onSubmit={(event) => void submitCode(event)}>
+              <label className="ui-field">
+                <span>Enter their friend ID</span>
+                <input
+                  className="ui-input profile__code-input profile__add-input profile__add-code"
+                  value={code}
+                  onChange={(event) => { setCode(event.target.value); setCodeError('') }}
+                  placeholder="8 characters, like 4F2A9C01"
+                  maxLength={16}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="send"
+                  aria-invalid={Boolean(codeError)}
+                  aria-describedby="add-code-help"
+                  autoFocus
+                />
+              </label>
+              {codeError ? <p className="profile__add-error" id="add-code-help" role="alert">{codeError}</p>
+                : <p className="profile__add-help" id="add-code-help">It’s on their Friends page, next to their name. Spaces and lowercase are fine.</p>}
+              <button type="submit" className={`ui-button profile__btn-blue profile__add-submit${busy === 'code' ? ' is-busy' : ''}`} disabled={Boolean(busy) || !code.trim()}>Send friend request</button>
+            </form>
+          ) : (
+            <div className="profile__add-panel profile__share-id" id="add-panel-share" role="tabpanel" aria-labelledby="add-tab-share">
+              <p className="profile__share-label">Your friend ID</p>
+              <p className="profile__share-code">{ownCode}</p>
+              <p className="profile__add-help">Send this to a friend. They type it into Add a friend.</p>
+              <div className="profile__share-actions">
+                <button type="button" className="ui-button" onClick={() => void copyId()}><CopyMark />Copy ID</button>
+                <button type="button" className="ui-button profile__btn-blue" onClick={() => void shareId()}><ShareMark />{nativeShare ? 'Share' : 'Copy invite message'}</button>
+              </div>
+            </div>
+          )}
+
+          {status ? (
+            <p className={`profile__add-status${status.error ? ' is-error' : ''}`} role={status.error ? 'alert' : 'status'}>
+              {status.error ? null : Icons.check}
+              {status.text}
+            </p>
+          ) : null}
+        </div>
+        <footer className="ui-dialog__footer">
+          <button type="button" className="ui-button" onClick={onClose}>Done</button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+/* Each group keeps its own stable color; when two groups would share one, the later one takes the next free hue. */
+function groupToneMap(groups: StudyGroup[]) {
+  const tones = new Map<string, Tone>()
+  const used = new Set<Tone>()
+  for (const group of groups) {
+    const first = TONES.indexOf(toneForName(group.name))
+    const free = TONES.map((_, step) => TONES[(first + step) % TONES.length]).find((tone) => !used.has(tone)) ?? TONES[first]
+    tones.set(group.id, free)
+    used.add(free)
+  }
+  return tones
+}
+
+/* Up to five member initials in their own colors, then "+N". */
+function AvatarStack({ names }: { names: string[] }) {
+  const shown = names.slice(0, 5)
+  return (
+    <span className="profile__avatar-stack" aria-hidden="true">
+      {shown.map((name, index) => (
+        <span key={`${name}-${index}`} className={`ui-avatar ${toneClass(toneForName(name))}`}>{initials(name)}</span>
+      ))}
+      {names.length > shown.length ? <span className="ui-avatar profile__avatar-more">+{names.length - shown.length}</span> : null}
+    </span>
   )
 }
 
@@ -1272,6 +1636,14 @@ function SkeletonRows({ rows, plain }: { rows: number; plain?: boolean }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+function PlusMark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
   )
 }
 
