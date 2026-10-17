@@ -173,6 +173,21 @@ class PlanTests(unittest.TestCase):
         self.sign_in(PRO)  # served from the verified-token cache; the plan is re-read
         self.assertFalse(rate_limit.is_pro("pro-1"))
 
+    def test_granting_one_inbox_keeps_everyone_elses_cached_plan(self):
+        plans.grant("tester@example.com", "unlimited", "owner-1")
+        self.sign_in(TESTER)
+        self.sign_in(PRO)
+        self.assertTrue(rate_limit.is_unlimited("tester-1"))
+        plans.grant("pro.student@example.com", "pro", "owner-1")
+        plans.revoke("someone.else@example.com")
+        # The tester's entry survives (the burst guard keeps treating them as Unlimited),
+        # and only the changed inbox's account is re-read.
+        self.assertTrue(rate_limit.plan_is_fresh("tester-1"))
+        self.assertTrue(rate_limit.is_unlimited("tester-1"))
+        self.assertFalse(rate_limit.plan_is_fresh("pro-1"))
+        self.sign_in(PRO)
+        self.assertTrue(rate_limit.is_pro("pro-1"))
+
     def test_other_instances_drop_a_revoked_plan_within_the_cache_window(self):
         rate_limit.mark_plan("pro-1", "pro", now=1000.0)
         self.assertEqual(rate_limit.plan_of("pro-1", now=1000.0 + rate_limit.PLAN_CACHE_SECONDS - 1), "pro")

@@ -105,6 +105,7 @@ def refresh(user: dict) -> None:
     student_id = str(user.get("id") or "")
     if not student_id or rate_limit.plan_is_fresh(student_id):
         return
+    rate_limit.remember_inbox(student_id, confirmed_inbox(user))
     try:
         plan = plan_for_user(user)
     except Exception:  # noqa: BLE001 - a plan lookup must never block signing in
@@ -175,7 +176,7 @@ def grant(email: str, plan: str, granted_by: str, note: str | None = None) -> di
             connection.execute(update(account_plans).where(account_plans.c.email == inbox).values(**values))
         else:
             connection.execute(account_plans.insert().values(email=inbox, **values))
-    rate_limit.forget_plans()
+    rate_limit.forget_inbox_plans(inbox)
     return {"email": inbox, "plan": plan, "note": note or "", "granted_at": now}
 
 
@@ -186,7 +187,7 @@ def revoke(email: str) -> bool:
     init_plans()
     with database.engine().begin() as connection:
         removed = connection.execute(delete(account_plans).where(account_plans.c.email == inbox)).rowcount or 0
-    rate_limit.forget_plans()
+    rate_limit.forget_inbox_plans(inbox)
     return bool(removed)
 
 
@@ -213,7 +214,9 @@ def delete_for_account_in(connection, student_id: str, email: str | None) -> Non
     if inbox and exact == inbox:
         connection.execute(delete(account_plans).where(account_plans.c.email == inbox))
     connection.execute(update(account_plans).where(account_plans.c.granted_by == student_id).values(granted_by=""))
-    rate_limit.forget_plans()
+    rate_limit.forget_plan(student_id)
+    if inbox and exact == inbox:
+        rate_limit.forget_inbox_plans(inbox)
 
 
 def reset_plans() -> None:

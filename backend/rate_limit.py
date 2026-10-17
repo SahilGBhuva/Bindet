@@ -271,9 +271,44 @@ def is_unlimited(student_id: str | None) -> bool:
 
 
 def forget_plans() -> None:
-    """Drop every cached plan (after a grant changes), so this instance re-reads them."""
+    """Drop every cached plan, so this instance re-reads them (tests and resets)."""
     with _plan_lock:
         _plans.clear()
+        _plan_inboxes.clear()
+
+
+# Which accounts auth last saw for each confirmed inbox, so a grant change can drop just
+# those accounts' cached plans. Clearing every entry instead would briefly make every
+# Unlimited account look Free to the burst guard (plan_of on a missing entry is 'free').
+_plan_inboxes: dict[str, set[str]] = {}
+
+
+def remember_inbox(student_id: str, inbox: str) -> None:
+    if not student_id or not inbox:
+        return
+    with _plan_lock:
+        ids = _plan_inboxes.get(inbox)
+        if ids is None:
+            if len(_plan_inboxes) >= MAX_PLAN_IDS:
+                _plan_inboxes.clear()
+            ids = _plan_inboxes[inbox] = set()
+        if len(ids) >= 20:  # many aliases of one inbox: keep the set bounded
+            ids.clear()
+        ids.add(student_id)
+
+
+def forget_plan(student_id: str) -> None:
+    """Drop one account's cached plan, so its next sign-in check re-reads it."""
+    with _plan_lock:
+        _plans.pop(student_id, None)
+
+
+def forget_inbox_plans(inbox: str) -> None:
+    """After a grant for this inbox changes: drop the cached plans of the accounts seen with
+    it on this instance. Other instances pick the change up within PLAN_CACHE_SECONDS."""
+    with _plan_lock:
+        for student_id in _plan_inboxes.get(inbox, ()):
+            _plans.pop(student_id, None)
 
 
 def skips_student_limits(student_id: str | None) -> bool:
