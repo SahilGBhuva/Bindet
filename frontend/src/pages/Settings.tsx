@@ -87,14 +87,17 @@ export function Settings({ session, onSession }: SettingsProps) {
   const goalSave = useRef(0)
   const privacySave = useRef(0)
 
-  // "#settings?help" (old Help links, the command palette) opens on Help & feedback.
+  // "#settings?help" (old Help links, the command palette) opens on Help & feedback, and
+  // "#settings?section=plan" (a plan notification) on bindet Pro.
   useEffect(() => {
     let timer = 0
     const openHelp = () => {
-      if (!/[?&]help\b/.test(window.location.hash)) return
+      const target = /[?&]help\b/.test(window.location.hash) ? 'settings-help'
+        : /[?&]section=plan\b/.test(window.location.hash) ? 'settings-plan' : ''
+      if (!target) return
       window.clearTimeout(timer)
       timer = window.setTimeout(() => {
-        document.getElementById('settings-help')?.scrollIntoView({ block: 'start' })
+        document.getElementById(target)?.scrollIntoView({ block: 'start' })
         window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#settings`)
       }, 50)
     }

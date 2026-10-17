@@ -13,6 +13,7 @@ import { toneClass, toneForName } from '../lib/tones'
 import { saveThemePreference, useThemePreference, type ThemePreference } from '../lib/theme'
 import type { Course } from '../lib/types'
 import { ProfileSetupCard } from '../components/ProfileSetupCard'
+import { notificationHref, notificationLabel } from '../lib/planLabels'
 import './Home.css'
 
 /*
@@ -547,8 +548,8 @@ export function Home({ session, firstRun = null }: { session: AuthSession | null
                 <span className="home-notice__time"><span className="sr-only">in </span>{relative(dueAt(nextItem) - now)}</span>
               </a>
             ) : unread ? (
-              <a className="home-notice__row" href="#profile">
-                <span className="home-badge">New</span>
+              <a className="home-notice__row" href={notificationHref(unread.kind)}>
+                <span className={`home-badge${unread.kind === 'plan_granted' ? ' home-badge--plan' : ''}`}>{notificationLabel(unread.kind)}</span>
                 <span className="home-notice__text">{unread.message}</span>
                 <span className="home-notice__time">{relative(now - parseServerTime(unread.created_at))}<span className="sr-only"> ago</span></span>
               </a>

@@ -11,6 +11,7 @@ import { ProfileSetupCard } from '../components/ProfileSetupCard'
 import { Icons } from '../components/Icons'
 import { canNudge, firstName, rankFriendStreaks, streakDays, streakStatusLine } from '../lib/friendStreaks'
 import { useAnnounce } from '../lib/announce'
+import { notificationHref, notificationLabel } from '../lib/planLabels'
 import './Profile.css'
 
 /*
@@ -1008,7 +1009,12 @@ export function Profile({ session, onError }: ProfileProps) {
                       <span className="profile__notification-dot" aria-hidden="true" />
                       <span className="profile__notification-text">
                         {item.is_read ? null : <span className="sr-only">New: </span>}
-                        {item.message}
+                        {item.kind === 'plan_granted' ? (
+                          <a className="ui-link" href={notificationHref(item.kind)}>
+                            <span className="ui-badge ui-badge--tone ui-tone--violet profile__notification-kind">{notificationLabel(item.kind)}</span>
+                            {item.message}
+                          </a>
+                        ) : item.message}
                       </span>
                       <time dateTime={item.created_at}>{shortDate.format(new Date(parseServerTime(item.created_at)))}</time>
                     </li>
