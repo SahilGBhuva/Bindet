@@ -255,6 +255,25 @@ def replace_reply(owner_id: str, conversation_id: str, old_reply_id: int, conten
     return {"id": message_id, "role": "assistant", "content": content, "attachments": attachments or [], "model_tier": model_tier, "created_at": now}
 
 
+def update_reply(owner_id: str, conversation_id: str, message_id: int, content: str, attachments: list[str] | None = None,
+                 model_tier: str | None = None) -> dict:
+    """Rewrite one of Otto's replies in place (Otto's "which unit?" question once the student picks
+    one becomes the reply with the deck or quiz). Raises ValueError("message_not_found")."""
+    init_tutor()
+    values: dict = {"content": content, "attachments": json.dumps([name[:120] for name in (attachments or [])][:3])}
+    if model_tier is not None:
+        values["model_tier"] = model_tier
+    with database.engine().begin() as connection:
+        _owned(connection, owner_id, conversation_id)
+        changed = connection.execute(update(messages).where(
+            messages.c.id == message_id, messages.c.conversation_id == conversation_id, messages.c.role == "assistant",
+        ).values(**values)).rowcount
+        if not changed:
+            raise ValueError("message_not_found")
+        row = connection.execute(select(messages).where(messages.c.id == message_id)).mappings().first()
+    return _message(row)
+
+
 def list_messages(owner_id: str, conversation_id: str, before_id: int | None = None, limit: int = 50) -> list[dict]:
     """The newest `limit` messages (older than before_id when given), oldest first."""
     init_tutor()

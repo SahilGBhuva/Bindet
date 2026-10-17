@@ -46,6 +46,7 @@ import note_ingestion
 import note_store
 import onboarding
 import otto
+import otto_make
 import plans
 import practice
 import practice_tests
@@ -2139,6 +2140,11 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     # with a link to it instead of a long chat reply (otto_guide_reply). A pattern, not a model
     # call; the guide's own limits, cache and budget apply, so the tutor's cache and budget don't.
     guide_intent = None if fixed_reply is not None or image_parts else study_guides.detect_intent(content)
+    # "Make flashcards on this", "quiz me": Otto makes a deck or an inline quiz from this chat
+    # (otto_make_reply). A pattern, not a model call; the flashcard and practice-test limits,
+    # caches and budget apply, so the tutor's cache and budget don't.
+    make_intent = None if fixed_reply is not None or image_parts or guide_intent is not None else otto_make.detect_intent(content)
+    makes = guide_intent is not None or make_intent is not None
     # Otto's personalization for this student (name, personality, about text, memory).
     otto_ctx = otto_context(otto_pending)
     personal = otto_personal_key(otto_ctx, data.study_mode or "explain")
@@ -2149,7 +2155,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
     grounding = None
     tutor_cache_key = None
     cached_reply = None
-    if fixed_reply is None and guide_intent is None and not data.conversation_id and not image_parts and ai_cache.enabled():
+    if fixed_reply is None and not makes and not data.conversation_id and not image_parts and ai_cache.enabled():
         if early_context:
             grounding = early_context.result()
         elif requested_course or requested_unit:
@@ -2167,7 +2173,7 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         cached_reply = ai_cache.cached_tutor_reply(tutor_cache_key, owner)
         if cached_reply is None:
             ai_tutor.log_ai_event("explain_material", outcome="cache_miss", student_id=owner)
-    if fixed_reply is None and cached_reply is None and guide_intent is None:
+    if fixed_reply is None and cached_reply is None and not makes:
         spend_global_ai_call(owner)
     try:
         conversation, recent = existing.result() if existing else (tutor.start_conversation(owner, content, requested_course, requested_unit), [])
@@ -2209,6 +2215,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
         route = {**ai_tutor.tutor_route(content, False), "tier": "small_talk"}
     elif guide_intent is not None:
         route = {**ai_tutor.tutor_route(content, False), "tier": "study_guide"}
+    elif make_intent is not None:
+        route = {**ai_tutor.tutor_route(content, False), "tier": "otto_make"}
     elif prefiltered or cached_reply is not None:
         route = ai_tutor.tutor_route(content, bool(image_parts))
     else:
@@ -2232,8 +2240,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
 
     def reply_chunks():
         """The model's reply, minus the off-topic sentinel: an off-topic reply becomes the fixed refusal."""
-        if guide_intent is not None:
-            ai_tutor.log_ai_event("explain_material", outcome="study_guide", student_id=owner, tier=route["tier"], started=started)
+        if makes:
+            ai_tutor.log_ai_event("explain_material", outcome=route["tier"], student_id=owner, tier=route["tier"], started=started)
             yield guide_reply["text"]
             return
         if small_talk is not None:
@@ -2325,6 +2333,24 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                         text, links = GUIDE_MESSAGES["ai_unavailable"], []
                         break
                 guide_reply.update(text=text, attachments=links)
+            if make_intent is not None:
+                # Gathering the source is quick (the database); writing the deck or quiz is one
+                # model call at most, kept alive with SSE comments like a study guide.
+                plan = otto_make_plan(owner, conversation, recent, make_intent, course, unit)
+                if plan.get("making"):
+                    yield sse("making", plan["making"])
+                making = guide_jobs.submit(contextvars.copy_context().run, otto_make_reply, owner, plan)
+                while True:
+                    try:
+                        text, links = making.result(timeout=GUIDE_KEEPALIVE_SECONDS)
+                        break
+                    except FutureTimeout:
+                        yield ": making flashcards or a quiz\n\n"
+                    except Exception:  # noqa: BLE001 - the student gets a friendly reply, never a broken stream
+                        logging.getLogger("bindit.otto").exception("otto_make_failed")
+                        text, links = MAKE_MESSAGES["unavailable"].format(what=otto_make_what(make_intent.kind)), []
+                        break
+                guide_reply.update(text=text, attachments=links)
             for chunk in reply_chunks():
                 if not user_sent:
                     user_sent = True
@@ -2355,8 +2381,8 @@ def _send_tutor_message(data: TutorMessageRequest, owner: str, content: str, ima
                 # A replayed (cached) first reply costs no AI call, and neither does its title
                 # (a cached or heuristic title only).
                 yield from otto_after_reply(owner, conversation, first_reply=first_reply, first_message=content,
-                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"] and guide_intent is None,
-                                            allow_ai_title=cached_reply is None and guide_intent is None)
+                                            reply=reply["content"], memory_enabled=otto_ctx["memory_enabled"] and not makes,
+                                            allow_ai_title=cached_reply is None and not makes)
         except ai_tutor.AITutorError:
             if not user_sent:
                 user_sent = True
@@ -3099,7 +3125,12 @@ def make_note_flashcards(
     authorization: Annotated[str | None, Header()] = None,
 ):
     """Make (once) and return the flashcards for one of the student's notes. Idempotent."""
-    owner = ai_user(authorization)["id"]
+    return note_flashcards(ai_user(authorization)["id"], note_id, retry)
+
+
+def note_flashcards(owner: str, note_id: str, retry: bool = False) -> dict:
+    """The flashcard pipeline for one note (also used by Otto's "make flashcards on this"):
+    stored cards, else the shared cache, else ONE model call after the daily limit and budget."""
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_flashcards", outcome=outcome, student_id=owner, note_id=note_id, tier="text", started=started, **fields)  # noqa: E731
     flashcards.init_flashcards()  # once per process, before the two reads below run side by side
@@ -3525,6 +3556,7 @@ PRACTICE_TESTS_PER_DAY = 10        # tests the AI writes per student per day (ca
 PRACTICE_STARTS_PER_DAY = 40       # tests started per day, retakes served from the cache included
 PRACTICE_SUBMITS_PER_HOUR = 60
 PRACTICE_GRADING_PER_DAY = 120     # the same "ai_grading" budget single answers use
+PRACTICE_CHECKS_PER_HOUR = 240     # answers checked one at a time in Otto's inline quiz
 PRACTICE_MESSAGES = {
     "no_notes": "Add notes first — practice tests are written only from your notes.",
     "notes_too_short": "These notes are too short for a practice test. Add a few more facts or definitions first.",
@@ -3562,6 +3594,15 @@ class PracticeTestCreate(BaseModel):
     instructions: str | None = Field(default=None, max_length=200)
     # Skip the saved test for these notes and settings and have the AI write new questions.
     new_questions: bool = False
+    # Write the test from this one note only (Otto's "From Otto: ..." note in this course and unit).
+    note_id: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class PracticeCheck(BaseModel):
+    """Check one answer now (Otto's inline quiz): the item is graded and locked."""
+    model_config = ConfigDict(extra="forbid")
+    position: int = Field(ge=0, lt=ai_tutor.PRACTICE_MAX_QUESTIONS)
+    answer: str = Field(min_length=1, max_length=ai_tutor.PRACTICE_STUDENT_ANSWER_MAX)
 
 
 class PracticeAnswer(BaseModel):
@@ -3592,11 +3633,26 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
     unit = data.unit.strip() if data.unit is not None else None
     if not course or (unit is not None and not unit):
         raise HTTPException(status_code=400, detail="Choose a course (and unit) for the practice test")
+    count = ai_tutor.practice_count(data.count)
+    source = None
+    if data.note_id is not None:
+        note = note_store.get_note(owner, data.note_id)
+        if note is None or note["course"] != course or note["unit"] != unit:
+            raise HTTPException(status_code=404, detail="Note not found")
+        source = (note["text"], [note["id"]])
+    return make_practice_test(owner, course, unit, count, practice_time_limit(data, count), instructions, data.new_questions, source)
+
+
+def make_practice_test(owner: str, course: str, unit: str | None, count: int, time_limit_s: int | None, instructions: str,
+                       new_questions: bool, source: tuple[str, list[str]] | None = None) -> dict:
+    """Write (or retake from the cache) and save a practice test. `source`: (text, note IDs) to
+    write it from instead of the scope's notes (Otto's quiz from one note). Raises HTTPException."""
     started = time.perf_counter()
     log = lambda outcome, **fields: ai_tutor.log_ai_event("generate_test", outcome=outcome, student_id=owner, tier="text", started=started, **fields)  # noqa: E731
-    count = ai_tutor.practice_count(data.count)
-    time_limit_s = practice_time_limit(data, count)
-    _, source_text, note_ids = note_store.practice_context(owner, course, unit, ai_tutor.PRACTICE_NOTE_CHARS)
+    if source is None:
+        _, source_text, note_ids = note_store.practice_context(owner, course, unit, ai_tutor.PRACTICE_NOTE_CHARS)
+    else:
+        source_text, note_ids = source
     text = ai_tutor.practice_source_text(source_text)
     if not text:
         raise practice_error(400, "no_notes")
@@ -3606,7 +3662,7 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
     steering = ai_tutor.instructions_hash(instructions)
     cache_key = ai_cache.practice_key(owner_id=owner, course=course, unit=unit or "", source_text=text, count=count, instructions_hash=steering)
     questions: list[dict] = []
-    if not data.new_questions:
+    if not new_questions:
         # The same notes, settings and preferences already made a test for this student:
         # serve it again (a retake) with no AI call, AI quota or budget.
         cached = ai_cache.cached_practice_test(cache_key, owner)
@@ -3627,7 +3683,7 @@ def create_practice_test(data: PracticeTestCreate, authorization: Annotated[str 
         try:
             ai_tutor.warm_connection()
             # "New questions": steer away from (and drop) prompts of this student's earlier tests here.
-            avoid = practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX) if data.new_questions else None
+            avoid = practice_tests.recent_prompts(owner, course, unit, ai_tutor.PRACTICE_AVOID_MAX) if new_questions else None
             batch = ai_tutor.generate_practice_test(
                 course=course, unit=unit or "", note_text=text, count=count, instructions=instructions,
                 session_id=ai_session_id(owner, course, unit or "", "practice"), avoid=avoid,
@@ -3681,6 +3737,11 @@ def grade_practice_items(owner: str, rows: list[dict], answers: dict[int, str]) 
     pending: list[dict] = []
     for row in rows:
         position = row["position"]
+        if row.get("correct") is not None and row.get("student_answer") is not None:
+            # Already checked one at a time (Otto's inline quiz): graded and locked, never graded again.
+            results[position] = {"student_answer": row["student_answer"], "correct": bool(row["correct"]),
+                                 "grading_source": row.get("grading_source") or "deterministic", "feedback": row.get("feedback") or ""}
+            continue
         answer = answers.get(position, "")
         if row["type"] == "multiple_choice":
             correct = bool(answer) and answer == row["answer"]
@@ -3708,6 +3769,77 @@ def grade_practice_items(owner: str, rows: list[dict], answers: dict[int, str]) 
         grade = graded[item["id"]]
         results[item["id"]] = {"student_answer": item["answer"], "correct": grade["correct"], "grading_source": "ai", "feedback": grade["feedback"]}
     return results
+
+
+def practice_grade_key(owner: str, row: dict, answer: str) -> str:
+    """The per-student grading cache entry for one practice answer (kept apart from quiz grades)."""
+    return ai_cache.grading_key(student_id=owner, question=row["prompt"], correct_answer=row["answer"], student_answer=answer,
+                                topic="practice:" + row["topic"], difficulty=0)
+
+
+def check_practice_answer(owner: str, row: dict, answer: str) -> dict:
+    """{student_answer, correct, grading_source, feedback} for one answer: multiple choice exactly,
+    short answers by the deterministic checks, then the student's grading cache, then ONE grading
+    call (the same ai_grading limit and budget as a submitted test). Raises HTTPException."""
+    if row["type"] == "multiple_choice":
+        return {"student_answer": answer, "correct": answer == row["answer"], "grading_source": "deterministic", "feedback": ""}
+    verdict = deterministic_verdict(answer, row["answer"], row["topic"])
+    if verdict is not None:
+        return {"student_answer": answer, "correct": verdict, "grading_source": "deterministic", "feedback": ""}
+    key = practice_grade_key(owner, row, answer)
+    cached = ai_cache.cached_grade(key)
+    if cached is not None:
+        return {"student_answer": answer, "correct": cached["correct"], "grading_source": "ai", "feedback": cached["explanation"]}
+    started = time.perf_counter()
+    practice_rate_limit(owner, "ai_grading", PRACTICE_GRADING_PER_DAY, "You’ve had a lot of answers checked today.")
+    if not global_ai_available(owner):
+        raise practice_error(503, "grading_unavailable", retry_after=30)
+    try:
+        graded = ai_tutor.grade_practice_answers([{"id": row["position"], "question": row["prompt"], "reference": row["answer"], "answer": answer}],
+                                                 session_id=ai_session_id(owner, "practice-grading"))
+    except ai_tutor.AITutorError as exc:
+        ai_tutor.log_ai_event("grade_test", outcome="bad_output" if isinstance(exc, ai_tutor.AIBadOutput) else "ai_error",
+                              student_id=owner, tier="text", started=started, error=exc)
+        raise practice_error(503, "grading_unavailable", retry_after=30) from exc
+    ai_tutor.log_ai_event("grade_test", outcome="ok", student_id=owner, tier="text", started=started, cards_in=1)
+    grade = graded[row["position"]]
+    # A "correct" verdict for an answer that reads like instructions to the grader is never cached.
+    if not (grade["correct"] and ai_tutor.answer_steers_grader(answer)):
+        ai_cache.store_grade(key, {"correct": grade["correct"], "score": 100 if grade["correct"] else 0, "mistake_type": None,
+                                   "explanation": grade["feedback"] or ("Correct." if grade["correct"] else "Not quite."),
+                                   "hint": None, "misconception": None})
+    return {"student_answer": answer, "correct": grade["correct"], "grading_source": "ai", "feedback": grade["feedback"]}
+
+
+@app.post("/api/practice-tests/{test_id}/check")
+def check_practice_test_answer(
+    test_id: Annotated[str, PathParam(min_length=1, max_length=64)],
+    data: PracticeCheck,
+    authorization: Annotated[str | None, Header()] = None,
+):
+    """Otto's inline quiz: grade one answer now and show whether it was right, the answer and why.
+    The item is locked once checked (asking again returns the stored result), and submitting the
+    test later reuses it, so nothing is graded twice. XP still comes only from submitting."""
+    owner = ai_user(authorization)["id"]
+    limit_action(owner, "practice_check", PRACTICE_CHECKS_PER_HOUR)
+    loaded = practice_tests.graded_items(owner, test_id)
+    if loaded is None:
+        raise practice_error(404, "test_not_found")
+    test, rows = loaded
+    row = next((item for item in rows if item["position"] == data.position), None)
+    if row is None:
+        raise practice_error(404, "test_not_found")
+    if row["correct"] is None or row["student_answer"] is None:
+        if test["status"] != "in_progress":
+            raise practice_error(409, "already_submitted")
+        answer = _practice_answer(data.answer)
+        if not answer:
+            raise HTTPException(status_code=400, detail="Write an answer first")
+        result = check_practice_answer(owner, row, answer)
+        row = practice_tests.record_check(owner, test_id, data.position, result) or row
+        if row["correct"] is None:  # submitted or being graded meanwhile
+            raise practice_error(409, "grading_in_progress")
+    return practice_tests.checked_item(row)
 
 
 @app.post("/api/practice-tests/{test_id}/submit")
@@ -4049,6 +4181,161 @@ def otto_guide_reply(owner: str, intent: "study_guides.GuideIntent", course: str
     return (f"Done — I made a {what.lower()} for {place} from {notes} of your {'note' if notes == 1 else 'notes'}. "
             f"It’s saved in Study under {guide_unit or guide_course} → Guides, so you can print it, copy it or turn it into flashcards.",
             attachment)
+
+
+# --- Otto: "make flashcards on this", "quiz me" ----------------------------------------------
+#
+# The source is the conversation (otto_make.chat_source) plus the matching paragraphs of the
+# unit's notes, saved once as a "From Otto: <topic>" note in the conversation's course and unit.
+# The deck is that note's flashcards (note_flashcards) and the quiz is an untimed practice test
+# written from that note (make_practice_test): their limits, budget, grounding and caches apply.
+
+OTTO_MAKES_PER_HOUR = 30           # decks and quizzes made through the picker or "New quiz on this"
+MAKE_MESSAGES = {
+    "pick": "Which course and unit should I save {what} to? Pick one below and I’ll make {them} from our chat.",
+    "too_short": "There isn’t enough here to make {what} from yet. Talk through the topic a bit more, or add notes, and try again.",
+    "unavailable": "I couldn’t make {what} right now. Try again in a moment.",
+    "busy": "I’m still making these flashcards. Give it a moment, then ask again.",
+}
+
+
+def otto_make_what(kind: str) -> str:
+    return "flashcards" if kind == "flashcards" else "a practice quiz"
+
+
+def otto_make_plan(owner: str, conversation: dict, turns: list[dict], intent: "otto_make.MakeIntent", course: str, unit: str,
+                   count: int | None = None) -> dict:
+    """Everything the deck or quiz needs, from the database only (no AI): where it is saved, the
+    note text, and what the progress line says ({"making": {"kind", "count"}})."""
+    plan: dict = {"kind": intent.kind, "course": course, "unit": unit, "target": intent.target,
+                  "count": otto_make.quiz_count(count if count is not None else intent.count)}
+    if not course or not unit:
+        return {**plan, "pick": True}
+    chat = otto_make.chat_source(turns, intent.target)
+    _, unit_text, _ = note_store.practice_context(owner, course, unit, ai_tutor.PRACTICE_NOTE_CHARS, exclude_prefix=otto_make.NOTE_PREFIX)
+    notes = otto_make.notes_excerpt(unit_text, intent.target or chat)
+    topic = otto_make.topic_title(conversation.get("title", ""), intent.target, unit)
+    text = note_ingestion.clean_text(otto_make.note_text(topic, chat, notes))
+    plan.update(topic=topic, text=text, from_chat=bool(chat), from_notes=bool(notes))
+    if ai_tutor.note_too_short(text):
+        return {**plan, "too_short": True}
+    plan["making"] = {"kind": intent.kind, "count": ai_tutor.flashcard_target(text) if intent.kind == "flashcards" else plan["count"]}
+    return plan
+
+
+def save_otto_note(owner: str, course: str, unit: str, topic: str, text: str) -> dict:
+    """The "From Otto: <topic>" note holding this text: the existing one when the same text was
+    saved before (so a repeat request reuses its cards and cached quiz), else a new one."""
+    existing = [note for note in note_store.list_notes(owner, course, unit) if otto_make.same_note(note["file_name"], topic)]
+    for note in existing:
+        if note["text"] == text:
+            return note
+    limit_action(owner, "note_upload", NOTE_UPLOADS_PER_DAY, 1440)
+    name = otto_make.note_name(topic, [note["file_name"] for note in existing])
+    return note_store.save_note(owner, course, unit, name, "text/plain", text, len(text.encode("utf-8")))
+
+
+def _error_text(error: HTTPException, fallback: str) -> str:
+    detail = error.detail
+    message = detail.get("message") if isinstance(detail, dict) else detail
+    return message if isinstance(message, str) and message.strip() else fallback
+
+
+def otto_make_reply(owner: str, plan: dict, new_questions: bool = False) -> tuple[str, list[str]]:
+    """Otto's short reply and the attachment for the deck or quiz it made. Never raises for the
+    student's sake: limits, too little material and AI trouble become a friendly reply."""
+    kind = plan["kind"]
+    what = otto_make_what(kind)
+    if plan.get("pick"):
+        return (MAKE_MESSAGES["pick"].format(what="these flashcards" if kind == "flashcards" else "this quiz",
+                                             them="them" if kind == "flashcards" else "it"),
+                [otto_make.pick_attachment(kind, plan["count"])])
+    if plan.get("too_short"):
+        return MAKE_MESSAGES["too_short"].format(what=what), []
+    course, unit, topic = plan["course"], plan["unit"], plan["topic"]
+    sources = "our chat and your notes" if plan["from_chat"] and plan["from_notes"] else "our chat" if plan["from_chat"] else "your notes"
+    try:
+        note = save_otto_note(owner, course, unit, topic, plan["text"])
+        if kind == "flashcards":
+            result = note_flashcards(owner, note["id"], retry=True)
+            if result["status"] == "too_short":
+                return MAKE_MESSAGES["too_short"].format(what=what), []
+            if result["status"] != "ready" or not result["cards"]:
+                return MAKE_MESSAGES["unavailable"].format(what=what), []
+            count = len(result["cards"])
+            return (f"Done — I made {count} {'flashcard' if count == 1 else 'flashcards'} on {topic} from {sources}. "
+                    f"They’re saved in {unit} as “{note['file_name']}”.", [otto_make.deck_attachment(note["id"])])
+        test = make_practice_test(owner, course, unit, plan["count"], None, "", new_questions, (note["text"], [note["id"]]))
+        count = test["question_count"]
+        fresh = "Here’s a new" if new_questions else "Here’s a"
+        return (f"{fresh} {count}-question quiz on {topic} from {sources}. Answer right here — you’ll see after each question "
+                "whether you got it.", [otto_make.quiz_attachment(test["id"], note["id"])])
+    except HTTPException as error:
+        code = error.detail.get("code") if isinstance(error.detail, dict) else ""
+        if code in ("notes_too_short", "no_notes"):
+            return MAKE_MESSAGES["too_short"].format(what=what), []
+        if code == "generation_in_progress":
+            return MAKE_MESSAGES["busy"], []
+        return _error_text(error, MAKE_MESSAGES["unavailable"].format(what=what)), []
+
+
+class OttoMakeRequest(BaseModel):
+    """The inline picker ("which unit?") or "New quiz on this" under a quiz."""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["flashcards", "quiz"]
+    course: str | None = Field(default=None, min_length=1, max_length=120)
+    unit: str | None = Field(default=None, min_length=1, max_length=160)
+    count: int | None = Field(default=None, ge=ai_tutor.PRACTICE_MIN_QUESTIONS, le=ai_tutor.PRACTICE_MAX_QUESTIONS)
+    message_id: int | None = Field(default=None, ge=1, le=MAX_DB_ID)   # Otto's "which unit?" reply, rewritten with the result
+    note_id: str | None = Field(default=None, min_length=1, max_length=64)  # a new quiz from this note
+
+
+@app.post("/api/tutor/conversations/{conversation_id}/make")
+def otto_make_in_chat(conversation_id: Annotated[str, PathParam(min_length=1, max_length=64)], data: OttoMakeRequest,
+                      authorization: Annotated[str | None, Header()] = None):
+    """Make the deck or quiz Otto asked a unit for (message_id: that reply becomes the result), or a
+    new quiz from a quiz's note with new questions (note_id: added as a new reply). Returns the reply."""
+    owner = ai_user(authorization)["id"]
+    limit_action(owner, "otto_make", OTTO_MAKES_PER_HOUR)
+    try:
+        conversation, recent = tutor.conversation_with_history(owner, conversation_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Conversation not found") from error
+    if data.note_id is not None:
+        note = note_store.get_note(owner, data.note_id)
+        if note is None or data.kind != "quiz":
+            raise HTTPException(status_code=404, detail="Note not found")
+        topic = note["file_name"].removeprefix(otto_make.NOTE_PREFIX)
+        plan = {"kind": "quiz", "course": note["course"], "unit": note["unit"], "topic": topic, "text": note["text"],
+                "count": otto_make.quiz_count(data.count), "from_chat": "From our chat with Otto:" in note["text"],
+                "from_notes": "From your notes:" in note["text"]}
+        text, links = otto_make_reply(owner, plan, new_questions=True)
+        return tutor.add_message(owner, conversation_id, "assistant", text, links, model_tier="otto_make")
+    if data.message_id is None or not data.course or not data.unit:
+        raise HTTPException(status_code=400, detail="Pick a course and unit first")
+    index = next((i for i, item in enumerate(recent) if item["id"] == data.message_id and item["role"] == "assistant"), None)
+    if index is None or not any(name.startswith("pick:") for name in recent[index]["attachments"]):
+        raise HTTPException(status_code=404, detail="Message not found")
+    asked = next((item["content"] for item in reversed(recent[:index]) if item["role"] == "user"), "")
+    intent = otto_make.detect_intent(asked) or otto_make.MakeIntent(kind=data.kind, target="", count=None)
+    intent = otto_make.MakeIntent(kind=data.kind, target=intent.target, count=intent.count)
+    plan = otto_make_plan(owner, conversation, recent[:index], intent, data.course.strip(), data.unit.strip(), data.count)
+    text, links = otto_make_reply(owner, plan)
+    try:
+        return tutor.update_reply(owner, conversation_id, data.message_id, text, links, model_tier="otto_make")
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Message not found") from error
+
+
+@app.get("/api/tutor/decks/{note_id}")
+def otto_deck(note_id: Annotated[str, PathParam(min_length=1, max_length=64)], authorization: Annotated[str | None, Header()] = None):
+    """The deck card in Otto's chat: the note's name, course, unit and its saved cards. No AI."""
+    owner = auth.authenticated_user(authorization)["id"]
+    note = note_store.get_note(owner, note_id)
+    if note is None:
+        raise HTTPException(status_code=404, detail="That deck was deleted.")
+    return {"note_id": note_id, "title": note["file_name"], "course": note["course"], "unit": note["unit"],
+            "cards": flashcards.note_cards(owner, note_id)}
 
 
 # --- Practice lab -----------------------------------------------------------------------

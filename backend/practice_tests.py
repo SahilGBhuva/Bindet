@@ -143,6 +143,13 @@ def _public(test, item_rows, now: datetime | None = None) -> dict:
             item.update({"answer": row["answer"], "explanation": row["explanation"], "topic": row["topic"],
                          "student_answer": row["student_answer"] or "", "correct": bool(row["correct"]),
                          "grading_source": row["grading_source"], "feedback": row["feedback"] or ""})
+        elif _is_checked(row):
+            # Checked one at a time (Otto's inline quiz): this item's answer and why are shown now.
+            item.update(checked_item(row))
+        else:
+            hint = hint_for(row)
+            if hint:
+                item["hint"] = hint
         public_items.append(item)
     result["items"] = public_items
     if submitted:
@@ -150,6 +157,48 @@ def _public(test, item_rows, now: datetime | None = None) -> dict:
         result["time_used_s"] = max(0, int((submitted_at - started_at).total_seconds())) if submitted_at and started_at else None
         result["topics"] = topic_breakdown(item_rows)
     return result
+
+
+def _is_checked(row) -> bool:
+    return row["correct"] is not None and row["student_answer"] is not None
+
+
+def _words(value: str) -> set[str]:
+    return {word for word in "".join(char if char.isalnum() else " " for char in (value or "").casefold()).split() if len(word) > 2}
+
+
+def hint_for(row) -> str:
+    """A nudge before answering: the subtopic the question is on, only when the subtopic doesn't
+    share a word with the answer (it would give it away) and is more than a placeholder."""
+    topic = " ".join(str(row["topic"] or "").split())
+    if not topic or topic.casefold() in ("general", "misc", "other"):
+        return ""
+    if _words(topic) & _words(row["answer"]) or _words(topic) <= _words(row["prompt"]):
+        return ""
+    return f"This one is about {topic}."
+
+
+def checked_item(row) -> dict:
+    """One answer checked on its own: whether it was right, the answer and the explanation."""
+    return {"position": row["position"], "checked": True, "student_answer": row["student_answer"] or "", "correct": bool(row["correct"]),
+            "answer": row["answer"], "explanation": row["explanation"], "topic": row["topic"],
+            "grading_source": row["grading_source"], "feedback": row["feedback"] or ""}
+
+
+def record_check(owner_id: str, test_id: str, position: int, result: dict) -> dict | None:
+    """Store one checked answer while the test is still in progress, only the first time (a second
+    check, or one racing the submit, changes nothing). Returns the item row as stored."""
+    init_practice()
+    with _guard(), database.engine().begin() as connection:
+        database._advisory_lock(connection, f"practice:{test_id}")
+        owned = connection.execute(select(tests.c.status).where(tests.c.id == test_id, tests.c.owner_id == owner_id)).scalar_one_or_none()
+        if owned == "in_progress":
+            connection.execute(update(items).where(
+                items.c.test_id == test_id, items.c.position == position, items.c.correct.is_(None),
+            ).values(student_answer=result["student_answer"], correct=result["correct"],
+                     grading_source=result["grading_source"], feedback=result.get("feedback") or None))
+        row = connection.execute(select(items).where(items.c.test_id == test_id, items.c.position == position)).mappings().first()
+    return dict(row) if row is not None and owned is not None else None
 
 
 def _summary(row) -> dict:
