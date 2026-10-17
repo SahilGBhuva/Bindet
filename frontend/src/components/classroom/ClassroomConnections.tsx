@@ -6,7 +6,7 @@ import {
   checkClassroomLink, connectClassroom, disconnectClassroom, LINK_HINTS, listClassroomFeeds,
   notebookWithClassroomCourse, setClassroomNotes, syncClassroom, type ClassroomFeed,
 } from '../../lib/classroom'
-import { loadNotebook, onNotebookChange, saveNotebook, sameName } from '../../lib/session'
+import { COURSE_TONES, loadNotebook, onNotebookChange, saveNotebook, sameName } from '../../lib/session'
 import { useDrawer } from '../../lib/useDrawer'
 import './ClassroomConnections.css'
 
@@ -173,10 +173,10 @@ export function ClassroomConnections({ session }: { session: AuthSession }) {
           </div>
         </div>
         <ol className="classroom__steps" aria-labelledby={ids.steps}>
-          <li>Open <b>Google Calendar</b> on a computer.</li>
-          <li>Click <b>⋮</b> next to the class calendar under “My calendars”.</li>
-          <li>Choose <b>Settings and sharing</b>.</li>
-          <li>Copy the <b>Secret address in iCal format</b> and paste it below.</li>
+          <li><span>Open <b>Google Calendar</b> on a computer.</span></li>
+          <li><span>Click <b>⋮</b> next to the class calendar under “My calendars”.</span></li>
+          <li><span>Choose <b>Settings and sharing</b>.</span></li>
+          <li><span>Copy the <b>Secret address in iCal format</b> and paste it below.</span></li>
         </ol>
         <ul className="classroom__features">
           <li><span className="ui-badge ui-badge--tone ui-tone--violet">Tasks</span> Each assignment becomes a task with its due date, kept in sync. Its priority follows how soon it’s due until you change it yourself.</li>
@@ -232,7 +232,7 @@ export function ClassroomConnections({ session }: { session: AuthSession }) {
         {full ? <p className="settings__hint">You’ve connected {maxFeeds} classes, the most bindet allows. Disconnect one to add another.</p> : null}
         <div className="classroom__actions">
           {status ? <p className="settings__status" role="status">{status}</p> : null}
-          <button type="submit" className={`ui-button ui-button--primary classroom__connect${busy ? ' is-busy' : ''}`} disabled={!canConnect}>
+          <button type="submit" className={`ui-button classroom__primary classroom__connect${busy ? ' is-busy' : ''}`} disabled={!canConnect}>
             {busy ? 'Connecting…' : 'Connect'}
           </button>
         </div>
@@ -250,7 +250,7 @@ export function ClassroomConnections({ session }: { session: AuthSession }) {
               const working = rowBusy[feed.id] ?? ''
               const problem = STATUS_PROBLEM[feed.last_status]
               return (
-                <li key={feed.id} className="ui-panel ui-course-row classroom__feed" style={tone ? { ['--course' as string]: tone } : undefined}>
+                <li key={feed.id} className="ui-panel ui-course-row classroom__feed" style={{ ['--course' as string]: tone ?? COURSE_TONES[0] }}>
                   <div className="classroom__feed-head">
                     <span className="ui-course-mark" aria-hidden="true">{courseInitial(feed.course)}</span>
                     <div className="classroom__feed-text">
@@ -269,7 +269,7 @@ export function ClassroomConnections({ session }: { session: AuthSession }) {
                   </label>
                   {rowError[feed.id] ? <div className="ui-alert" role="alert"><span>{rowError[feed.id]}</span></div> : null}
                   <div className="classroom__feed-actions">
-                    <button type="button" className={`ui-button ui-button--primary ui-button--sm${working === 'sync' ? ' is-busy' : ''}`} disabled={Boolean(working)} onClick={() => void syncNow(feed)}>
+                    <button type="button" className={`ui-button classroom__primary ui-button--sm${working === 'sync' ? ' is-busy' : ''}`} disabled={Boolean(working)} onClick={() => void syncNow(feed)}>
                       {Icon.sync}{working === 'sync' ? 'Syncing…' : 'Sync now'}
                     </button>
                     <button type="button" className="ui-button ui-button--ghost ui-button--sm" disabled={Boolean(working)} onClick={() => setLeaving(feed)}>Disconnect</button>
@@ -305,7 +305,7 @@ function DisconnectDialog({ feed, onCancel, onChoose, busy }: { feed: ClassroomF
         <footer className="ui-dialog__footer classroom__dialog-footer">
           <button type="button" className="ui-button ui-button--ghost" disabled={busy} onClick={cancel}>Cancel</button>
           <button type="button" className="ui-button ui-button--danger" disabled={busy} onClick={() => onChoose(true)}>Delete imported tasks</button>
-          <button type="button" className="ui-button ui-button--primary" disabled={busy} onClick={() => onChoose(false)}>Keep tasks</button>
+          <button type="button" className="ui-button classroom__primary" disabled={busy} onClick={() => onChoose(false)}>Keep tasks</button>
         </footer>
       </div>
     </div>

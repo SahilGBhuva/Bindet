@@ -2,8 +2,17 @@
 
 .classroom { display: grid; gap: var(--space-4); min-width: 0; }
 .classroom .ui-button { border-radius: var(--radius-full); }
-.classroom .ui-button--primary,
-.classroom__dialog .ui-button--primary { color: #ffffff; }
+
+/* The main action: a blue pill with white text (>= 5.3:1 in both themes) and a soft blue shadow. */
+.classroom__primary {
+  border-color: #0b58f5;
+  background: #0b58f5;
+  color: #ffffff;
+  box-shadow: 0 6px 16px -6px color-mix(in srgb, #0b58f5 60%, transparent);
+}
+.classroom__primary:hover { border-color: #0947c7; background: #0947c7; color: #ffffff; }
+.classroom__primary:disabled { box-shadow: none; }
+.classroom__primary.is-busy::after { border-color: #ffffff #ffffff #ffffff transparent; }
 
 /* How-to: a blue-tinted card with an icon chip and numbered steps */
 
@@ -31,6 +40,7 @@
   line-height: 1.45;
   counter-increment: step;
 }
+.classroom__steps li > span { min-width: 0; }
 .classroom__steps li::before {
   content: counter(step);
   display: grid;
