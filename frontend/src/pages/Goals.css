@@ -536,6 +536,32 @@
 :root[data-theme="dark"] .tasks-box[class*="ui-tone--"] .tasks-box__head h2 { color: color-mix(in srgb, var(--tone-text) 70%, #fff); }
 :root[data-theme="dark"] .tasks-box__chip { background: color-mix(in srgb, var(--tone, var(--color-text-secondary)) 80%, #000); }
 
+/* Google Classroom imports: a small teal chip; cancelled ones go quiet. */
+.task-source {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-teal-tint);
+  color: var(--color-teal-text);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+.task-source .tasks-icon { width: 12px; height: 12px; stroke-width: 2; }
+.task-source.is-compact { width: 18px; height: 18px; padding: 0; justify-content: center; }
+.task-source.is-compact .tasks-icon { width: 11px; height: 11px; }
+.task-source.is-cancelled { background: var(--color-surface-sunken); color: var(--color-text-secondary); }
+.task-card.is-cancelled .task-card__title,
+.tasks-cal__row.is-cancelled .tasks-cal__row-title,
+.tasks-cal__chip.is-cancelled .tasks-cal__chip-title { color: var(--color-text-tertiary); }
+.tasks-cal__chip-main .task-source .tasks-icon { color: inherit; }
+:root[data-theme="dark"] .task-source:not(.is-cancelled) { background: color-mix(in srgb, var(--color-teal) 30%, var(--color-surface)); color: color-mix(in srgb, var(--color-teal-text) 70%, #fff); }
+
 /* ---------- calendar ---------- */
 
 /* With nothing open beside it, the calendar takes the whole width. */

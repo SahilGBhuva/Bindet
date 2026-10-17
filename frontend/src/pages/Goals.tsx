@@ -81,7 +81,25 @@ function cardSummary(task: Task, today: string) {
   if (task.due_date) parts.push(`${isOverdue(task, today) ? 'overdue, ' : ''}due ${task.due_date === today ? 'today' : shortDate.format(parseDay(task.due_date))}${task.due_time ? ` at ${timeLabel(task.due_time)}` : ''}`)
   if (task.priority === 'high' || task.priority === 'urgent') parts.push(PRIORITY_LABEL[task.priority].toLowerCase())
   if (task.status === 'done') parts.push('completed')
+  if (fromClassroom(task)) parts.push(task.source_cancelled ? 'from Google Classroom, cancelled' : 'from Google Classroom')
   return parts.join(', ')
+}
+
+/* Imported from Google Classroom (fields may be missing on servers without the import). */
+function fromClassroom(task: Task) {
+  return task.source === 'classroom'
+}
+
+/* The small "Classroom" chip; `compact` shows the icon alone (the name stays in the summary). */
+function ClassroomChip({ task, compact = false }: { task: Task; compact?: boolean }) {
+  if (!fromClassroom(task)) return null
+  const cancelled = !!task.source_cancelled
+  return (
+    <span className={`task-source${cancelled ? ' is-cancelled' : ''}${compact ? ' is-compact' : ''}`} aria-hidden="true"
+      title={cancelled ? 'From Google Classroom · cancelled' : 'From Google Classroom'}>
+      <Icon name="classroom" />{compact ? null : cancelled ? 'Classroom · cancelled' : 'Classroom'}
+    </span>
+  )
 }
 
 function isOverdue(task: Task, today: string) {
@@ -169,7 +187,7 @@ function clearTaskLink() {
 /* ---------- icons ---------- */
 
 type IconName = 'triangle' | 'people' | 'rect' | 'edit' | 'pencil' | 'list' | 'board' | 'close-box' | 'close'
-  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh' | 'calendar' | 'flag' | 'search' | 'tasks'
+  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh' | 'calendar' | 'flag' | 'search' | 'tasks' | 'classroom'
 const ICONS: Record<IconName, ReactNode> = {
   triangle: <path d="M12 5 20 19H4z" />,
   people: <><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M16 5.3a3 3 0 0 1 0 5.4M18 14.4c1.6.7 2.7 2.3 3 4.6" /></>,
@@ -190,6 +208,7 @@ const ICONS: Record<IconName, ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
   flag: <><path d="M6 21V4.5" /><path d="M6 5h11l-2.2 4L17 13H6" /></>,
   search: <><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></>,
+  classroom: <><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5" /><path d="M8.5 20h7M12 16v4M7.5 9h5" /></>,
   tasks: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>,
   calendar: <><rect x="4" y="5.5" width="16" height="14" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></>,
   refresh: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
@@ -782,13 +801,14 @@ function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { 
   const due = dueBadge(task, today)
   const flag = task.priority === 'urgent' || task.priority === 'high'
   return (
-    <li data-task-id={task.id} className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
+    <li data-task-id={task.id} className={`task-card${task.source_cancelled ? ' is-cancelled' : ''}${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
       style={{ '--course': colorFor(task) } as CSSProperties} draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
         <span className="task-card__title">{task.title}</span>
-        {due || flag || task.course ? (
+        {due || flag || task.course || fromClassroom(task) ? (
           <span className="task-card__meta" aria-hidden="true">
+            <ClassroomChip task={task} />
             {due ? <span className={`task-badge is-${due.tone}`}>{due.label}</span> : null}
             {flag ? <span className={`task-flag is-${task.priority}`} title={PRIORITY_LABEL[task.priority]}><Icon name="flag" /></span> : null}
             {task.course ? <span className="task-card__course">{task.course}</span> : null}
@@ -982,7 +1002,7 @@ function CalendarRow({ task, today, selected, color, draggable, onSelect, onPref
   const where = taskWhereLabel(task)
   const mark = task.course || task.group_name || ''
   return (
-    <li data-task-id={task.id} className={`tasks-cal__row${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${selected ? ' is-selected' : ''}`}
+    <li data-task-id={task.id} className={`tasks-cal__row${task.source_cancelled ? ' is-cancelled' : ''}${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${selected ? ' is-selected' : ''}`}
       style={{ '--course': color } as CSSProperties} draggable={draggable || undefined}
       onDragStart={draggable ? (event) => onDragStart(event, task) : undefined} onDragEnd={draggable ? onDragEnd : undefined}>
       <CheckButton task={task} onToggle={onToggle} />
@@ -993,6 +1013,7 @@ function CalendarRow({ task, today, selected, color, draggable, onSelect, onPref
         <span className="tasks-cal__row-text">
           <span className="tasks-cal__row-title">{task.title}</span>
           <span className="tasks-cal__row-meta">
+            <ClassroomChip task={task} />
             {overdue ? <span className="tasks-cal__late">Overdue</span> : null}
             {task.due_time ? <span>{timeLabel(task.due_time)}</span> : null}
             {where ? <span>{where}</span> : null}
@@ -1105,11 +1126,12 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
     const draggable = canDrag && task.can_manage && !task.id.startsWith('temp-')
     return (
       <li key={task.id} data-task-id={task.id} style={{ '--course': colorFor(task) } as CSSProperties}
-        className={`tasks-cal__chip${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${task.id === selectedId ? ' is-selected' : ''}${dragging === task.id ? ' is-dragging' : ''}`}
+        className={`tasks-cal__chip${task.source_cancelled ? ' is-cancelled' : ''}${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${task.id === selectedId ? ' is-selected' : ''}${dragging === task.id ? ' is-dragging' : ''}`}
         draggable={draggable || undefined} onDragStart={draggable ? (event) => dragStart(event, task) : undefined} onDragEnd={draggable ? dragEnd : undefined}>
         <CheckButton task={task} onToggle={onToggleDone} tabIndex={active ? 0 : -1} />
         <button type="button" className="tasks-cal__chip-main" tabIndex={active ? 0 : -1} disabled={task.id.startsWith('temp-')}
           onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} title={[task.due_time ? timeLabel(task.due_time) : '', task.title, taskWhereLabel(task)].filter(Boolean).join(' · ')}>
+          <ClassroomChip task={task} compact />
           {task.group_id ? <Icon name="people" /> : null}
           {task.due_time && mode === 'week' ? <time>{timeLabel(task.due_time)}</time> : null}
           <span className="tasks-cal__chip-title">{task.title}</span>
@@ -1155,6 +1177,7 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
                 <button type="button" onClick={() => { if (task.due_date) go(task.due_date, task.due_date > focus ? 1 : -1); onSelect(task.id) }}>
                   <span className="tasks-cal__next-dot" aria-hidden="true" />
                   <span className="tasks-cal__next-title">{task.title}</span>
+                  <ClassroomChip task={task} compact />
                   <span className="tasks-cal__next-when">{dueCountdown(task.due_date ?? today, today)}{task.due_time && task.due_date === today ? ` · ${timeLabel(task.due_time)}` : ''}</span>
                 </button>
               </li>
