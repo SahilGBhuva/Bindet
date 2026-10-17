@@ -786,3 +786,12 @@ button.tutor-chip:hover { background: color-mix(in srgb, var(--course, var(--col
 .guide-card__kind { color: var(--tone-text); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
 .guide-card__title { font-size: var(--text-base); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
 .guide-card__open { flex: none; color: var(--color-text-secondary); font-size: var(--text-sm); }
+
+/* Under a reply: Make flashcards (violet) and Practice test (blue) start Otto's deck or quiz. */
+.tutor-followups__chip.is-deck { border-color: color-mix(in srgb, var(--color-violet) 35%, var(--color-border)); color: var(--color-violet-text); }
+.tutor-followups__chip.is-quiz { border-color: color-mix(in srgb, var(--color-blue) 35%, var(--color-border)); color: var(--color-blue-text); }
+.tutor-followups__chip.is-deck:hover:not(:disabled) { background: color-mix(in srgb, var(--color-violet) 10%, var(--color-surface)); color: var(--color-violet-text); }
+.tutor-followups__chip.is-quiz:hover:not(:disabled) { background: color-mix(in srgb, var(--color-blue) 10%, var(--color-surface)); color: var(--color-blue-text); }
+.tutor-followups__counts { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.tutor-message__body > .otto-card,
+.tutor-message__body > .inline-quiz { min-width: 0; }

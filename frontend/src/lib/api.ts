@@ -560,7 +560,13 @@ export type PracticeItem = {
   correct?: boolean
   grading_source?: 'deterministic' | 'ai'
   feedback?: string
+  // Checked one at a time (Otto's inline quiz): the answer and explanation arrive with it.
+  checked?: boolean
+  // A nudge before answering (the subtopic), when it doesn't give the answer away.
+  hint?: string
 }
+/* One answer checked on its own (Otto's inline quiz). */
+export type PracticeCheck = Required<Pick<PracticeItem, 'position' | 'student_answer' | 'correct' | 'answer' | 'explanation' | 'feedback'>> & { checked: true; topic: string }
 export type PracticeTopic = { topic: string; correct: number; total: number; weak: boolean }
 export type PracticeTest = {
   id: string
@@ -630,6 +636,15 @@ export function submitPracticeTest(testId: string, answers: { position: number; 
   return request<PracticeTest>(`/api/practice-tests/${encodeURIComponent(testId)}/submit`, {
     method: 'POST',
     body: JSON.stringify({ answers }),
+    timeoutMs: AI_TIMEOUTS.practiceGrade,
+  }, accessToken)
+}
+
+/* Checks one answer now and locks it (Otto's inline quiz). Short answers may need the grader. */
+export function checkPracticeAnswer(testId: string, position: number, answer: string, accessToken?: string) {
+  return request<PracticeCheck>(`/api/practice-tests/${encodeURIComponent(testId)}/check`, {
+    method: 'POST',
+    body: JSON.stringify({ position, answer }),
     timeoutMs: AI_TIMEOUTS.practiceGrade,
   }, accessToken)
 }
@@ -967,6 +982,8 @@ export type TutorStreamHandlers = {
   /* Text that arrived since the last call. Batched to at most one call per frame. */
   onDelta?: (text: string) => void
   onDone?: (result: { message: TutorMessage; partial?: boolean }) => void
+  /* Otto is making a flashcard deck or a quiz for this reply ("Making 10 flashcards…"). */
+  onMaking?: (making: OttoMaking) => void
   /* After the reply: Otto named the new conversation. */
   onTitle?: (result: { conversation_id: string; title: string }) => void
   /* After the reply: Otto saved something to its memory (notice is true the first time ever). */
@@ -1015,6 +1032,26 @@ export function updateTutorConversation(accessToken: string, conversationId: str
 /* Thumbs up (1), down (-1) or cleared (0) on one of Otto's replies. */
 export function rateTutorMessage(accessToken: string, messageId: number, rating: -1 | 0 | 1) {
   return request<{ message_id: number; rating: number }>(`/api/tutor/messages/${messageId}/rating`, { method: 'PUT', body: JSON.stringify({ rating }) }, accessToken)
+}
+
+/* ---- Otto makes flashcards and quizzes in the chat ------------------------ */
+
+export type OttoMaking = { kind: 'flashcards' | 'quiz'; count: number }
+export type OttoDeck = { note_id: string; title: string; course: string; unit: string; cards: Flashcard[] }
+
+/* A deck Otto made in the chat: its note's name, place and cards. Never calls the AI. */
+export function getOttoDeck(accessToken: string, noteId: string, signal?: AbortSignal) {
+  return request<OttoDeck>(`/api/tutor/decks/${encodeURIComponent(noteId)}`, { signal }, accessToken)
+}
+
+/*
+ * Makes the deck or quiz Otto asked a unit for (messageId: that reply becomes the result), or a
+ * new quiz with new questions from a quiz's note (noteId: a new reply). Returns Otto's reply.
+ */
+export function ottoMake(accessToken: string, conversationId: string, body: { kind: 'flashcards' | 'quiz'; course?: string; unit?: string; count?: number; message_id?: number; note_id?: string }) {
+  return request<TutorMessage>(`/api/tutor/conversations/${encodeURIComponent(conversationId)}/make`, {
+    method: 'POST', body: JSON.stringify(body), timeoutMs: AI_TIMEOUTS.practiceTest,
+  }, accessToken)
 }
 
 /* Saves one of Otto's replies (once) as a note in a unit; its flashcards then come from generateNoteFlashcards. */
@@ -1174,6 +1211,7 @@ export function streamTutorMessage(
     if (finished) return
     const payload = JSON.parse(raw)
     if (name === 'meta') handlers.onMeta?.(payload)
+    else if (name === 'making') handlers.onMaking?.(payload)
     else if (name === 'user') handlers.onSaved?.(payload.user_message)
     else if (name === 'delta') {
       pending += payload.text
