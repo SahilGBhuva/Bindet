@@ -1043,12 +1043,16 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
     gridRef.current?.querySelector<HTMLElement>(`[data-day="${focus}"]`)?.focus()
   }, [focus])
 
+  // Opening a day (Enter, +N more) moves focus to its list once the list shows that day.
+  const [opened, setOpened] = useState(0)
+  useEffect(() => {
+    if (!opened) return
+    dayListRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true })
+    dayListRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [opened])
   const openDay = (day: string) => {
     setFocus(day)
-    window.requestAnimationFrame(() => {
-      dayListRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true })
-      dayListRef.current?.scrollIntoView({ block: 'nearest' })
-    })
+    setOpened((count) => count + 1)
   }
 
   const onGridKey = (event: ReactKeyboardEvent) => {
@@ -1193,7 +1197,6 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
                       className={`tasks-cal__day${outside ? ' is-outside' : ''}${day === today ? ' is-today' : ''}${isWeekend(day) ? ' is-weekend' : ''}${active ? ' is-active' : ''}${over === day ? ' is-over' : ''}${day < today ? ' is-past' : ''}`}
                       onClick={(event) => onCellClick(event, day)} {...dropTarget(day, day)}>
                       <span className="tasks-cal__num" aria-hidden="true">
-                        {mode === 'week' && !phone ? <small>{weekdayShort.format(date)}</small> : null}
                         <b>{date.getDate()}</b>
                       </span>
                       {phone ? (items.length ? dots(items) : null) : (
@@ -1222,8 +1225,9 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
       </div>
 
       <div className="tasks-cal__lists">
-        <section ref={dayListRef} className={`tasks-cal__day-list${over === 'focus' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-day-title" {...dropTarget('focus', focus)}>
+        <section ref={dayListRef} className={`tasks-cal__day-list ui-tone--blue${over === 'focus' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-day-title" {...dropTarget('focus', focus)}>
           <header className="tasks-cal__list-head">
+            <span className="tasks-box__chip" aria-hidden="true"><Icon name="calendar" /></span>
             <h3 id="tasks-cal-day-title" tabIndex={-1}>{focus === today ? 'Today · ' : ''}{longDate.format(parseDay(focus))}</h3>
             {focusTasks.length ? <span className="tasks-box__count">{focusTasks.length}</span> : null}
           </header>
@@ -1241,8 +1245,9 @@ function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSe
           )}
         </section>
 
-        <section ref={trayRef} className={`tasks-cal__tray${over === 'none' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-tray-title" {...dropTarget('none', null)}>
+        <section ref={trayRef} className={`tasks-cal__tray ui-tone--amber${over === 'none' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-tray-title" {...dropTarget('none', null)}>
           <header className="tasks-cal__list-head">
+            <span className="tasks-box__chip" aria-hidden="true"><Icon name="clock" /></span>
             <h3 id="tasks-cal-tray-title" tabIndex={-1}>No due date</h3>
             {undated.length ? <span className="tasks-box__count">{undated.length}</span> : null}
           </header>

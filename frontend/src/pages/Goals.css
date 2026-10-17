@@ -653,7 +653,6 @@
 .tasks-cal__day.is-over { background: var(--color-brand-tint); box-shadow: inset 0 0 0 2px var(--color-brand); }
 
 .tasks-cal__num { display: flex; align-items: center; gap: 6px; min-height: 26px; padding-left: 2px; }
-.tasks-cal__num small { color: var(--color-text-secondary); font-size: var(--text-xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: .04em; }
 .tasks-cal__num b {
   display: inline-grid;
   place-items: center;
@@ -842,7 +841,7 @@
 .tasks-cal__tray { border-style: dashed; }
 .tasks-cal__day-list.is-over,
 .tasks-cal__tray.is-over { border-color: var(--color-brand); background: var(--color-brand-tint); }
-.tasks-cal__list-head { display: flex; align-items: baseline; gap: var(--space-1); }
+.tasks-cal__list-head { display: flex; align-items: center; gap: var(--space-2); }
 .tasks-cal__list-head h3 { margin: 0; color: var(--color-text); font-size: var(--text-sm); font-weight: var(--weight-semibold); outline-offset: 2px; }
 .tasks-cal__list-empty,
 .tasks-cal__list-hint { margin: 0; color: var(--color-text-secondary); font-size: var(--text-xs); }
