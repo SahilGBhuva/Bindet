@@ -241,7 +241,7 @@ export function InlineQuiz({ testId, accessToken, title, onNewQuiz, fullTest = f
           <button type="button" className="inline-quiz__hint-toggle" aria-expanded={hintOpen} onClick={() => setHintOpen((open) => !open)}>
             {hintOpen ? 'Hide hint' : 'Show hint'}
           </button>
-          {hintOpen ? <p>{item.hint}</p> : null}
+          {hintOpen ? <p><MathText text={item.hint} /></p> : null}
         </div>
       ) : null}
       {multiple ? (
