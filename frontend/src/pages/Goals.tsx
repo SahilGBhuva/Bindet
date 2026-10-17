@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import {
   ApiError, addTaskChecklistItem, addTaskComment, addTaskLink, createTask, deleteTask, deleteTaskAttachment, deleteTaskChecklistItem,
   getCachedFriends, getCachedStudyGroups, getCachedTasks, getFriends, getStudyGroups, getTask, getTasks, parseServerTime,
@@ -6,17 +6,19 @@ import {
   type SocialNotification, type StudyGroup, type Task, type TaskDetail, type TaskInput, type TaskPriority, type TaskStatus,
 } from '../lib/api'
 import type { AuthSession } from '../lib/auth'
-import { loadNotebook } from '../lib/session'
+import { loadNotebook, withCourseTones } from '../lib/session'
+import { addMonths, daysBetween, dueCountdown, groupByDay, isWeekend, monthGrid, monthStart, moveDay, sameMonth, weekDays, weekStart } from '../lib/calendar'
 import { addDays, formatClockTime, isoDay, lowerMeridiem, parseDay } from '../lib/time'
-import { toneForName } from '../lib/tones'
+import { courseInitial, toneForName, type Tone } from '../lib/tones'
+import { parseQuickAdd } from '../lib/quickAdd'
 import { useDrawer } from '../lib/useDrawer'
 import { useAnnounce } from '../lib/announce'
 import './Goals.css'
 
 /*
- * Tasks, drawn after the owner's sketch: a small "Tasks" title, three tiny tools
- * (settings, list/board, show completed), today's date, the My Tasks / Group Tasks /
- * Calendar tabs, two compact boxes (To do and Assigned) on the left and the selected
+ * Tasks, drawn after the owner's sketch: a small "Tasks" title with Refresh and the
+ * one primary "Add task" action, today's date, the My Tasks / Group Tasks / Calendar
+ * tabs, a labeled view bar (List / Board, Show completed), two compact boxes (To do and Assigned) on the left and the selected
  * task's details card on the right. Everything is server data: the server checks
  * ownership and group permissions (can_edit / can_manage / can_delete) and the UI follows them.
  * Cached lists render first and refresh in the background; edits apply optimistically
@@ -25,7 +27,7 @@ import './Goals.css'
 
 type Tab = 'mine' | 'group' | 'calendar'
 type View = 'list' | 'board'
-type Draft = { due_date?: string; status?: TaskStatus; group_id?: string | null }
+type Draft = { due_date?: string; status?: TaskStatus; group_id?: string | null; title?: string; course?: string }
 type Toast = { text: string; undo?: () => void; error?: boolean }
 type Counts = Partial<Pick<Task, 'checklist_total' | 'checklist_done' | 'comment_count' | 'attachment_count'>>
 
@@ -34,11 +36,11 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'group', label: 'Group Tasks', icon: 'people' },
   { id: 'calendar', label: 'Calendar', icon: 'rect' },
 ]
-const STATUSES: { id: TaskStatus; label: string }[] = [
-  { id: 'todo', label: 'To do' },
-  { id: 'in_progress', label: 'In progress' },
-  { id: 'review', label: 'Final check' },
-  { id: 'done', label: 'Done' },
+const STATUSES: { id: TaskStatus; label: string; tone: Tone; icon: IconName }[] = [
+  { id: 'todo', label: 'To do', tone: 'blue', icon: 'dot-circle' },
+  { id: 'in_progress', label: 'In progress', tone: 'amber', icon: 'clock' },
+  { id: 'review', label: 'Final check', tone: 'violet', icon: 'search' },
+  { id: 'done', label: 'Done', tone: 'green', icon: 'check' },
 ]
 const PRIORITIES: TaskPriority[] = ['low', 'medium', 'high', 'urgent']
 const PRIORITY_LABEL: Record<TaskPriority, string> = { low: 'Low priority', medium: 'Medium priority', high: 'High priority', urgent: 'Urgent' }
@@ -46,7 +48,6 @@ const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium
 const UNDO_MS = 5000
 const PHONE_QUERY = '(max-width: 860px)'
 
-const monthDay = new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' })
 const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 const weekdayLong = new Intl.DateTimeFormat(undefined, { weekday: 'long' })
 const weekdayDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
@@ -80,11 +81,38 @@ function cardSummary(task: Task, today: string) {
   if (task.due_date) parts.push(`${isOverdue(task, today) ? 'overdue, ' : ''}due ${task.due_date === today ? 'today' : shortDate.format(parseDay(task.due_date))}${task.due_time ? ` at ${timeLabel(task.due_time)}` : ''}`)
   if (task.priority === 'high' || task.priority === 'urgent') parts.push(PRIORITY_LABEL[task.priority].toLowerCase())
   if (task.status === 'done') parts.push('completed')
+  if (fromClassroom(task)) parts.push(task.source_cancelled ? 'from Google Classroom, cancelled' : 'from Google Classroom')
   return parts.join(', ')
+}
+
+/* Imported from Google Classroom (fields may be missing on servers without the import). */
+function fromClassroom(task: Task) {
+  return task.source === 'classroom'
+}
+
+/* The small "Classroom" chip; `compact` shows the icon alone (the name stays in the summary). */
+function ClassroomChip({ task, compact = false }: { task: Task; compact?: boolean }) {
+  if (!fromClassroom(task)) return null
+  const cancelled = !!task.source_cancelled
+  return (
+    <span className={`task-source${cancelled ? ' is-cancelled' : ''}${compact ? ' is-compact' : ''}`} aria-hidden="true"
+      title={cancelled ? 'From Google Classroom · cancelled' : 'From Google Classroom'}>
+      <Icon name="classroom" />{compact ? null : cancelled ? 'Classroom · cancelled' : 'Classroom'}
+    </span>
+  )
 }
 
 function isOverdue(task: Task, today: string) {
   return task.status !== 'done' && !!task.due_date && task.due_date < today
+}
+
+/* The colored due badge on cards: red overdue, orange today, amber in the next three days, plain later. */
+function dueBadge(task: Task, today: string): { label: string; tone: 'danger' | 'orange' | 'amber' | 'plain' } | null {
+  if (!task.due_date || task.status === 'done') return null
+  if (task.due_date < today) return { label: 'Overdue', tone: 'danger' }
+  if (task.due_date === today) return { label: task.due_time ? `Today ${timeLabel(task.due_time)}` : 'Today', tone: 'orange' }
+  if (task.due_date <= addDays(today, 3)) return { label: task.due_date === addDays(today, 1) ? 'Tomorrow' : weekdayLong.format(parseDay(task.due_date)).slice(0, 3), tone: 'amber' }
+  return { label: shortDate.format(parseDay(task.due_date)), tone: 'plain' }
 }
 
 function sortTasks(list: Task[]) {
@@ -158,18 +186,16 @@ function clearTaskLink() {
 
 /* ---------- icons ---------- */
 
-type IconName = 'triangle' | 'people' | 'rect' | 'square-plus' | 'edit' | 'pencil' | 'list' | 'board' | 'settings' | 'close-box' | 'close'
-  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link'
+type IconName = 'triangle' | 'people' | 'rect' | 'edit' | 'pencil' | 'list' | 'board' | 'close-box' | 'close'
+  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh' | 'calendar' | 'flag' | 'search' | 'tasks' | 'classroom'
 const ICONS: Record<IconName, ReactNode> = {
   triangle: <path d="M12 5 20 19H4z" />,
   people: <><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M16 5.3a3 3 0 0 1 0 5.4M18 14.4c1.6.7 2.7 2.3 3 4.6" /></>,
   rect: <rect x="3.5" y="6.5" width="17" height="11" rx="1.5" />,
-  'square-plus': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M12 8.5v7M8.5 12h7" /></>,
   edit: <><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /><path d="m17.5 3.5 3 3L12 15l-4 1 1-4z" /></>,
   pencil: <path d="m15.5 4.5 4 4L9 19l-5 1 1-5z" />,
   list: <path d="M5 7h14M5 12h14M5 17h14" />,
   board: <><rect x="3.5" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="11" rx="1.5" /><rect x="16.5" y="4" width="4" height="7" rx="1.5" /></>,
-  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
   'close-box': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m9 9 6 6M15 9l-6 6" /></>,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
@@ -179,6 +205,13 @@ const ICONS: Record<IconName, ReactNode> = {
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   'chevron-left': <path d="m14.5 6-6 6 6 6" />,
   'chevron-right': <path d="m9.5 6 6 6-6 6" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  flag: <><path d="M6 21V4.5" /><path d="M6 5h11l-2.2 4L17 13H6" /></>,
+  search: <><circle cx="11" cy="11" r="6" /><path d="m20 20-4.5-4.5" /></>,
+  classroom: <><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5" /><path d="M8.5 20h7M12 16v4M7.5 9h5" /></>,
+  tasks: <><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>,
+  calendar: <><rect x="4" y="5.5" width="16" height="14" rx="2" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></>,
+  refresh: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
 }
 
@@ -188,6 +221,69 @@ function Icon({ name }: { name: IconName }) {
 
 function Avatar({ name }: { name: string }) {
   return <span className={`ui-avatar tasks-avatar ui-tone--${toneForName(name)}`} title={name} aria-hidden="true">{initials(name)}</span>
+}
+
+/* ---------- one-line quick add ---------- */
+
+const chipDate = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+
+/* "Bio lab report due Friday" → a task for Biology due Friday. The parts it understood show as
+   chips that can be removed (the words then stay in the title); Enter saves; More options opens
+   the full form filled in. */
+function QuickAddBar({ today, courses, colorFor, onSave, onMore }: {
+  today: string; courses: string[]; colorFor: (task: Task) => string
+  onSave: (input: TaskInput & { title: string }) => void; onMore: (draft: Draft) => void
+}) {
+  const [text, setText] = useState('')
+  const [ignoreDate, setIgnoreDate] = useState(false)
+  const [ignoreCourse, setIgnoreCourse] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const parsed = parseQuickAdd(text, { today, courses, ignoreDate, ignoreCourse })
+  const typed = text.trim().length > 0
+  const reset = () => { setText(''); setIgnoreDate(false); setIgnoreCourse(false) }
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!typed) return
+    onSave({ title: parsed.title, due_date: parsed.due_date, course: parsed.course ?? '' })
+    reset()
+  }
+  const days = parsed.due_date ? daysBetween(today, parsed.due_date) : null
+  const dateTone = days === null ? '' : days < 0 ? 'is-late' : days === 0 ? 'ui-tone--orange' : days <= 3 ? 'ui-tone--amber' : 'ui-tone--blue'
+  return (
+    <form className="tasks-quick" onSubmit={submit}>
+      <div className="tasks-quick__field">
+        <span className="tasks-quick__icon" aria-hidden="true"><Icon name="plus" /></span>
+        <input ref={inputRef} className="tasks-quick__input" value={text} maxLength={200} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done"
+          placeholder="Add an assignment… e.g. Bio lab report due Friday" aria-label="Add an assignment" aria-describedby="tasks-quick-preview"
+          onChange={(event) => { setText(event.target.value); if (!event.target.value.trim()) { setIgnoreDate(false); setIgnoreCourse(false) } }}
+          onKeyDown={(event) => { if (event.key === 'Escape' && text) { event.preventDefault(); event.stopPropagation(); reset() } }} />
+        <button type="submit" className="ui-button ui-button--sm tasks-quick__save" disabled={!typed}>Add</button>
+      </div>
+      <div className="tasks-quick__preview" id="tasks-quick-preview">
+        {typed ? (
+          <>
+            <span className="tasks-quick__title"><span className="sr-only">Will add </span>“{parsed.title}”</span>
+            {parsed.course ? (
+              <span className="tasks-quick__chip is-course" style={{ '--course': colorFor({ course: parsed.course } as Task) } as CSSProperties}>
+                <span className="ui-course-mark ui-course-mark--sm" aria-hidden="true">{courseInitial(parsed.course)}</span>
+                <span><span className="sr-only">Course: </span>{parsed.course}</span>
+                <button type="button" aria-label={`Remove course ${parsed.course}`} title="Remove course" onClick={() => { setIgnoreCourse(true); inputRef.current?.focus() }}><Icon name="close" /></button>
+              </span>
+            ) : null}
+            {parsed.due_date ? (
+              <span className={`tasks-quick__chip is-date ${dateTone}`}>
+                <Icon name="calendar" />
+                <span><span className="sr-only">Due </span>{chipDate.format(parseDay(parsed.due_date))} · {dueCountdown(parsed.due_date, today)}</span>
+                <button type="button" aria-label="Remove due date" title="Remove due date" onClick={() => { setIgnoreDate(true); inputRef.current?.focus() }}><Icon name="close" /></button>
+              </span>
+            ) : <span className="tasks-quick__none">No due date</span>}
+          </>
+        ) : <span className="tasks-quick__tip">Add a date like “tomorrow”, “Fri” or “Oct 24”, and a course like “Bio”.</span>}
+        <button type="button" className="ui-link tasks-quick__more"
+          onClick={() => { onMore(typed ? { title: parsed.title, due_date: parsed.due_date ?? undefined, course: parsed.course ?? undefined } : {}); reset() }}>More options</button>
+      </div>
+    </form>
+  )
 }
 
 /* ---------- page ---------- */
@@ -210,7 +306,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [toast, setToast] = useState<Toast | null>(null)
   const [notice, setNotice] = useState<SocialNotification | null>(() => token ? latestTaskNotice(getCachedFriends(token)?.notifications) : null)
   const [dismissedNotice, setDismissedNotice] = useState(() => { try { return localStorage.getItem('bindit:tasks:dismissed-notice') ?? '' } catch { return '' } })
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [today, setToday] = useState(() => isoDay(new Date()))
   // A tab left open past midnight moves on to the new day (Today, overdue flags, the calendar).
   useEffect(() => {
@@ -227,8 +322,8 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const pendingDetails = useRef(new Set<string>())
   const pendingDeletes = useRef(new Map<string, { timer: number; task: Task }>())
   const panelRef = useRef<HTMLElement>(null)
-  const settingsRef = useRef<HTMLDivElement>(null)
-  const courses = useMemo(() => loadNotebook().courses.map((item) => item.name), [])
+  const notebookCourses = useMemo(() => loadNotebook().courses, [])
+  const courses = useMemo(() => notebookCourses.map((item) => item.name), [notebookCourses])
 
   const setTab = (next: Tab) => { setTabState(next); writePref('bindit:tasks:tab', next) }
   const setView = (next: View) => { setViewState(next); writePref('bindit:tasks:view', next) }
@@ -276,14 +371,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
     }
   }, [token])
 
-  /* The settings menu closes on an outside click. */
-  useEffect(() => {
-    if (!settingsOpen) return
-    const onPointer = (event: PointerEvent) => { if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false) }
-    document.addEventListener('pointerdown', onPointer)
-    return () => document.removeEventListener('pointerdown', onPointer)
-  }, [settingsOpen])
-
   const closePanel = useCallback(() => { setSelectedId(null); setDraft(null); setPanelClosed(true) }, [])
 
   useEffect(() => {
@@ -295,10 +382,12 @@ export function Goals({ session }: { session: AuthSession | null }) {
 
   /* On phones the panel is a drawer: focus moves into it when a task opens, the page behind
      stays still, Tab stays inside, and focus returns to the task card when it closes. */
-  useDrawer({ open: phone && Boolean(selectedId || draft), onClose: closePanel, panel: panelRef, autoFocus: false })
+  // The calendar keeps its full width on every screen, so there the details open as a drawer too.
+  const asDrawer = phone || tab === 'calendar'
+  useDrawer({ open: asDrawer && Boolean(selectedId || draft), onClose: closePanel, panel: panelRef, autoFocus: false })
   useEffect(() => {
-    if (phone && selectedId && !draft) panelRef.current?.focus({ preventScroll: true })
-  }, [phone, selectedId, draft])
+    if (asDrawer && selectedId && !draft) panelRef.current?.focus({ preventScroll: true })
+  }, [asDrawer, selectedId, draft])
 
   const loadDetail = useCallback((taskId: string) => {
     if (!token || taskId.startsWith('temp-') || pendingDetails.current.has(taskId)) return
@@ -430,7 +519,8 @@ export function Goals({ session }: { session: AuthSession | null }) {
     })
   }, [token, replaceTask])
 
-  const create = useCallback(async (input: TaskInput & { title: string }) => {
+  // open: false (calendar quick add) saves without opening the new task.
+  const create = useCallback(async (input: TaskInput & { title: string }, open = true) => {
     if (!token) return
     const tempId = `temp-${Date.now()}`
     const group = groups.find((item) => item.id === input.group_id)
@@ -447,12 +537,15 @@ export function Goals({ session }: { session: AuthSession | null }) {
       completed_at: null, can_edit: false, can_delete: false, can_manage: false,
     }
     setTasks((current) => [placeholder, ...current])
-    setDraft(null)
-    setSelectedId(tempId)
+    if (open) {
+      setDraft(null)
+      setSelectedId(tempId)
+    }
     try {
       const saved = await createTask(input, token)
       setTasks((current) => current.map((task) => task.id === tempId ? saved : task))
       setSelectedId((current) => current === tempId ? saved.id : current)
+      if (!open) setToast({ text: `Added “${saved.title}”${saved.due_date ? ` for ${shortDate.format(parseDay(saved.due_date))}` : ''}.` })
     } catch (error) {
       setTasks((current) => current.filter((task) => task.id !== tempId))
       setSelectedId((current) => current === tempId ? null : current)
@@ -501,8 +594,35 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const todayDate = parseDay(today)
   const defaultGroup = tab === 'group' ? groups[0]?.id ?? null : null
 
+  /* Calendar colors: each course keeps its notebook color; courses only seen on tasks get the
+     notebook's own stable pick, avoiding colors already taken. Then the group's tone, then ink. */
+  const calendarCourses = useMemo(() => {
+    const names = new Map<string, string>()
+    for (const name of [...courses, ...tasks.map((task) => task.course)]) if (name.trim() && !names.has(name.trim().toLowerCase())) names.set(name.trim().toLowerCase(), name.trim())
+    return [...names.values()].sort((a, b) => a.localeCompare(b))
+  }, [courses, tasks])
+  const courseTones = useMemo(() => {
+    const known = new Set(notebookCourses.map((item) => item.name.toLowerCase()))
+    const toned = withCourseTones([...notebookCourses, ...calendarCourses.filter((name) => !known.has(name.toLowerCase())).map((name) => ({ name, units: [] }))])
+    return new Map(toned.map((item) => [item.name.toLowerCase(), item.tone ?? '']))
+  }, [notebookCourses, calendarCourses])
+  const colorFor = useCallback((task: Task) => {
+    if (task.course) return courseTones.get(task.course.trim().toLowerCase()) || 'var(--color-text-tertiary)'
+    if (task.group_name) return `var(--color-${toneForName(task.group_name)})`
+    return 'var(--color-text-tertiary)'
+  }, [courseTones])
+
+  /* The header's at-a-glance numbers, over the student's own tasks (personal and assigned). */
+  const weekAgo = addDays(today, -6)
+  const stats: { label: string; value: number; tone: Tone | 'danger'; icon: IconName }[] = [
+    { label: 'Due today', value: mine.filter((task) => task.status !== 'done' && task.due_date === today).length, tone: 'orange', icon: 'clock' },
+    { label: 'Overdue', value: mine.filter((task) => isOverdue(task, today)).length, tone: 'danger', icon: 'flag' },
+    { label: 'Next 7 days', value: mine.filter((task) => task.status !== 'done' && !!task.due_date && task.due_date > today && task.due_date <= addDays(today, 7)).length, tone: 'blue', icon: 'calendar' },
+    { label: 'Done this week', value: mine.filter((task) => task.status === 'done' && !!task.completed_at && isoDay(new Date(parseServerTime(task.completed_at))) >= weekAgo).length, tone: 'green', icon: 'check' },
+  ]
+
   const panel = draft
-    ? <TaskComposer draft={draft} groups={groups} me={me} onCancel={closePanel} onCreate={(input) => void create(input)} />
+    ? <TaskComposer draft={draft} groups={groups} me={me} courses={calendarCourses} onCancel={closePanel} onCreate={(input) => void create(input)} />
     : selected
       ? <TaskPanel
           key={selected.id}
@@ -522,14 +642,41 @@ export function Goals({ session }: { session: AuthSession | null }) {
           onError={(text) => setToast({ text, error: true })}
         />
       : null
-  const drawerOpen = phone && !!panel
+  const drawerOpen = asDrawer && !!panel
 
-  const card: CardProps = { today, selectedId: activeId, onSelect: select, onPrefetch: loadDetail }
+  // The calendar takes the full width; a task opens over it in a drawer.
+  const calendarFull = tab === 'calendar' && !phone
+
+  const card: CardProps = { today, selectedId: activeId, onSelect: select, onPrefetch: loadDetail, colorFor }
 
   return (
     <div className="ui-page tasks-page">
-      <div className="tasks-sheet">
-        <h1 className="tasks-title">Tasks</h1>
+      <div className={`tasks-sheet${calendarFull ? ' is-full' : ''}`}>
+        <header className="tasks-hero">
+          <div className="tasks-hero__top">
+            <span className="tasks-hero__icon" aria-hidden="true"><Icon name="tasks" /></span>
+            <div className="tasks-hero__text">
+              <h1 className="tasks-title">Tasks</h1>
+              <p className="tasks-hero__date"><span className="sr-only">Today is </span>{longDate.format(todayDate)}</p>
+            </div>
+            <div className="tasks-hero__actions">
+              <button type="button" className="tasks-icon-button tasks-hero__refresh" onClick={() => setReload((count) => count + 1)} aria-label="Refresh tasks" title="Refresh tasks"><Icon name="refresh" /></button>
+              <button type="button" className="ui-button tasks-add" onClick={() => compose({ group_id: defaultGroup })}><Icon name="plus" />Add task</button>
+            </div>
+          </div>
+          <ul className="tasks-stats" aria-label="Your tasks at a glance">
+            {stats.map((item) => (
+              <li key={item.label} className={`tasks-stat ${item.tone === 'danger' ? 'is-danger' : `ui-tone--${item.tone}`}`}>
+                <span className="tasks-stat__icon" aria-hidden="true"><Icon name={item.icon} /></span>
+                <span className="tasks-stat__label">{item.label}</span>
+                <strong className="tasks-stat__value">{item.value}</strong>
+              </li>
+            ))}
+          </ul>
+          <QuickAddBar today={today} courses={calendarCourses} colorFor={colorFor}
+            onSave={(input) => void create({ ...input, group_id: tab === 'group' ? defaultGroup : null }, false)}
+            onMore={(input) => compose({ ...input, group_id: tab === 'group' ? defaultGroup : null })} />
+        </header>
 
         {visibleNotice ? (
           <div className="tasks-notice" title={lowerMeridiem(stamp.format(new Date(parseServerTime(visibleNotice.created_at))))}>
@@ -540,37 +687,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
         ) : null}
 
         <div className="tasks-main">
-          <div className="tasks-tools">
-            <div className="tasks-settings" ref={settingsRef}>
-              <button type="button" className="tasks-icon-button" aria-label="Task settings" title="Task settings" aria-expanded={settingsOpen} aria-controls="tasks-settings-menu" onClick={() => setSettingsOpen((open) => !open)}><Icon name="settings" /></button>
-              {settingsOpen ? (
-                <div id="tasks-settings-menu" className="ui-menu tasks-settings__menu" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setSettingsOpen(false) } }}>
-                  <label className="tasks-settings__option">
-                    <input type="checkbox" className="ui-checkbox" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} autoFocus />
-                    Show completed tasks
-                  </label>
-                  <label className="tasks-settings__option">
-                    <input type="checkbox" className="ui-checkbox" checked={view === 'board'} onChange={(event) => setView(event.target.checked ? 'board' : 'list')} />
-                    Board layout
-                  </label>
-                  <button type="button" className="ui-menu__item" onClick={() => { setSettingsOpen(false); setReload((count) => count + 1) }}>Refresh tasks</button>
-                </div>
-              ) : null}
-            </div>
-            <button type="button" className="tasks-icon-button" aria-pressed={view === 'board'} onClick={() => setView(view === 'board' ? 'list' : 'board')}
-              aria-label={view === 'board' ? 'Show as list' : 'Show as board'} title={view === 'board' ? 'Show as list' : 'Show as board'}>
-              <Icon name={view === 'board' ? 'board' : 'list'} />
-            </button>
-            <button type="button" role="switch" className="tasks-switch" aria-checked={showDone} onClick={() => setShowDone(!showDone)} aria-label="Show completed tasks" title="Show completed tasks">
-              <span aria-hidden="true" />
-            </button>
-          </div>
-
-          <p className="tasks-date">
-            <span className="tasks-date__tile" aria-hidden="true">{todayDate.getDate()}</span>
-            <span className="sr-only">Today is </span>{monthDay.format(todayDate)}
-          </p>
-
           <div className="tasks-tabbar">
             <div
               className="tasks-tabs"
@@ -593,10 +709,21 @@ export function Goals({ session }: { session: AuthSession | null }) {
                 </button>
               ))}
             </div>
-            <button type="button" className="tasks-icon-button" onClick={() => compose({ group_id: defaultGroup })} aria-label="New task" title="New task">
-              <Icon name="square-plus" />
-            </button>
           </div>
+
+          {tab !== 'calendar' ? (
+            <div className="tasks-viewbar" role="group" aria-label="View options">
+              <div className="ui-segmented" role="group" aria-label="Layout">
+                <button type="button" className="ui-segmented__item" aria-pressed={view === 'list'} onClick={() => setView('list')} title="Show tasks in To do and Assigned boxes"><Icon name="list" />List</button>
+                <button type="button" className="ui-segmented__item" aria-pressed={view === 'board'} onClick={() => setView('board')} title="Show tasks in columns by status"><Icon name="board" />Board</button>
+              </div>
+              <label className="tasks-toggle">
+                <input type="checkbox" role="switch" className="tasks-toggle__input" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} />
+                <span className="tasks-toggle__track" aria-hidden="true" />
+                Show completed
+              </label>
+            </div>
+          ) : null}
 
           {loadError ? (
             <div className="ui-alert tasks-alert" role="alert"><span>{tasks.length ? 'Showing saved tasks. ' : ''}{loadError}</span><button type="button" className="ui-button ui-button--sm" onClick={() => setReload((count) => count + 1)}>Try again</button></div>
@@ -604,7 +731,13 @@ export function Goals({ session }: { session: AuthSession | null }) {
 
           <section className="tasks-content" id="tasks-tabpanel" role="tabpanel" aria-labelledby={`tasks-tab-${tab}`}>
             {!loaded && !tasks.length ? <TasksSkeleton /> : (
-              tab === 'calendar' ? <CalendarView tasks={visible} today={today} selectedId={activeId} onSelect={select} onCompose={(date) => compose({ due_date: date })} />
+              tab === 'calendar' ? (
+                <CalendarView tasks={visible} today={today} phone={phone} selectedId={activeId} courses={calendarCourses} colorFor={colorFor}
+                  onSelect={select} onPrefetch={loadDetail} onCompose={(date) => compose(date ? { due_date: date, group_id: null } : { group_id: null })}
+                  onQuickAdd={(input) => void create({ ...input, group_id: null }, false)}
+                  onMove={(id, date) => void patchTask(id, date ? { due_date: date } : { due_date: null, due_time: null })}
+                  onToggleDone={(task) => void patchTask(task.id, { status: task.status === 'done' ? 'todo' : 'done' })} />
+              )
                 : view === 'board' ? <BoardView tasks={visible} card={card} onMove={(id, status) => void patchTask(id, { status })} hiddenDone={showDone ? 0 : scoped.length - visible.length} onShowDone={() => setShowDone(true)} />
                   : tab === 'mine' ? (
                     <div className="tasks-boxes">
@@ -616,7 +749,7 @@ export function Goals({ session }: { session: AuthSession | null }) {
           </section>
         </div>
 
-        {panel || !phone ? (
+        {panel || (!phone && !calendarFull) ? (
           <>
             {drawerOpen ? <div className="tasks-scrim" aria-hidden="true" onClick={closePanel} /> : null}
             <aside ref={panelRef} className={`tasks-panel${drawerOpen ? ' is-drawer' : ''}`} role={drawerOpen ? 'dialog' : undefined} aria-modal={drawerOpen || undefined} aria-label={draft ? 'New task' : 'Task details'} tabIndex={-1}>
@@ -658,19 +791,29 @@ function TasksSkeleton() {
 
 /* ---------- boxes and cards ---------- */
 
-type CardProps = { today: string; selectedId: string | null; onSelect: (id: string) => void; onPrefetch: (id: string) => void }
+type CardProps = { today: string; selectedId: string | null; onSelect: (id: string) => void; onPrefetch: (id: string) => void; colorFor: (task: Task) => string }
 
 /* A rounded bar with just the title; the open task gets the sketch's diagonal hatch. */
 function TaskCard({ task, card, drag }: { task: Task; card: CardProps; drag?: { dragging: boolean; onStart: (event: DragEvent) => void; onEnd: () => void } }) {
-  const { today, selectedId, onSelect, onPrefetch } = card
+  const { today, selectedId, onSelect, onPrefetch, colorFor } = card
   const pending = task.id.startsWith('temp-')
   const isSelected = task.id === selectedId
+  const due = dueBadge(task, today)
+  const flag = task.priority === 'urgent' || task.priority === 'high'
   return (
-    <li data-task-id={task.id} className={`task-card${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
-      draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
+    <li data-task-id={task.id} className={`task-card${task.source_cancelled ? ' is-cancelled' : ''}${isSelected ? ' is-selected' : ''}${task.status === 'done' ? ' is-done' : ''}${pending ? ' is-pending' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}${drag?.dragging ? ' is-dragging' : ''}`}
+      style={{ '--course': colorFor(task) } as CSSProperties} draggable={drag ? task.can_edit : undefined} onDragStart={drag?.onStart} onDragEnd={drag?.onEnd}>
       <button type="button" className="task-card__main" disabled={pending} aria-current={isSelected ? 'true' : undefined}
         onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
         <span className="task-card__title">{task.title}</span>
+        {due || flag || task.course || fromClassroom(task) ? (
+          <span className="task-card__meta" aria-hidden="true">
+            <ClassroomChip task={task} />
+            {due ? <span className={`task-badge is-${due.tone}`}>{due.label}</span> : null}
+            {flag ? <span className={`task-flag is-${task.priority}`} title={PRIORITY_LABEL[task.priority]}><Icon name="flag" /></span> : null}
+            {task.course ? <span className="task-card__course">{task.course}</span> : null}
+          </span>
+        ) : null}
         <span className="sr-only">, {cardSummary(task, today)}</span>
       </button>
     </li>
@@ -682,10 +825,10 @@ function TaskBox({ kind, id, tasks, card, onCompose, composeLabel = 'New task' }
 }) {
   const open = tasks.filter((task) => task.status !== 'done').length
   return (
-    <section className={`tasks-box is-${kind}`} aria-labelledby={id}>
+    <section className={`tasks-box is-${kind} ui-tone--${kind === 'todo' ? 'blue' : 'teal'}`} aria-labelledby={id}>
       <header className="tasks-box__head">
         <h2 id={id}>
-          <Icon name={kind === 'todo' ? 'triangle' : 'rect'} />
+          <span className="tasks-box__chip" aria-hidden="true"><Icon name={kind === 'todo' ? 'triangle' : 'people'} /></span>
           {kind === 'todo' ? 'To do' : 'Assigned'}
           {kind === 'todo' ? <span className="tasks-box__count" aria-label={`${open} open`}>{open}</span> : null}
         </h2>
@@ -727,7 +870,7 @@ function GroupBoxes({ tasks, groups, isAssigned, card, onCompose }: {
   )
 }
 
-/* The ≡ toggle's other layout. Drag moves a card between statuses; the Status field
+/* The Board layout (List / Board in the view bar). Drag moves a card between statuses; the Status field
    under "+ Details" is the keyboard alternative. */
 function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Task[]; card: CardProps; onMove: (id: string, status: TaskStatus) => void; hiddenDone: number; onShowDone: () => void }) {
   const [dragging, setDragging] = useState<string | null>(null)
@@ -748,12 +891,12 @@ function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Tas
         // card dragged into Done doesn't look like it vanished.
         const hidden = status.id === 'done' ? hiddenDone : 0
         return (
-          <section key={status.id} className={`tasks-box tasks-board__column${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
+          <section key={status.id} className={`tasks-box tasks-board__column ui-tone--${status.tone}${over === status.id ? ' is-over' : ''}`} aria-labelledby={`tasks-board-${status.id}`}
             onDragOver={(event) => { if (dragging) { event.preventDefault(); setOver(status.id) } }}
             onDragLeave={() => setOver((current) => current === status.id ? null : current)}
             onDrop={(event) => drop(event, status.id)}>
             <header className="tasks-box__head">
-              <h2 id={`tasks-board-${status.id}`}>{status.label}<span className="tasks-box__count">{items.length + hidden}</span></h2>
+              <h2 id={`tasks-board-${status.id}`}><span className="tasks-box__chip" aria-hidden="true"><Icon name={status.icon} /></span>{status.label}<span className="tasks-box__count">{items.length + hidden}</span></h2>
             </header>
             {items.length ? (
               <ul className="task-cards">
@@ -777,56 +920,375 @@ function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Tas
 
 /* ---------- calendar ---------- */
 
-function CalendarView({ tasks, today, selectedId, onSelect, onCompose }: {
-  tasks: Task[]; today: string; selectedId: string | null; onSelect: (id: string) => void; onCompose: (date: string) => void
-}) {
-  const [cursor, setCursor] = useState(() => { const date = parseDay(today); return new Date(date.getFullYear(), date.getMonth(), 1) })
-  const start = new Date(cursor)
-  start.setDate(1 - cursor.getDay())
-  const days = Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day })
-  const byDay = new Map<string, Task[]>()
-  for (const task of sortTasks(tasks)) if (task.due_date) byDay.set(task.due_date, [...(byDay.get(task.due_date) ?? []), task])
-  const shift = (months: number) => setCursor((current) => new Date(current.getFullYear(), current.getMonth() + months, 1))
-  const monthDays = days.filter((day) => day.getMonth() === cursor.getMonth() && byDay.has(isoDay(day)))
-  const chip = (task: Task) => (
-    <button key={task.id} type="button" className={`tasks-calendar__chip${task.status === 'done' ? ' is-done' : ''}${task.id === selectedId ? ' is-selected' : ''}`}
-      onClick={() => onSelect(task.id)} title={task.due_time ? `${timeLabel(task.due_time)} · ${task.title}` : task.title}>
-      {task.due_time ? <time>{timeLabel(task.due_time)}</time> : null}<span>{task.title}</span>
+type CalendarMode = 'month' | 'week'
+type QuickAddInput = { title: string; due_date: string | null; course: string }
+type CalendarProps = {
+  tasks: Task[]; today: string; phone: boolean; selectedId: string | null; courses: string[]
+  colorFor: (task: Task) => string
+  onSelect: (id: string) => void; onPrefetch: (id: string) => void
+  onCompose: (date: string | null) => void
+  onQuickAdd: (input: QuickAddInput) => void
+  onMove: (id: string, date: string | null) => void
+  onToggleDone: (task: Task) => void
+}
+
+const weekdayShort = new Intl.DateTimeFormat(undefined, { weekday: 'short' })
+const weekdayNarrow = new Intl.DateTimeFormat(undefined, { weekday: 'narrow' })
+const rangeDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+const WEEKDAYS = weekDays('2026-10-11').map(parseDay)
+const MONTH_CHIPS = 3
+
+function taskWhereLabel(task: Task) {
+  return [task.course, task.group_name].filter(Boolean).join(' · ')
+}
+
+/* The round "done" control on chips and rows: marks the task done (or not) straight from the calendar. */
+function CheckButton({ task, onToggle, tabIndex }: { task: Task; onToggle: (task: Task) => void; tabIndex?: number }) {
+  const done = task.status === 'done'
+  return (
+    <button type="button" className={`tasks-cal__check${done ? ' is-done' : ''}`} aria-pressed={done} tabIndex={tabIndex}
+      disabled={!task.can_edit || task.id.startsWith('temp-')} aria-label={`Done: ${task.title}`}
+      title={done ? 'Mark as not done' : 'Mark as done'} onClick={(event) => { event.stopPropagation(); onToggle(task) }}>
+      <Icon name="check" />
     </button>
   )
+}
+
+/* A small inline box: type a title, Enter saves it due that day, Esc closes. Course is an optional chip. */
+function QuickAdd({ date, courses, onSave, onCancel, onMore, className = '' }: {
+  date: string | null; courses: string[]; onSave: (input: QuickAddInput) => void; onCancel: () => void; onMore: () => void; className?: string
+}) {
+  const [title, setTitle] = useState('')
+  const [course, setCourse] = useState('')
+  const label = date ? `New task for ${weekdayDate.format(parseDay(date))}` : 'New task with no due date'
+  const save = (event: FormEvent) => {
+    event.preventDefault()
+    if (!title.trim()) return
+    onSave({ title: title.trim(), due_date: date, course })
+    setTitle('')
+  }
   return (
-    <div className="tasks-calendar">
-      <header className="tasks-calendar__head">
-        <h2>{monthTitle.format(cursor)}</h2>
-        <button type="button" className="tasks-icon-button" onClick={() => shift(-1)} aria-label="Previous month"><Icon name="chevron-left" /></button>
-        <button type="button" className="tasks-icon-button" onClick={() => shift(1)} aria-label="Next month"><Icon name="chevron-right" /></button>
-      </header>
-      <div className="tasks-calendar__grid" role="grid" aria-label={monthTitle.format(cursor)}>
-        <div role="row" className="tasks-calendar__row is-weekdays">
-          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => <span key={index} className="tasks-calendar__weekday" role="columnheader">{day}</span>)}
-        </div>
-        {Array.from({ length: 6 }, (_, week) => (
-          <div key={week} role="row" className="tasks-calendar__row">
-            {days.slice(week * 7, week * 7 + 7).map((day) => {
-              const key = isoDay(day)
-              const items = byDay.get(key) ?? []
-              return (
-                <div key={key} role="gridcell" className={`tasks-calendar__day${day.getMonth() !== cursor.getMonth() ? ' is-outside' : ''}${key === today ? ' is-today' : ''}`}>
-                  <button type="button" className="tasks-calendar__date" onClick={() => onCompose(key)} aria-label={`Add a task on ${longDate.format(day)}`}>{day.getDate()}</button>
-                  {items.slice(0, 2).map(chip)}
-                  {items.length > 2 ? <span className="tasks-calendar__more">+{items.length - 2}</span> : null}
-                </div>
-              )
-            })}
-          </div>
-        ))}
+    <form className={`tasks-cal__quick ${className}`} onSubmit={save} aria-label={label}
+      onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onCancel() } }}
+      onClick={(event) => event.stopPropagation()}>
+      <input className="tasks-cal__quick-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={label} aria-label={label}
+        maxLength={140} autoComplete="off" autoCapitalize="sentences" enterKeyHint="done" autoFocus />
+      <div className="tasks-cal__quick-row">
+        {courses.length ? (
+          <label className={`tasks-cal__course-pick${course ? ' is-set' : ''}`}>
+            <span className="sr-only">Course</span>
+            <select value={course} onChange={(event) => setCourse(event.target.value)}>
+              <option value="">+ Course</option>
+              {courses.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+        ) : null}
+        <button type="button" className="ui-link tasks-cal__quick-more" onClick={onMore}>More options</button>
+        <span className="tasks-cal__quick-hint" aria-hidden="true">Enter to save</span>
+        <button type="submit" className="ui-button ui-button--sm ui-button--primary" disabled={!title.trim()}>Save</button>
+        <button type="button" className="tasks-icon-button is-tiny" onClick={onCancel} aria-label="Close quick add" title="Close"><Icon name="close" /></button>
       </div>
-      <ol className="tasks-agenda" aria-label={`${monthTitle.format(cursor)} agenda`}>
-        {monthDays.length ? monthDays.map((day) => {
-          const key = isoDay(day)
-          return <li key={key} className={key === today ? 'is-today' : ''}><h3>{longDate.format(day)}</h3><div>{(byDay.get(key) ?? []).map(chip)}</div></li>
-        }) : <li className="tasks-agenda__empty">Nothing scheduled this month.</li>}
-      </ol>
+    </form>
+  )
+}
+
+/* A list row (day list, No due date tray): course mark, title, time and course, done circle. */
+function CalendarRow({ task, today, selected, color, draggable, onSelect, onPrefetch, onToggle, onDragStart, onDragEnd }: {
+  task: Task; today: string; selected: boolean; color: string; draggable: boolean
+  onSelect: (id: string) => void; onPrefetch: (id: string) => void; onToggle: (task: Task) => void
+  onDragStart: (event: DragEvent, task: Task) => void; onDragEnd: () => void
+}) {
+  const overdue = isOverdue(task, today)
+  const where = taskWhereLabel(task)
+  const mark = task.course || task.group_name || ''
+  return (
+    <li data-task-id={task.id} className={`tasks-cal__row${task.source_cancelled ? ' is-cancelled' : ''}${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${selected ? ' is-selected' : ''}`}
+      style={{ '--course': color } as CSSProperties} draggable={draggable || undefined}
+      onDragStart={draggable ? (event) => onDragStart(event, task) : undefined} onDragEnd={draggable ? onDragEnd : undefined}>
+      <CheckButton task={task} onToggle={onToggle} />
+      <button type="button" className="tasks-cal__row-main" disabled={task.id.startsWith('temp-')} aria-current={selected ? 'true' : undefined}
+        onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} onFocus={() => onPrefetch(task.id)}>
+        {mark ? <span className="ui-course-mark ui-course-mark--sm" aria-hidden="true">{task.group_id && !task.course ? <Icon name="people" /> : courseInitial(mark)}</span>
+          : <span className="tasks-cal__mark-none" aria-hidden="true" />}
+        <span className="tasks-cal__row-text">
+          <span className="tasks-cal__row-title">{task.title}</span>
+          <span className="tasks-cal__row-meta">
+            <ClassroomChip task={task} />
+            {overdue ? <span className="tasks-cal__late">Overdue</span> : null}
+            {task.due_time ? <span>{timeLabel(task.due_time)}</span> : null}
+            {where ? <span>{where}</span> : null}
+            {task.group_id ? <span className="tasks-cal__group" title="Group task"><Icon name="people" /><span className="sr-only">Group task</span></span> : null}
+          </span>
+        </span>
+        <span className="sr-only">, {cardSummary(task, today)}</span>
+      </button>
+    </li>
+  )
+}
+
+function CalendarView({ tasks, today, phone, selectedId, courses, colorFor, onSelect, onPrefetch, onCompose, onQuickAdd, onMove, onToggleDone }: CalendarProps) {
+  const [mode, setModeState] = useState<CalendarMode>(() => readPref('bindit:tasks:calendar-view', ['month', 'week'] as const, 'month'))
+  const [focus, setFocus] = useState(today)
+  const [quick, setQuick] = useState<{ day: string | null; where: 'grid' | 'list' | 'tray' } | null>(null)
+  const [dir, setDir] = useState(0)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [over, setOver] = useState<string | null>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const dayListRef = useRef<HTMLElement>(null)
+  const trayRef = useRef<HTMLElement>(null)
+  const moveFocus = useRef(false)
+
+  const setMode = (next: CalendarMode) => { setModeState(next); writePref('bindit:tasks:calendar-view', next); setQuick(null) }
+  const weeks = mode === 'month' ? monthGrid(focus) : [weekDays(focus)]
+  const rangeKey = mode === 'month' ? monthStart(focus) : weekStart(focus)
+  const first = weeks[0][0]
+  const last = weeks[weeks.length - 1][6]
+  const title = mode === 'month' ? monthTitle.format(parseDay(focus)) : rangeDate.formatRange(parseDay(first), parseDay(last))
+
+  const sorted = sortTasks(tasks)
+  const byDay = groupByDay(sorted)
+  const undated = sorted.filter((task) => !task.due_date)
+  const inRange = sorted.filter((task) => task.due_date && (mode === 'month' ? sameMonth(task.due_date, focus) : task.due_date >= first && task.due_date <= last))
+  const nextUp = sorted.filter((task) => task.status !== 'done' && task.due_date && task.due_date >= today).slice(0, 3)
+  const focusTasks = byDay.get(focus) ?? []
+  const canDrag = !phone
+
+  const go = (next: string, direction: number) => { setDir(direction); setFocus(next); setQuick(null) }
+  const shift = (step: number) => go(mode === 'month' ? addMonths(focus, step) : addDays(focus, step * 7), step)
+  const goToday = () => go(today, today < focus ? -1 : today > focus ? 1 : 0)
+
+  // After an arrow key, focus follows the selected day (also into the next month or week).
+  useEffect(() => {
+    if (!moveFocus.current) return
+    moveFocus.current = false
+    gridRef.current?.querySelector<HTMLElement>(`[data-day="${focus}"]`)?.focus()
+  }, [focus])
+
+  // Opening a day (Enter, +N more) moves focus to its list once the list shows that day.
+  const [opened, setOpened] = useState(0)
+  useEffect(() => {
+    if (!opened) return
+    dayListRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true })
+    dayListRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [opened])
+  const openDay = (day: string) => {
+    setFocus(day)
+    setOpened((count) => count + 1)
+  }
+
+  const onGridKey = (event: ReactKeyboardEvent) => {
+    const cell = (event.target as HTMLElement).closest<HTMLElement>('[data-day]')
+    if (!cell || event.target !== cell) return
+    const day = cell.dataset.day ?? focus
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      if ((byDay.get(day) ?? []).length) openDay(day)
+      else { setFocus(day); setQuick({ day, where: phone ? 'list' : 'grid' }) }
+      return
+    }
+    const next = moveDay(day, event.key)
+    if (!next) return
+    event.preventDefault()
+    moveFocus.current = true
+    if (mode === 'month' ? !sameMonth(next, focus) : weekStart(next) !== weekStart(focus)) setDir(next > focus ? 1 : -1)
+    setFocus(next)
+    setQuick(null)
+  }
+
+  const onCellClick = (event: ReactMouseEvent, day: string) => {
+    if ((event.target as HTMLElement).closest('button, input, select, a, form')) return
+    setFocus(day)
+    setQuick(phone ? null : { day, where: 'grid' })
+  }
+
+  const dragStart = (event: DragEvent, task: Task) => {
+    event.dataTransfer.setData('text/plain', task.id)
+    event.dataTransfer.effectAllowed = 'move'
+    setDragging(task.id)
+    setQuick(null)
+  }
+  const dragEnd = () => { setDragging(null); setOver(null) }
+  const dropOn = (event: DragEvent, day: string | null) => {
+    event.preventDefault()
+    const id = event.dataTransfer.getData('text/plain') || dragging
+    const task = tasks.find((item) => item.id === id)
+    if (task && task.due_date !== day && task.can_manage) onMove(task.id, day)
+    dragEnd()
+  }
+  const dropTarget = (key: string, day: string | null) => canDrag ? {
+    onDragOver: (event: DragEvent) => { if (dragging) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setOver(key) } },
+    onDragLeave: (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setOver((current) => current === key ? null : current) },
+    onDrop: (event: DragEvent) => dropOn(event, day),
+  } : {}
+
+  const chip = (task: Task, active: boolean) => {
+    const overdue = isOverdue(task, today)
+    const draggable = canDrag && task.can_manage && !task.id.startsWith('temp-')
+    return (
+      <li key={task.id} data-task-id={task.id} style={{ '--course': colorFor(task) } as CSSProperties}
+        className={`tasks-cal__chip${task.source_cancelled ? ' is-cancelled' : ''}${task.status === 'done' ? ' is-done' : ''}${overdue ? ' is-overdue' : ''}${task.id === selectedId ? ' is-selected' : ''}${dragging === task.id ? ' is-dragging' : ''}`}
+        draggable={draggable || undefined} onDragStart={draggable ? (event) => dragStart(event, task) : undefined} onDragEnd={draggable ? dragEnd : undefined}>
+        <CheckButton task={task} onToggle={onToggleDone} tabIndex={active ? 0 : -1} />
+        <button type="button" className="tasks-cal__chip-main" tabIndex={active ? 0 : -1} disabled={task.id.startsWith('temp-')}
+          onClick={() => onSelect(task.id)} onMouseEnter={() => onPrefetch(task.id)} title={[task.due_time ? timeLabel(task.due_time) : '', task.title, taskWhereLabel(task)].filter(Boolean).join(' · ')}>
+          <ClassroomChip task={task} compact />
+          {task.group_id ? <Icon name="people" /> : null}
+          {task.due_time && mode === 'week' ? <time>{timeLabel(task.due_time)}</time> : null}
+          <span className="tasks-cal__chip-title">{task.title}</span>
+          <span className="sr-only">, {cardSummary(task, today)}{task.group_name ? `, group ${task.group_name}` : ''}</span>
+        </button>
+      </li>
+    )
+  }
+
+  const dots = (items: Task[]) => (
+    <span className="tasks-cal__dots" aria-hidden="true">
+      {items.slice(0, 3).map((task) => (
+        <span key={task.id} className={`tasks-cal__dot${task.status === 'done' ? ' is-done' : ''}${isOverdue(task, today) ? ' is-overdue' : ''}`} style={{ '--course': colorFor(task) } as CSSProperties} />
+      ))}
+      {items.length > 3 ? <span className="tasks-cal__dot-more">+{items.length - 3}</span> : null}
+    </span>
+  )
+
+  const rowProps = { today, onSelect, onPrefetch, onToggle: onToggleDone, onDragStart: dragStart, onDragEnd: dragEnd }
+  const hint = phone ? 'Tap a day to see its tasks.' : 'Click a day to add a task. Drag a task to another day to move it.'
+
+  return (
+    <div className={`tasks-cal is-${mode}`}>
+      <header className="tasks-cal__head">
+        <h2 className="tasks-cal__title" id="tasks-cal-title" aria-live="polite">{title}</h2>
+        <div className="tasks-cal__nav">
+          <button type="button" className="tasks-icon-button" onClick={() => shift(-1)} aria-label={mode === 'month' ? 'Previous month' : 'Previous week'} title={mode === 'month' ? 'Previous month' : 'Previous week'}><Icon name="chevron-left" /></button>
+          <button type="button" className="ui-button ui-button--sm" onClick={goToday} disabled={mode === 'month' ? sameMonth(focus, today) && focus === today : weekStart(focus) === weekStart(today) && focus === today}>Today</button>
+          <button type="button" className="tasks-icon-button" onClick={() => shift(1)} aria-label={mode === 'month' ? 'Next month' : 'Next week'} title={mode === 'month' ? 'Next month' : 'Next week'}><Icon name="chevron-right" /></button>
+        </div>
+        <div className="ui-segmented tasks-cal__modes" role="group" aria-label="Calendar view">
+          <button type="button" className="ui-segmented__item" aria-pressed={mode === 'month'} onClick={() => setMode('month')}>Month</button>
+          <button type="button" className="ui-segmented__item" aria-pressed={mode === 'week'} onClick={() => setMode('week')}>Week</button>
+        </div>
+      </header>
+
+      <div className="tasks-cal__next" aria-label="Next up" role="group">
+        <span className="tasks-cal__next-label">Next up</span>
+        {nextUp.length ? (
+          <ul>
+            {nextUp.map((task) => (
+              <li key={task.id} style={{ '--course': colorFor(task) } as CSSProperties}>
+                <button type="button" onClick={() => { if (task.due_date) go(task.due_date, task.due_date > focus ? 1 : -1); onSelect(task.id) }}>
+                  <span className="tasks-cal__next-dot" aria-hidden="true" />
+                  <span className="tasks-cal__next-title">{task.title}</span>
+                  <ClassroomChip task={task} compact />
+                  <span className="tasks-cal__next-when">{dueCountdown(task.due_date ?? today, today)}{task.due_time && task.due_date === today ? ` · ${timeLabel(task.due_time)}` : ''}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : <span className="tasks-cal__next-none">Nothing coming up.</span>}
+        {undated.length ? (
+          <button type="button" className="ui-link tasks-cal__undated-link" onClick={() => { trayRef.current?.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true }); trayRef.current?.scrollIntoView({ block: 'nearest' }) }}>
+            {undated.length} with no date
+          </button>
+        ) : null}
+      </div>
+
+      {!inRange.length ? (
+        <p className="tasks-cal__empty">Nothing due {mode === 'month' ? `in ${monthTitle.format(parseDay(focus)).split(' ')[0]}` : 'this week'}. {phone ? 'Tap a day, then Add task.' : 'Click a day to add a task.'}</p>
+      ) : null}
+
+      <div className="tasks-cal__frame">
+        <div key={rangeKey} className="tasks-cal__pane" data-dir={dir > 0 ? 'next' : dir < 0 ? 'prev' : undefined}>
+          <div ref={gridRef} className="tasks-cal__grid" role="grid" aria-labelledby="tasks-cal-title" aria-describedby="tasks-cal-help" onKeyDown={onGridKey}>
+            <div role="row" className="tasks-cal__week is-head">
+              {WEEKDAYS.map((day) => (
+                <span key={day.getDay()} role="columnheader" className="tasks-cal__weekday" aria-label={weekdayLong.format(day)}>
+                  {phone ? weekdayNarrow.format(day) : weekdayShort.format(day)}
+                </span>
+              ))}
+            </div>
+            {weeks.map((week) => (
+              <div key={week[0]} role="row" className="tasks-cal__week">
+                {week.map((day) => {
+                  const items = byDay.get(day) ?? []
+                  const active = day === focus
+                  const outside = mode === 'month' && !sameMonth(day, focus)
+                  const limit = mode === 'week' ? items.length : items.length > MONTH_CHIPS ? MONTH_CHIPS - 1 : MONTH_CHIPS
+                  const date = parseDay(day)
+                  const count = items.filter((task) => task.status !== 'done').length
+                  return (
+                    <div key={day} data-day={day} role="gridcell" tabIndex={active ? 0 : -1} aria-selected={active}
+                      aria-label={`${longDate.format(date)}${day === today ? ', today' : ''}, ${items.length ? `${items.length} ${items.length === 1 ? 'task' : 'tasks'}${count !== items.length ? `, ${items.length - count} done` : ''}` : 'no tasks'}`}
+                      className={`tasks-cal__day${outside ? ' is-outside' : ''}${day === today ? ' is-today' : ''}${isWeekend(day) ? ' is-weekend' : ''}${active ? ' is-active' : ''}${over === day ? ' is-over' : ''}${day < today ? ' is-past' : ''}`}
+                      onClick={(event) => onCellClick(event, day)} {...dropTarget(day, day)}>
+                      <span className="tasks-cal__num" aria-hidden="true">
+                        <b>{date.getDate()}</b>
+                      </span>
+                      {phone ? (items.length ? dots(items) : null) : (
+                        <>
+                          <button type="button" className="tasks-cal__add" tabIndex={active ? 0 : -1} aria-label={`Add a task on ${longDate.format(date)}`} title="Add a task"
+                            onClick={() => { setFocus(day); setQuick({ day, where: 'grid' }) }}><Icon name="plus" /></button>
+                          {items.length ? <ul className="tasks-cal__chips">{items.slice(0, limit).map((task) => chip(task, active))}</ul> : null}
+                          {items.length > limit ? (
+                            <button type="button" className="tasks-cal__more" tabIndex={active ? 0 : -1} onClick={() => openDay(day)}
+                              aria-label={`${items.length - limit} more on ${longDate.format(date)}`}>+{items.length - limit} more</button>
+                          ) : null}
+                          {quick?.where === 'grid' && quick.day === day ? (
+                            <QuickAdd className={date.getDay() >= 4 ? 'is-left' : ''} date={day} courses={courses} onSave={onQuickAdd} onCancel={() => { setQuick(null); gridRef.current?.querySelector<HTMLElement>(`[data-day="${day}"]`)?.focus() }}
+                              onMore={() => { setQuick(null); onCompose(day) }} />
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p id="tasks-cal-help" className="tasks-cal__help">{hint} {phone ? '' : 'Arrow keys move between days; Enter opens a day or adds a task to an empty one.'}</p>
+      </div>
+
+      <div className="tasks-cal__lists">
+        <section ref={dayListRef} className={`tasks-cal__day-list ui-tone--blue${over === 'focus' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-day-title" {...dropTarget('focus', focus)}>
+          <header className="tasks-cal__list-head">
+            <span className="tasks-box__chip" aria-hidden="true"><Icon name="calendar" /></span>
+            <h3 id="tasks-cal-day-title" tabIndex={-1}>{focus === today ? 'Today · ' : ''}{longDate.format(parseDay(focus))}</h3>
+            {focusTasks.length ? <span className="tasks-box__count">{focusTasks.length}</span> : null}
+          </header>
+          {focusTasks.length ? (
+            <ul className="tasks-cal__rows">
+              {focusTasks.map((task) => <CalendarRow key={task.id} task={task} selected={task.id === selectedId} color={colorFor(task)} draggable={canDrag && task.can_manage} {...rowProps} />)}
+            </ul>
+          ) : <p className="tasks-cal__list-empty">Nothing due{focus === today ? ' today' : ' this day'}.</p>}
+          {quick?.where === 'list' && quick.day === focus ? (
+            <QuickAdd date={focus} courses={courses} onSave={onQuickAdd} onCancel={() => setQuick(null)} onMore={() => { setQuick(null); onCompose(focus) }} />
+          ) : (
+            <button type="button" className="ui-button ui-button--sm tasks-cal__list-add" onClick={() => setQuick({ day: focus, where: 'list' })}>
+              <Icon name="plus" />Add task for {shortDate.format(parseDay(focus))}
+            </button>
+          )}
+        </section>
+
+        <section ref={trayRef} className={`tasks-cal__tray ui-tone--amber${over === 'none' ? ' is-over' : ''}`} aria-labelledby="tasks-cal-tray-title" {...dropTarget('none', null)}>
+          <header className="tasks-cal__list-head">
+            <span className="tasks-box__chip" aria-hidden="true"><Icon name="clock" /></span>
+            <h3 id="tasks-cal-tray-title" tabIndex={-1}>No due date</h3>
+            {undated.length ? <span className="tasks-box__count">{undated.length}</span> : null}
+          </header>
+          {undated.length ? (
+            <ul className="tasks-cal__rows">
+              {undated.map((task) => <CalendarRow key={task.id} task={task} selected={task.id === selectedId} color={colorFor(task)} draggable={canDrag && task.can_manage} {...rowProps} />)}
+            </ul>
+          ) : <p className="tasks-cal__list-empty">{dragging ? 'Drop here to remove the date.' : 'Every task has a date.'}</p>}
+          {canDrag && undated.length ? <p className="tasks-cal__list-hint">Drag one onto a day to schedule it.</p> : null}
+          {quick?.where === 'tray' ? (
+            <QuickAdd date={null} courses={courses} onSave={onQuickAdd} onCancel={() => setQuick(null)} onMore={() => { setQuick(null); onCompose(null) }} />
+          ) : (
+            <button type="button" className="ui-button ui-button--sm ui-button--ghost tasks-cal__list-add" onClick={() => setQuick({ day: null, where: 'tray' })}>
+              <Icon name="plus" />Add task with no date
+            </button>
+          )}
+        </section>
+      </div>
     </div>
   )
 }
@@ -842,11 +1304,12 @@ function KindToggle({ value, onChange }: { value: Task['kind']; onChange: (kind:
   )
 }
 
-function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
-  draft: Draft; groups: StudyGroup[]; me: string
+function TaskComposer({ draft, groups, me, courses, onCancel, onCreate }: {
+  draft: Draft; groups: StudyGroup[]; me: string; courses: string[]
   onCancel: () => void; onCreate: (input: TaskInput & { title: string }) => void
 }) {
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(draft.title ?? '')
+  const [course, setCourse] = useState(draft.course ?? '')
   const [kind, setKind] = useState<Task['kind']>('task')
   const [dueDate, setDueDate] = useState(draft.due_date ?? '')
   const [dueTime, setDueTime] = useState('')
@@ -859,7 +1322,7 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
     event.preventDefault()
     if (!title.trim()) return
     onCreate({
-      title: title.trim(), kind, priority, location: location.trim(), status: draft.status ?? 'todo',
+      title: title.trim(), kind, priority, location: location.trim(), status: draft.status ?? 'todo', course: course.trim(),
       due_date: dueDate || null, due_time: dueDate && dueTime ? dueTime : null,
       group_id: groupId || null, assignee_ids: groupId && assignees.length ? assignees : [me],
     })
@@ -875,6 +1338,10 @@ function TaskComposer({ draft, groups, me, onCancel, onCreate }: {
         <div className="task-form">
           <label className="ui-field"><span>Date</span><input className="ui-input" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
           <label className="ui-field"><span>Time</span><input className="ui-input" type="time" value={dueTime} disabled={!dueDate} onChange={(event) => setDueTime(event.target.value)} /></label>
+          <label className="ui-field is-wide"><span>Course</span>
+            <input className="ui-input" value={course} onChange={(event) => setCourse(event.target.value)} placeholder="Optional" maxLength={120} autoComplete="off" list="task-compose-courses" enterKeyHint="done" />
+            <datalist id="task-compose-courses">{courses.map((name) => <option key={name} value={name} />)}</datalist>
+          </label>
           <label className="ui-field is-wide"><span>Location</span><input className="ui-input" value={location} onChange={(event) => setLocation(event.target.value)} placeholder="Optional" maxLength={200} autoComplete="off" enterKeyHint="done" /></label>
           <label className="ui-field"><span>Priority</span>
             <select className="ui-select" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
@@ -1128,6 +1595,20 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
           {overdue ? <span className="task-when__flag">Overdue</span> : null}
         </p>
 
+        {manageable && !pending ? (
+          <div className="task-due" role="group" aria-label="Change due date">
+            <label className="task-pill task-due__pick" title="Pick a due date">
+              <Icon name="calendar" />{task.due_date ? 'Change date' : 'Set date'}
+              <input type="date" className="task-due__input" value={task.due_date ?? ''} aria-label="Due date"
+                onClick={(event) => { try { event.currentTarget.showPicker() } catch { /* the field still works by typing */ } }}
+                onChange={(event) => { if (event.target.value) onPatch({ due_date: event.target.value }) }} />
+            </label>
+            {task.due_date !== today ? <button type="button" className="task-pill" onClick={() => onPatch({ due_date: today })}>Today</button> : null}
+            {task.due_date !== addDays(today, 1) ? <button type="button" className="task-pill" onClick={() => onPatch({ due_date: addDays(today, 1) })}>Tomorrow</button> : null}
+            {task.due_date ? <button type="button" className="task-pill" onClick={() => onPatch({ due_date: null, due_time: null })}>No date</button> : null}
+          </div>
+        ) : null}
+
         <span className="task-chip"><Icon name="dot-circle" />{task.kind === 'event' ? 'Event' : 'Task'}</span>
 
         <div className="task-branch">
@@ -1159,7 +1640,7 @@ function TaskPanel({ task, detail, groups, courses, today, token, me, onClose, o
           </div>
         </div>
 
-        <span className={`task-chip${task.priority === 'urgent' ? ' is-urgent' : ''}`}><Icon name="dot-circle" />{PRIORITY_LABEL[task.priority]}</span>
+        <span className={`task-chip task-priority is-${task.priority}`}><Icon name="flag" />{PRIORITY_LABEL[task.priority]}</span>
 
         {expanded ? (
           <div className="task-more-fields" id={`task-more-${task.id}`}>
