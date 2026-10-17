@@ -14,9 +14,9 @@ import { useAnnounce } from '../lib/announce'
 import './Goals.css'
 
 /*
- * Tasks, drawn after the owner's sketch: a small "Tasks" title, three tiny tools
- * (settings, list/board, show completed), today's date, the My Tasks / Group Tasks /
- * Calendar tabs, two compact boxes (To do and Assigned) on the left and the selected
+ * Tasks, drawn after the owner's sketch: a small "Tasks" title with Refresh and the
+ * one primary "Add task" action, today's date, the My Tasks / Group Tasks / Calendar
+ * tabs, a labeled view bar (List / Board, Show completed), two compact boxes (To do and Assigned) on the left and the selected
  * task's details card on the right. Everything is server data: the server checks
  * ownership and group permissions (can_edit / can_manage / can_delete) and the UI follows them.
  * Cached lists render first and refresh in the background; edits apply optimistically
@@ -46,7 +46,6 @@ const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium
 const UNDO_MS = 5000
 const PHONE_QUERY = '(max-width: 860px)'
 
-const monthDay = new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' })
 const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 const weekdayLong = new Intl.DateTimeFormat(undefined, { weekday: 'long' })
 const weekdayDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
@@ -158,18 +157,16 @@ function clearTaskLink() {
 
 /* ---------- icons ---------- */
 
-type IconName = 'triangle' | 'people' | 'rect' | 'square-plus' | 'edit' | 'pencil' | 'list' | 'board' | 'settings' | 'close-box' | 'close'
-  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link'
+type IconName = 'triangle' | 'people' | 'rect' | 'edit' | 'pencil' | 'list' | 'board' | 'close-box' | 'close'
+  | 'clock' | 'pin' | 'bell' | 'dot-circle' | 'check' | 'chevron-left' | 'chevron-right' | 'link' | 'plus' | 'refresh'
 const ICONS: Record<IconName, ReactNode> = {
   triangle: <path d="M12 5 20 19H4z" />,
   people: <><circle cx="9" cy="8" r="3.2" /><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5" /><path d="M16 5.3a3 3 0 0 1 0 5.4M18 14.4c1.6.7 2.7 2.3 3 4.6" /></>,
   rect: <rect x="3.5" y="6.5" width="17" height="11" rx="1.5" />,
-  'square-plus': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M12 8.5v7M8.5 12h7" /></>,
   edit: <><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /><path d="m17.5 3.5 3 3L12 15l-4 1 1-4z" /></>,
   pencil: <path d="m15.5 4.5 4 4L9 19l-5 1 1-5z" />,
   list: <path d="M5 7h14M5 12h14M5 17h14" />,
   board: <><rect x="3.5" y="4" width="5" height="16" rx="1.5" /><rect x="10" y="4" width="5" height="11" rx="1.5" /><rect x="16.5" y="4" width="4" height="7" rx="1.5" /></>,
-  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
   'close-box': <><rect x="4" y="4" width="16" height="16" rx="2" /><path d="m9 9 6 6M15 9l-6 6" /></>,
   close: <path d="M6 6l12 12M18 6 6 18" />,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
@@ -179,6 +176,8 @@ const ICONS: Record<IconName, ReactNode> = {
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   'chevron-left': <path d="m14.5 6-6 6 6 6" />,
   'chevron-right': <path d="m9.5 6 6 6-6 6" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  refresh: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
 }
 
@@ -210,7 +209,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const [toast, setToast] = useState<Toast | null>(null)
   const [notice, setNotice] = useState<SocialNotification | null>(() => token ? latestTaskNotice(getCachedFriends(token)?.notifications) : null)
   const [dismissedNotice, setDismissedNotice] = useState(() => { try { return localStorage.getItem('bindit:tasks:dismissed-notice') ?? '' } catch { return '' } })
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [today, setToday] = useState(() => isoDay(new Date()))
   // A tab left open past midnight moves on to the new day (Today, overdue flags, the calendar).
   useEffect(() => {
@@ -227,7 +225,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
   const pendingDetails = useRef(new Set<string>())
   const pendingDeletes = useRef(new Map<string, { timer: number; task: Task }>())
   const panelRef = useRef<HTMLElement>(null)
-  const settingsRef = useRef<HTMLDivElement>(null)
   const courses = useMemo(() => loadNotebook().courses.map((item) => item.name), [])
 
   const setTab = (next: Tab) => { setTabState(next); writePref('bindit:tasks:tab', next) }
@@ -275,14 +272,6 @@ export function Goals({ session }: { session: AuthSession | null }) {
       pending.clear()
     }
   }, [token])
-
-  /* The settings menu closes on an outside click. */
-  useEffect(() => {
-    if (!settingsOpen) return
-    const onPointer = (event: PointerEvent) => { if (!settingsRef.current?.contains(event.target as Node)) setSettingsOpen(false) }
-    document.addEventListener('pointerdown', onPointer)
-    return () => document.removeEventListener('pointerdown', onPointer)
-  }, [settingsOpen])
 
   const closePanel = useCallback(() => { setSelectedId(null); setDraft(null); setPanelClosed(true) }, [])
 
@@ -529,7 +518,11 @@ export function Goals({ session }: { session: AuthSession | null }) {
   return (
     <div className="ui-page tasks-page">
       <div className="tasks-sheet">
-        <h1 className="tasks-title">Tasks</h1>
+        <header className="tasks-head">
+          <h1 className="tasks-title">Tasks</h1>
+          <button type="button" className="tasks-icon-button" onClick={() => setReload((count) => count + 1)} aria-label="Refresh tasks" title="Refresh tasks"><Icon name="refresh" /></button>
+          <button type="button" className="ui-button ui-button--sm ui-button--primary tasks-add" onClick={() => compose({ group_id: defaultGroup })}><Icon name="plus" />Add task</button>
+        </header>
 
         {visibleNotice ? (
           <div className="tasks-notice" title={lowerMeridiem(stamp.format(new Date(parseServerTime(visibleNotice.created_at))))}>
@@ -540,35 +533,9 @@ export function Goals({ session }: { session: AuthSession | null }) {
         ) : null}
 
         <div className="tasks-main">
-          <div className="tasks-tools">
-            <div className="tasks-settings" ref={settingsRef}>
-              <button type="button" className="tasks-icon-button" aria-label="Task settings" title="Task settings" aria-expanded={settingsOpen} aria-controls="tasks-settings-menu" onClick={() => setSettingsOpen((open) => !open)}><Icon name="settings" /></button>
-              {settingsOpen ? (
-                <div id="tasks-settings-menu" className="ui-menu tasks-settings__menu" onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setSettingsOpen(false) } }}>
-                  <label className="tasks-settings__option">
-                    <input type="checkbox" className="ui-checkbox" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} autoFocus />
-                    Show completed tasks
-                  </label>
-                  <label className="tasks-settings__option">
-                    <input type="checkbox" className="ui-checkbox" checked={view === 'board'} onChange={(event) => setView(event.target.checked ? 'board' : 'list')} />
-                    Board layout
-                  </label>
-                  <button type="button" className="ui-menu__item" onClick={() => { setSettingsOpen(false); setReload((count) => count + 1) }}>Refresh tasks</button>
-                </div>
-              ) : null}
-            </div>
-            <button type="button" className="tasks-icon-button" aria-pressed={view === 'board'} onClick={() => setView(view === 'board' ? 'list' : 'board')}
-              aria-label={view === 'board' ? 'Show as list' : 'Show as board'} title={view === 'board' ? 'Show as list' : 'Show as board'}>
-              <Icon name={view === 'board' ? 'board' : 'list'} />
-            </button>
-            <button type="button" role="switch" className="tasks-switch" aria-checked={showDone} onClick={() => setShowDone(!showDone)} aria-label="Show completed tasks" title="Show completed tasks">
-              <span aria-hidden="true" />
-            </button>
-          </div>
-
           <p className="tasks-date">
             <span className="tasks-date__tile" aria-hidden="true">{todayDate.getDate()}</span>
-            <span className="sr-only">Today is </span>{monthDay.format(todayDate)}
+            <span className="sr-only">Today is </span>{longDate.format(todayDate)}
           </p>
 
           <div className="tasks-tabbar">
@@ -593,10 +560,21 @@ export function Goals({ session }: { session: AuthSession | null }) {
                 </button>
               ))}
             </div>
-            <button type="button" className="tasks-icon-button" onClick={() => compose({ group_id: defaultGroup })} aria-label="New task" title="New task">
-              <Icon name="square-plus" />
-            </button>
           </div>
+
+          {tab !== 'calendar' ? (
+            <div className="tasks-viewbar" role="group" aria-label="View options">
+              <div className="ui-segmented" role="group" aria-label="Layout">
+                <button type="button" className="ui-segmented__item" aria-pressed={view === 'list'} onClick={() => setView('list')} title="Show tasks in To do and Assigned boxes"><Icon name="list" />List</button>
+                <button type="button" className="ui-segmented__item" aria-pressed={view === 'board'} onClick={() => setView('board')} title="Show tasks in columns by status"><Icon name="board" />Board</button>
+              </div>
+              <label className="tasks-toggle">
+                <input type="checkbox" role="switch" className="tasks-toggle__input" checked={showDone} onChange={(event) => setShowDone(event.target.checked)} />
+                <span className="tasks-toggle__track" aria-hidden="true" />
+                Show completed
+              </label>
+            </div>
+          ) : null}
 
           {loadError ? (
             <div className="ui-alert tasks-alert" role="alert"><span>{tasks.length ? 'Showing saved tasks. ' : ''}{loadError}</span><button type="button" className="ui-button ui-button--sm" onClick={() => setReload((count) => count + 1)}>Try again</button></div>
@@ -727,7 +705,7 @@ function GroupBoxes({ tasks, groups, isAssigned, card, onCompose }: {
   )
 }
 
-/* The ≡ toggle's other layout. Drag moves a card between statuses; the Status field
+/* The Board layout (List / Board in the view bar). Drag moves a card between statuses; the Status field
    under "+ Details" is the keyboard alternative. */
 function BoardView({ tasks, card, onMove, hiddenDone, onShowDone }: { tasks: Task[]; card: CardProps; onMove: (id: string, status: TaskStatus) => void; hiddenDone: number; onShowDone: () => void }) {
   const [dragging, setDragging] = useState<string | null>(null)

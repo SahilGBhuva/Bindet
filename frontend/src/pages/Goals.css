@@ -55,8 +55,6 @@
 }
 
 .tasks-title {
-  grid-area: title;
-  align-self: center;
   margin: 0;
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -105,60 +103,63 @@
 
 .tasks-main { grid-area: main; min-width: 0; padding-top: var(--space-3); }
 
-/* ---------- tiny tools ---------- */
+/* ---------- header and view bar ---------- */
 
-.tasks-tools { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
-.tasks-tools .tasks-icon { width: 15px; height: 15px; }
-
-.tasks-settings { position: relative; }
-.tasks-settings__menu { top: calc(100% + 4px); left: 0; min-width: 220px; }
-.tasks-settings__option {
+/* "Tasks", then Refresh and the one primary action on the right. */
+.tasks-head {
+  grid-area: title;
+  align-self: center;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 34px;
-  padding: 0 var(--space-3);
-  color: var(--color-text);
-  font-size: var(--text-sm);
-  cursor: pointer;
+  min-width: 0;
 }
+.tasks-head .tasks-title { flex: 1; min-width: 0; }
+.tasks-add .tasks-icon { width: 14px; height: 14px; stroke-width: 2.2; }
 
-/* The toggle switch: show completed tasks. */
-.tasks-switch {
+/* List / Board and Show completed, each with a visible label. */
+.tasks-viewbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); margin-top: var(--space-3); }
+.tasks-viewbar .ui-segmented__item { height: 30px; padding: 0 10px; font-size: var(--text-xs); }
+.tasks-viewbar .ui-segmented__item .tasks-icon { width: 14px; height: 14px; }
+
+.tasks-toggle {
   position: relative;
   display: inline-flex;
   align-items: center;
-  width: 36px;
-  height: 28px;
-  margin-left: 2px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
+  gap: var(--space-2);
+  min-height: 32px;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
   cursor: pointer;
 }
-.tasks-switch span {
+.tasks-toggle:hover { color: var(--color-text); }
+/* The real checkbox covers the whole label, invisible, so it keeps native focus and the switch role. */
+.tasks-toggle__input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.tasks-toggle__track {
   position: relative;
-  width: 26px;
-  height: 14px;
+  flex: none;
+  width: 28px;
+  height: 16px;
   border: 1.5px solid var(--color-text-secondary);
   border-radius: var(--radius-full);
   transition: background-color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard);
 }
-.tasks-switch span::after {
+.tasks-toggle__track::after {
   content: "";
   position: absolute;
-  top: 1.5px;
-  left: 1.5px;
-  width: 8px;
-  height: 8px;
+  top: 2px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
   border-radius: var(--radius-full);
   background: var(--color-text-secondary);
   transition: transform var(--duration-fast) var(--ease-standard), background-color var(--duration-fast) var(--ease-standard);
 }
-.tasks-switch:hover span { border-color: var(--color-text); }
-.tasks-switch[aria-checked="true"] span { border-color: var(--color-accent); background: var(--color-accent); }
-.tasks-switch[aria-checked="true"] span::after { background: var(--color-on-accent); transform: translateX(12px); }
+.tasks-toggle__input:checked + .tasks-toggle__track { border-color: var(--color-accent); background: var(--color-accent); }
+.tasks-toggle__input:checked + .tasks-toggle__track::after { background: var(--color-on-accent); transform: translateX(12px); }
+.tasks-toggle__input:focus-visible + .tasks-toggle__track { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
 /* ---------- date line ---------- */
 
@@ -216,7 +217,6 @@
 .tasks-tab:hover { color: var(--color-text); }
 .tasks-tab[aria-selected="true"] { color: var(--color-text); font-weight: var(--weight-semibold); }
 .tasks-tab:focus-visible { border-radius: var(--radius-xs); outline-offset: 2px; }
-.tasks-tabbar > .tasks-icon-button { margin-left: -6px; }
 
 .tasks-alert { margin-top: var(--space-3); }
 
@@ -671,7 +671,7 @@
       "notice"
       "main";
   }
-  .tasks-title { align-self: start; }
+  .tasks-head { align-self: start; }
   .tasks-notice { justify-self: stretch; width: auto; margin: var(--space-4) 0 0 8px; }
 
   /* Touch: 40px targets for the tiny tools, tabs and task bars. */
@@ -680,7 +680,8 @@
   .tasks-box__head .tasks-icon-button { width: 44px; height: 44px; }
   .tasks-box__head .tasks-icon-button { margin-block: -6px; }
   .tasks-notice .tasks-icon-button { width: 44px; height: 44px; margin: -8px -8px -8px 0; }
-  .tasks-switch { min-width: 44px; height: 44px; }
+  .tasks-toggle { min-height: 44px; font-size: var(--text-sm); }
+  .tasks-viewbar .ui-segmented__item { height: 44px; font-size: var(--text-sm); }
   /* The drawn inline fields keep their look; they just get a finger-sized hit area. */
   .task-title-input,
   .task-location__input { min-height: 44px; }
