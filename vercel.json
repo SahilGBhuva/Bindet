@@ -23,6 +23,13 @@
       "entrypoint": "app:app"
     }
   },
+  "redirects": [
+    {
+      "source": "/((?!offline\\.html$|bindit-mascot-cutout\\.webp$|favicon\\.svg$).*)",
+      "destination": "/offline.html",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
